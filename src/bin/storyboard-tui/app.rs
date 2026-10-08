@@ -1,0 +1,1227 @@
+use crate::prs::{PrMsg, PullRequest};
+use ratatui::crossterm::event::KeyCode;
+use ratatui::layout::Rect;
+use std::cell::RefCell;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::mpsc::{Receiver, Sender};
+use storyboard::model::{Board, PrState, Status, StoryStatus, Task};
+use storyboard::store;
+
+const MAIN_COLUMNS: [Status; 5] = [
+    Status::Todo,
+    Status::Planning,
+    Status::Planned,
+    Status::Implementing,
+    Status::Done,
+];
+const MAX_COLUMNS: usize = 6;
+pub const STATUS_ORDER: [Status; 6] = [
+    Status::Todo,
+    Status::Planning,
+    Status::Planned,
+    Status::Implementing,
+    Status::Done,
+    Status::Dropped,
+];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Screen {
+    List,
+    Board,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Focus {
+    Main,
+    Prs,
+}
+
+/// What a mouse click on a rectangle does. Rectangles are recorded while drawing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    Story(usize),
+    ToggleDone,
+    Back,
+    Column(usize),
+    Card { col: usize, row: usize },
+    PrevColumn,
+    NextColumn,
+    Pr(usize),
+    PrPanel,
+    OpenPr,
+    Sheet,
+}
+
+pub struct Column<'a> {
+    pub status: Status,
+    pub tasks: Vec<&'a Task>,
+}
+
+pub struct StorySummary {
+    pub key: String,
+    pub title: String,
+    pub status: StoryStatus,
+    pub total: usize,
+    pub done: usize,
+    pub counts: [usize; 6],
+    /// (pull request url, task id) for every PR recorded on the story's tasks.
+    pub prs: Vec<(String, String)>,
+    pub error: Option<String>,
+}
+
+fn summarize(root: &Path, key: &str) -> StorySummary {
+    match store::load(root, key) {
+        Ok(board) => {
+            let mut counts = [0; 6];
+            for task in &board.tasks {
+                if let Some(i) = STATUS_ORDER.iter().position(|s| *s == task.status) {
+                    counts[i] += 1;
+                }
+            }
+            StorySummary {
+                key: key.to_string(),
+                title: board.story.title.clone(),
+                status: board.story.status,
+                total: board.tasks.len() - counts[5],
+                done: counts[4],
+                counts,
+                prs: board
+                    .tasks
+                    .iter()
+                    .flat_map(|t| t.prs.iter().map(|p| (p.url.clone(), t.id.clone())))
+                    .collect(),
+                error: None,
+            }
+        }
+        Err(e) => StorySummary {
+            key: key.to_string(),
+            title: String::new(),
+            status: StoryStatus::InProgress,
+            total: 0,
+            done: 0,
+            counts: [0; 6],
+            prs: Vec::new(),
+            error: Some(format!("{e:#}")),
+        },
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Signature(Vec<(String, u64)>);
+
+pub fn signature(root: &Path) -> Signature {
+    let mut entries = Vec::new();
+    for key in store::list_keys(root).unwrap_or_default() {
+        let bytes = std::fs::read(root.join(&key).join("board.json")).unwrap_or_default();
+        let mut hasher = DefaultHasher::new();
+        bytes.hash(&mut hasher);
+        entries.push((key, hasher.finish()));
+    }
+    Signature(entries)
+}
+
+fn now() -> String {
+    chrono::Local::now().format("%H:%M:%S").to_string()
+}
+
+fn id_number(task: &Task) -> u32 {
+    task.id.trim_start_matches('T').parse().unwrap_or(u32::MAX)
+}
+
+fn contains(rect: Rect, x: u16, y: u16) -> bool {
+    x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
+}
+
+#[derive(Default)]
+pub struct PrData {
+    pub items: Vec<PullRequest>,
+    pub error: Option<String>,
+    pub updated: Option<String>,
+    pub loaded: bool,
+    pub loading: bool,
+    pub disabled: bool,
+}
+
+/// One line of the pull request panel: a live GitHub PR, or a PR known only from the board.
+pub struct PrRow<'a> {
+    pub live: Option<&'a PullRequest>,
+    pub url: String,
+    pub repo: String,
+    pub number: Option<u64>,
+    pub title: String,
+    pub tag: Option<String>,
+    pub board_state: Option<PrState>,
+}
+
+fn same_url(a: &str, b: &str) -> bool {
+    a.trim_end_matches('/') == b.trim_end_matches('/')
+}
+
+fn url_parts(url: &str) -> Option<(String, u64)> {
+    let parts: Vec<&str> = url.trim_end_matches('/').split('/').collect();
+    if parts.len() >= 7 && parts[5] == "pull" {
+        Some((format!("{}/{}", parts[3], parts[4]), parts[6].parse().ok()?))
+    } else {
+        None
+    }
+}
+
+fn open_in_browser(url: &str) {
+    if !url.starts_with("https://") {
+        return;
+    }
+    let program = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    let child = Command::new(program)
+        .arg(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    if let Ok(mut child) = child {
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+    }
+}
+
+pub struct App {
+    pub root: PathBuf,
+    pub keys: Vec<String>,
+    pub stories: Vec<StorySummary>,
+    pub screen: Screen,
+    pub hide_done: bool,
+    pub list_sel: usize,
+    pub story: usize,
+    pub board: Option<Board>,
+    pub error: Option<String>,
+    pub col: usize,
+    pub row: [usize; MAX_COLUMNS],
+    pub detail: bool,
+    pub help: bool,
+    pub updated: String,
+    pub hits: RefCell<Vec<(Rect, Target)>>,
+    pub focus: Focus,
+    pub pr_sel: usize,
+    pub pr_sheet: bool,
+    pub prs: PrData,
+    pub opener: Box<dyn Fn(&str)>,
+    feed: Option<(Receiver<PrMsg>, Sender<()>)>,
+    sig: Signature,
+}
+
+impl App {
+    pub fn new(root: PathBuf, preferred: Option<String>) -> App {
+        let keys = store::list_keys(&root).unwrap_or_default();
+        let preferred_pos = preferred.and_then(|k| keys.iter().position(|x| *x == k));
+        let stories = keys.iter().map(|k| summarize(&root, k)).collect();
+        let mut app = App {
+            sig: signature(&root),
+            root,
+            keys,
+            stories,
+            screen: if preferred_pos.is_some() { Screen::Board } else { Screen::List },
+            hide_done: true,
+            list_sel: 0,
+            story: preferred_pos.unwrap_or(0),
+            board: None,
+            error: None,
+            col: 0,
+            row: [0; MAX_COLUMNS],
+            detail: false,
+            help: false,
+            updated: now(),
+            hits: RefCell::new(Vec::new()),
+            focus: Focus::Main,
+            pr_sel: 0,
+            pr_sheet: false,
+            prs: PrData::default(),
+            opener: Box::new(open_in_browser),
+            feed: None,
+        };
+        app.load_current();
+        app.focus_first_column();
+        if preferred_pos.is_some() {
+            let key = app.keys[app.story].clone();
+            app.reselect(Some(key));
+        }
+        app
+    }
+
+    fn load_current(&mut self) {
+        let Some(key) = self.keys.get(self.story).cloned() else {
+            self.board = None;
+            self.error = None;
+            return;
+        };
+        if self.board.as_ref().map(|b| b.story.key.as_str()) != Some(key.as_str()) {
+            self.board = None;
+        }
+        match store::load(&self.root, &key) {
+            Ok(board) => {
+                self.board = Some(board);
+                self.error = None;
+            }
+            Err(e) => self.error = Some(format!("{e:#}")),
+        }
+    }
+
+    fn focus_first_column(&mut self) {
+        self.row = [0; MAX_COLUMNS];
+        self.col = self
+            .columns()
+            .iter()
+            .position(|c| !c.tasks.is_empty())
+            .unwrap_or(0);
+    }
+
+    pub fn needs_reload(&self) -> bool {
+        signature(&self.root) != self.sig
+    }
+
+    pub fn reload(&mut self) {
+        let selected = self.selected_task().map(|t| t.id.clone());
+        let list_key = self.selected_story_key();
+        let current = self.keys.get(self.story).cloned();
+        self.keys = store::list_keys(&self.root).unwrap_or_default();
+        self.stories = self.keys.iter().map(|k| summarize(&self.root, k)).collect();
+        self.story = current
+            .and_then(|k| self.keys.iter().position(|x| *x == k))
+            .unwrap_or(0);
+        self.load_current();
+        self.sig = signature(&self.root);
+        self.updated = now();
+        self.reselect(list_key);
+        if let Some(id) = selected {
+            self.select_task(&id);
+        }
+        self.clamp();
+    }
+
+    pub fn visible_stories(&self) -> Vec<&StorySummary> {
+        self.stories
+            .iter()
+            .filter(|s| !self.hide_done || s.status != StoryStatus::Done)
+            .collect()
+    }
+
+    pub fn hidden_done_count(&self) -> usize {
+        if !self.hide_done {
+            return 0;
+        }
+        self.stories.iter().filter(|s| s.status == StoryStatus::Done).count()
+    }
+
+    fn selected_story_key(&self) -> Option<String> {
+        self.visible_stories().get(self.list_sel).map(|s| s.key.clone())
+    }
+
+    fn reselect(&mut self, key: Option<String>) {
+        let (pos, len) = {
+            let visible = self.visible_stories();
+            let pos = key.and_then(|k| visible.iter().position(|s| s.key == k));
+            (pos, visible.len())
+        };
+        self.list_sel = pos.unwrap_or(self.list_sel).min(len.saturating_sub(1));
+    }
+
+    pub fn toggle_hide_done(&mut self) {
+        let key = self.selected_story_key();
+        self.hide_done = !self.hide_done;
+        self.reselect(key);
+    }
+
+    pub fn list_move(&mut self, delta: i32) {
+        let len = self.visible_stories().len() as i32;
+        if len > 0 {
+            self.list_sel = (self.list_sel as i32 + delta).clamp(0, len - 1) as usize;
+        }
+    }
+
+    pub fn open_selected(&mut self) {
+        if let Some(key) = self.selected_story_key() {
+            self.open_story(&key);
+        }
+    }
+
+    pub fn open_story(&mut self, key: &str) {
+        let Some(i) = self.keys.iter().position(|k| k == key) else {
+            return;
+        };
+        self.story = i;
+        self.load_current();
+        self.focus_first_column();
+        self.screen = Screen::Board;
+        self.detail = false;
+        self.help = false;
+        self.reset_pr_view();
+        self.reselect(Some(key.to_string()));
+    }
+
+    pub fn back(&mut self) {
+        self.screen = Screen::List;
+        self.detail = false;
+        self.help = false;
+        self.reset_pr_view();
+        let key = self.keys.get(self.story).cloned();
+        self.reselect(key);
+    }
+
+    /// Position of the open story among the visible stories, as (1-based position, count).
+    pub fn story_position(&self) -> Option<(usize, usize)> {
+        let key = self.keys.get(self.story)?;
+        let visible = self.visible_stories();
+        let pos = visible.iter().position(|s| &s.key == key)?;
+        Some((pos + 1, visible.len()))
+    }
+
+    fn select_task(&mut self, id: &str) {
+        let found = self.columns().iter().enumerate().find_map(|(c, col)| {
+            col.tasks.iter().position(|t| t.id == id).map(|r| (c, r))
+        });
+        if let Some((c, r)) = found {
+            self.col = c;
+            self.row[c] = r;
+        }
+    }
+
+    fn clamp(&mut self) {
+        let lens: Vec<usize> = self.columns().iter().map(|c| c.tasks.len()).collect();
+        self.col = self.col.min(lens.len().saturating_sub(1));
+        for (i, len) in lens.iter().enumerate() {
+            self.row[i] = self.row[i].min(len.saturating_sub(1));
+        }
+        self.pr_clamp();
+    }
+
+    fn pr_clamp(&mut self) {
+        let len = self.pr_rows().len();
+        self.pr_sel = self.pr_sel.min(len.saturating_sub(1));
+    }
+
+    pub fn attach_feed(&mut self, rx: Receiver<PrMsg>, wake: Sender<()>) {
+        self.feed = Some((rx, wake));
+    }
+
+    pub fn poll_feed(&mut self) {
+        let mut messages = Vec::new();
+        if let Some((rx, _)) = &self.feed {
+            while let Ok(msg) = rx.try_recv() {
+                messages.push(msg);
+            }
+        }
+        for msg in messages {
+            match msg {
+                PrMsg::Started => self.apply_started(),
+                PrMsg::Result(result) => self.apply_prs(result),
+            }
+        }
+    }
+
+    fn refresh_prs(&self) {
+        if let Some((_, wake)) = &self.feed {
+            let _ = wake.send(());
+        }
+    }
+
+    pub fn apply_started(&mut self) {
+        self.prs.loading = true;
+    }
+
+    pub fn apply_prs(&mut self, result: Result<Vec<PullRequest>, String>) {
+        self.prs.loading = false;
+        self.prs.loaded = true;
+        match result {
+            Ok(items) => {
+                self.prs.items = items;
+                self.prs.error = None;
+                self.prs.updated = Some(now());
+            }
+            Err(e) => self.prs.error = Some(e),
+        }
+        self.pr_clamp();
+    }
+
+    pub fn pr_tag(&self, url: &str) -> Option<String> {
+        self.stories.iter().find_map(|story| {
+            story
+                .prs
+                .iter()
+                .find(|(u, _)| same_url(u, url))
+                .map(|(_, task)| format!("{} · {task}", story.key))
+        })
+    }
+
+    /// The panel rows: every open PR on the main screen, only the story's own PRs on the board.
+    pub fn pr_rows(&self) -> Vec<PrRow<'_>> {
+        match self.screen {
+            Screen::List => self
+                .prs
+                .items
+                .iter()
+                .map(|p| PrRow {
+                    live: Some(p),
+                    url: p.url.clone(),
+                    repo: p.repo.clone(),
+                    number: Some(p.number),
+                    title: p.title.clone(),
+                    tag: self.pr_tag(&p.url),
+                    board_state: None,
+                })
+                .collect(),
+            Screen::Board => {
+                let Some(board) = &self.board else {
+                    return Vec::new();
+                };
+                let mut tasks: Vec<&Task> = board.tasks.iter().collect();
+                tasks.sort_by_key(|t| id_number(t));
+                let mut rows = Vec::new();
+                for task in tasks {
+                    for pr in &task.prs {
+                        let live = self.prs.items.iter().find(|p| same_url(&p.url, &pr.url));
+                        let parts = url_parts(&pr.url);
+                        rows.push(PrRow {
+                            live,
+                            url: live.map_or_else(|| pr.url.clone(), |p| p.url.clone()),
+                            repo: live.map_or_else(
+                                || parts.as_ref().map_or_else(|| pr.repo.clone(), |(r, _)| r.clone()),
+                                |p| p.repo.clone(),
+                            ),
+                            number: live.map(|p| p.number).or(parts.map(|(_, n)| n)),
+                            title: live.map_or_else(String::new, |p| p.title.clone()),
+                            tag: Some(task.id.clone()),
+                            board_state: Some(pr.state),
+                        });
+                    }
+                }
+                rows
+            }
+        }
+    }
+
+    pub fn pr_move(&mut self, delta: i32) {
+        let len = self.pr_rows().len() as i32;
+        if len > 0 {
+            self.pr_sel = (self.pr_sel as i32 + delta).clamp(0, len - 1) as usize;
+        }
+    }
+
+    pub fn open_selected_pr(&self) {
+        let url = self.pr_rows().get(self.pr_sel).map(|r| r.url.clone());
+        if let Some(url) = url {
+            (self.opener)(&url);
+        }
+    }
+
+    fn reset_pr_view(&mut self) {
+        self.focus = Focus::Main;
+        self.pr_sel = 0;
+        self.pr_sheet = false;
+    }
+
+    pub fn columns(&self) -> Vec<Column<'_>> {
+        let Some(board) = &self.board else {
+            return Vec::new();
+        };
+        let mut statuses = MAIN_COLUMNS.to_vec();
+        if board.tasks.iter().any(|t| t.status == Status::Dropped) {
+            statuses.push(Status::Dropped);
+        }
+        statuses
+            .into_iter()
+            .map(|status| {
+                let mut tasks: Vec<&Task> =
+                    board.tasks.iter().filter(|t| t.status == status).collect();
+                tasks.sort_by_key(|t| id_number(t));
+                Column { status, tasks }
+            })
+            .collect()
+    }
+
+    pub fn selected_task(&self) -> Option<&Task> {
+        let cols = self.columns();
+        let col = cols.get(self.col)?;
+        col.tasks.get(self.row[self.col]).copied()
+    }
+
+    pub fn move_col(&mut self, delta: i32) {
+        let n = self.columns().len() as i32;
+        if n > 0 {
+            self.col = (self.col as i32 + delta).clamp(0, n - 1) as usize;
+        }
+    }
+
+    pub fn move_row(&mut self, delta: i32) {
+        let len = self.columns().get(self.col).map_or(0, |c| c.tasks.len()) as i32;
+        if len > 0 {
+            self.row[self.col] = (self.row[self.col] as i32 + delta).clamp(0, len - 1) as usize;
+        }
+    }
+
+    /// Move to the next or previous visible story while staying on the board.
+    pub fn switch_story(&mut self, delta: i32) {
+        let visible: Vec<String> = self.visible_stories().iter().map(|s| s.key.clone()).collect();
+        let n = visible.len() as i32;
+        if n <= 1 {
+            return;
+        }
+        let current = self.keys.get(self.story);
+        let next = match current.and_then(|k| visible.iter().position(|v| v == k)) {
+            Some(p) => (p as i32 + delta).rem_euclid(n) as usize,
+            None if delta > 0 => 0,
+            None => (n - 1) as usize,
+        };
+        if let Some(i) = self.keys.iter().position(|k| *k == visible[next]) {
+            self.story = i;
+            self.load_current();
+            self.focus_first_column();
+            self.reset_pr_view();
+        }
+    }
+
+    /// Returns true when the app should quit.
+    pub fn on_key(&mut self, code: KeyCode, ctrl: bool) -> bool {
+        if ctrl {
+            return code == KeyCode::Char('c');
+        }
+        match code {
+            KeyCode::Char('q') => return true,
+            KeyCode::Char('?') => {
+                self.help = !self.help;
+                return false;
+            }
+            KeyCode::Esc if self.detail || self.help || self.pr_sheet => {
+                self.detail = false;
+                self.help = false;
+                self.pr_sheet = false;
+                return false;
+            }
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.focus = if self.focus == Focus::Main { Focus::Prs } else { Focus::Main };
+                return false;
+            }
+            KeyCode::Char('o') if self.focus == Focus::Prs => {
+                self.open_selected_pr();
+                return false;
+            }
+            _ => {}
+        }
+        if self.focus == Focus::Prs {
+            match code {
+                KeyCode::Up | KeyCode::Char('k') => self.pr_move(-1),
+                KeyCode::Down | KeyCode::Char('j') => self.pr_move(1),
+                KeyCode::Enter | KeyCode::Char(' ') => self.pr_sheet = !self.pr_sheet,
+                KeyCode::Esc => self.focus = Focus::Main,
+                KeyCode::Char('r') => self.refresh_prs(),
+                _ => {}
+            }
+            return false;
+        }
+        match self.screen {
+            Screen::List => self.on_key_list(code),
+            Screen::Board => {
+                self.on_key_board(code);
+                false
+            }
+        }
+    }
+
+    fn on_key_list(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::Esc => return true,
+            KeyCode::Up | KeyCode::Char('k') => self.list_move(-1),
+            KeyCode::Down | KeyCode::Char('j') => self.list_move(1),
+            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => {
+                self.open_selected()
+            }
+            KeyCode::Char('d') => self.toggle_hide_done(),
+            KeyCode::Char('r') => self.reload_now(),
+            _ => {}
+        }
+        false
+    }
+
+    fn on_key_board(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Esc | KeyCode::Backspace | KeyCode::Char('b') => self.back(),
+            KeyCode::Left | KeyCode::Char('h') => self.move_col(-1),
+            KeyCode::Right | KeyCode::Char('l') => self.move_col(1),
+            KeyCode::Up | KeyCode::Char('k') => self.move_row(-1),
+            KeyCode::Down | KeyCode::Char('j') => self.move_row(1),
+            KeyCode::Char('[') => self.switch_story(-1),
+            KeyCode::Char(']') => self.switch_story(1),
+            KeyCode::Enter | KeyCode::Char(' ') => self.detail = !self.detail,
+            KeyCode::Char('r') => self.reload_now(),
+            _ => {}
+        }
+    }
+
+    fn reload_now(&mut self) {
+        self.reload();
+        self.refresh_prs();
+    }
+
+    fn hit(&self, x: u16, y: u16) -> Option<Target> {
+        let hits = self.hits.borrow();
+        hits.iter().rev().find(|(rect, _)| contains(*rect, x, y)).map(|(_, t)| *t)
+    }
+
+    pub fn on_click(&mut self, x: u16, y: u16) {
+        let target = self.hit(x, y);
+        if self.detail || self.help || self.pr_sheet {
+            match target {
+                Some(Target::Sheet) => {}
+                Some(Target::OpenPr) => self.open_selected_pr(),
+                _ => {
+                    self.detail = false;
+                    self.help = false;
+                    self.pr_sheet = false;
+                }
+            }
+            return;
+        }
+        if let Some(Target::Pr(i)) = target {
+            self.focus = Focus::Prs;
+            if self.pr_sel == i {
+                self.pr_sheet = true;
+            } else {
+                self.pr_sel = i;
+            }
+            return;
+        }
+        if target.is_some() {
+            self.focus = Focus::Main;
+        }
+        match target {
+            Some(Target::Story(i)) => {
+                self.list_sel = i;
+                self.open_selected();
+            }
+            Some(Target::ToggleDone) => self.toggle_hide_done(),
+            Some(Target::Back) => self.back(),
+            Some(Target::Column(c)) => self.col = c,
+            Some(Target::Card { col, row }) => {
+                if self.col == col && self.row[col] == row {
+                    self.detail = true;
+                } else {
+                    self.col = col;
+                    self.row[col] = row;
+                }
+            }
+            Some(Target::PrevColumn) => self.move_col(-1),
+            Some(Target::NextColumn) => self.move_col(1),
+            Some(Target::PrPanel) => self.focus = Focus::Prs,
+            _ => {}
+        }
+    }
+
+    pub fn on_scroll(&mut self, x: u16, y: u16, delta: i32) {
+        if self.detail || self.help || self.pr_sheet {
+            return;
+        }
+        let target = self.hit(x, y);
+        if matches!(target, Some(Target::Pr(_) | Target::PrPanel)) {
+            self.focus = Focus::Prs;
+            self.pr_move(delta);
+            return;
+        }
+        match self.screen {
+            Screen::List => self.list_move(delta),
+            Screen::Board => {
+                if let Some(Target::Column(c) | Target::Card { col: c, .. }) = target {
+                    self.col = c;
+                }
+                self.move_row(delta);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::crossterm::event::KeyCode;
+    use crate::prs::{Check, CheckState, PullRequest, Review};
+    use storyboard::model::{PrState, StoryStatus};
+    use storyboard::model::TaskType::{self, Pr, Spike};
+    use storyboard::{ops, rules, store};
+    use tempfile::TempDir;
+
+    fn story(root: &TempDir, key: &str, tasks: &[(&str, TaskType, &[&str])]) {
+        ops::init_story(root.path(), key, &format!("Story {key}"), None).unwrap();
+        store::update(root.path(), key, |b| {
+            let dir = root.path().join(key);
+            for (title, kind, deps) in tasks {
+                let deps = deps.iter().map(|d| d.to_string()).collect();
+                ops::add_task(&dir, b, title, *kind, deps, vec![])?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    fn set_status(root: &TempDir, key: &str, id: &str, to: Status) {
+        store::update(root.path(), key, |b| rules::transition(b, id, to)).unwrap();
+    }
+
+    fn ids(app: &App, status: Status) -> Vec<String> {
+        let cols = app.columns();
+        let col = cols.iter().find(|c| c.status == status).unwrap();
+        col.tasks.iter().map(|t| t.id.clone()).collect()
+    }
+
+    fn new(root: &TempDir) -> App {
+        App::new(root.path().to_path_buf(), Some("PROJ-1".into()))
+    }
+
+    fn finish_story(root: &TempDir, key: &str) {
+        store::update(root.path(), key, |b| {
+            let dir = root.path().join(key);
+            ops::add_task(&dir, b, "Done thing", Spike, vec![], vec![])?;
+            let id = b.tasks.last().unwrap().id.clone();
+            for s in [Status::Planning, Status::Planned, Status::Implementing, Status::Done] {
+                rules::transition(b, &id, s)?;
+            }
+            rules::story_transition(b, StoryStatus::InReview)?;
+            rules::story_transition(b, StoryStatus::Done)
+        })
+        .unwrap();
+    }
+
+    fn live(repo: &str, number: u64, title: &str) -> PullRequest {
+        PullRequest {
+            repo: repo.into(),
+            number,
+            title: title.into(),
+            url: format!("https://github.com/{repo}/pull/{number}"),
+            is_draft: false,
+            labels: vec![],
+            review: Review::None,
+            comments: 0,
+            updated_at: "2026-10-08T01:00:00Z".into(),
+            checks: vec![Check {
+                name: "build".into(),
+                workflow: Some("CI".into()),
+                state: CheckState::Running,
+                started_at: None,
+                completed_at: None,
+            }],
+        }
+    }
+
+    fn record_pr(root: &TempDir, key: &str, task: &str, repo: &str, url: &str, state: PrState) {
+        store::update(root.path(), key, |b| ops::add_pr(b, task, repo, url, state)).unwrap();
+    }
+
+    const URL12: &str = "https://github.com/acme/widgets/pull/12";
+    const URL5: &str = "https://github.com/acme/widgets/pull/5";
+
+    fn open_key(app: &App) -> String {
+        app.board.as_ref().unwrap().story.key.clone()
+    }
+
+    #[test]
+    fn columns_group_tasks_by_status_and_sort_ids_numerically() {
+        let root = TempDir::new().unwrap();
+        let titles: Vec<String> = (1..=10).map(|n| format!("Task {n}")).collect();
+        let tasks: Vec<(&str, TaskType, &[&str])> =
+            titles.iter().map(|t| (t.as_str(), Pr, &[][..])).collect();
+        story(&root, "PROJ-1", &tasks);
+        set_status(&root, "PROJ-1", "T3", Status::Planning);
+        let app = new(&root);
+        assert_eq!(app.columns().len(), 5);
+        let todo: Vec<String> = [1, 2, 4, 5, 6, 7, 8, 9, 10].iter().map(|n| format!("T{n}")).collect();
+        assert_eq!(ids(&app, Status::Todo), todo);
+        assert_eq!(ids(&app, Status::Planning), vec!["T3"]);
+        assert!(ids(&app, Status::Done).is_empty());
+    }
+
+    #[test]
+    fn a_dropped_column_appears_only_when_a_task_is_dropped() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[]), ("Two", Pr, &[])]);
+        assert_eq!(new(&root).columns().len(), 5);
+        set_status(&root, "PROJ-1", "T2", Status::Dropped);
+        let app = new(&root);
+        let cols = app.columns();
+        assert_eq!(cols.len(), 6);
+        assert_eq!(cols[5].status, Status::Dropped);
+        assert_eq!(ids(&app, Status::Dropped), vec!["T2"]);
+    }
+
+    #[test]
+    fn selection_moves_within_bounds_and_remembers_the_row_per_column() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[]), ("Two", Pr, &[]), ("Three", Pr, &[])]);
+        set_status(&root, "PROJ-1", "T3", Status::Planning);
+        let mut app = new(&root);
+        assert_eq!(app.selected_task().unwrap().id, "T1");
+        app.move_row(1);
+        assert_eq!(app.selected_task().unwrap().id, "T2");
+        app.move_row(5);
+        assert_eq!(app.selected_task().unwrap().id, "T2");
+        app.move_col(1);
+        assert_eq!(app.selected_task().unwrap().id, "T3");
+        app.move_col(-1);
+        assert_eq!(app.selected_task().unwrap().id, "T2");
+        app.move_row(-9);
+        assert_eq!(app.selected_task().unwrap().id, "T1");
+        app.move_col(-5);
+        assert_eq!(app.col, 0);
+        app.move_col(9);
+        assert_eq!(app.col, 4);
+        assert!(app.selected_task().is_none());
+    }
+
+    #[test]
+    fn it_starts_on_the_first_column_that_has_tasks() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        set_status(&root, "PROJ-1", "T1", Status::Planning);
+        assert_eq!(new(&root).col, 1);
+    }
+
+    #[test]
+    fn reload_picks_up_changes_and_keeps_the_selected_task() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[]), ("Two", Pr, &[])]);
+        let mut app = new(&root);
+        app.move_row(1);
+        assert!(!app.needs_reload());
+        set_status(&root, "PROJ-1", "T2", Status::Planning);
+        assert!(app.needs_reload());
+        app.reload();
+        assert!(!app.needs_reload());
+        assert_eq!(app.selected_task().unwrap().id, "T2");
+        assert_eq!(app.col, 1);
+        assert_eq!(ids(&app, Status::Todo), vec!["T1"]);
+    }
+
+    #[test]
+    fn reload_notices_a_new_story_folder() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        let mut app = new(&root);
+        story(&root, "PROJ-2", &[("Two", Pr, &[])]);
+        assert!(app.needs_reload());
+        app.reload();
+        assert_eq!(app.keys, vec!["PROJ-1", "PROJ-2"]);
+        assert_eq!(app.board.as_ref().unwrap().story.key, "PROJ-1");
+    }
+
+    #[test]
+    fn a_broken_board_keeps_the_last_good_view_and_reports_the_error() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        let path = root.path().join("PROJ-1/board.json");
+        let good = std::fs::read_to_string(&path).unwrap();
+        let mut app = new(&root);
+        std::fs::write(&path, "{ not json").unwrap();
+        assert!(app.needs_reload());
+        app.reload();
+        assert_eq!(app.board.as_ref().unwrap().tasks.len(), 1);
+        assert!(app.error.as_deref().unwrap().contains("board.json"));
+        std::fs::write(&path, good).unwrap();
+        app.reload();
+        assert!(app.error.is_none());
+    }
+
+    #[test]
+    fn switching_story_cycles_and_a_requested_key_wins() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        story(&root, "PROJ-2", &[("Two", Spike, &[])]);
+        let mut app = new(&root);
+        assert_eq!(app.board.as_ref().unwrap().story.key, "PROJ-1");
+        app.switch_story(1);
+        assert_eq!(app.board.as_ref().unwrap().story.key, "PROJ-2");
+        app.switch_story(1);
+        assert_eq!(app.board.as_ref().unwrap().story.key, "PROJ-1");
+        app.switch_story(-1);
+        assert_eq!(app.board.as_ref().unwrap().story.key, "PROJ-2");
+
+        let wanted = App::new(root.path().to_path_buf(), Some("PROJ-2".into()));
+        assert_eq!(wanted.board.as_ref().unwrap().story.key, "PROJ-2");
+        let unknown = App::new(root.path().to_path_buf(), Some("PROJ-9".into()));
+        assert_eq!(unknown.board.as_ref().unwrap().story.key, "PROJ-1");
+    }
+
+    #[test]
+    fn an_empty_root_has_no_board_and_no_columns() {
+        let root = TempDir::new().unwrap();
+        let mut app = new(&root);
+        assert!(app.board.is_none());
+        assert!(app.columns().is_empty());
+        assert!(app.selected_task().is_none());
+        app.move_col(1);
+        app.move_row(1);
+        app.switch_story(1);
+        app.reload();
+    }
+
+    #[test]
+    fn keys_navigate_toggle_overlays_and_quit() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[]), ("Two", Pr, &[])]);
+        let mut app = new(&root);
+        assert!(!app.on_key(KeyCode::Char('j'), false));
+        assert_eq!(app.selected_task().unwrap().id, "T2");
+        assert!(!app.on_key(KeyCode::Up, false));
+        assert_eq!(app.selected_task().unwrap().id, "T1");
+        assert!(!app.on_key(KeyCode::Char('l'), false));
+        assert_eq!(app.col, 1);
+        assert!(!app.on_key(KeyCode::Left, false));
+        assert!(!app.on_key(KeyCode::Enter, false));
+        assert!(app.detail);
+        assert!(!app.on_key(KeyCode::Esc, false));
+        assert!(!app.detail);
+        assert!(!app.on_key(KeyCode::Char('?'), false));
+        assert!(app.help);
+        assert!(!app.on_key(KeyCode::Esc, false));
+        assert!(!app.help);
+        assert_eq!(app.screen, Screen::Board);
+        assert!(!app.on_key(KeyCode::Esc, false));
+        assert_eq!(app.screen, Screen::List);
+        assert!(app.on_key(KeyCode::Esc, false));
+        assert!(app.on_key(KeyCode::Char('q'), false));
+        assert!(app.on_key(KeyCode::Char('c'), true));
+    }
+    #[test]
+    fn the_list_summarises_every_story() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[]), ("Two", Pr, &[])]);
+        set_status(&root, "PROJ-1", "T2", Status::Planning);
+        story(&root, "PROJ-2", &[("Three", Pr, &[])]);
+        let app = App::new(root.path().to_path_buf(), None);
+        assert_eq!(app.screen, Screen::List);
+        assert_eq!(app.stories.len(), 2);
+        let s = &app.stories[0];
+        assert_eq!((s.key.as_str(), s.title.as_str()), ("PROJ-1", "Story PROJ-1"));
+        assert_eq!((s.total, s.done), (2, 0));
+        assert_eq!((s.counts[0], s.counts[1]), (1, 1));
+        assert_eq!(s.status, StoryStatus::InProgress);
+        assert!(s.error.is_none());
+    }
+
+    #[test]
+    fn completed_stories_are_hidden_by_default_and_can_be_shown() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[]);
+        finish_story(&root, "PROJ-1");
+        story(&root, "PROJ-2", &[("Open", Pr, &[])]);
+        let mut app = App::new(root.path().to_path_buf(), None);
+        assert!(app.hide_done);
+        let keys = |app: &App| app.visible_stories().iter().map(|s| s.key.clone()).collect::<Vec<_>>();
+        assert_eq!(keys(&app), vec!["PROJ-2"]);
+        assert_eq!(app.hidden_done_count(), 1);
+        app.toggle_hide_done();
+        assert_eq!(keys(&app), vec!["PROJ-1", "PROJ-2"]);
+        assert_eq!(app.hidden_done_count(), 0);
+        app.toggle_hide_done();
+        assert_eq!(keys(&app), vec!["PROJ-2"]);
+    }
+
+    #[test]
+    fn a_story_that_fails_to_load_is_always_listed_with_its_error() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        std::fs::write(root.path().join("PROJ-1/board.json"), "{ nope").unwrap();
+        let app = App::new(root.path().to_path_buf(), None);
+        let visible = app.visible_stories();
+        assert_eq!(visible.len(), 1);
+        assert!(visible[0].error.as_deref().unwrap().contains("board.json"));
+    }
+
+    #[test]
+    fn the_list_selects_and_opens_stories_and_esc_goes_back() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[]);
+        finish_story(&root, "PROJ-1");
+        story(&root, "PROJ-2", &[("Two", Pr, &[])]);
+        story(&root, "PROJ-3", &[("Three", Pr, &[])]);
+        let mut app = App::new(root.path().to_path_buf(), None);
+        assert_eq!(app.list_sel, 0);
+        app.on_key(KeyCode::Char('j'), false);
+        assert_eq!(app.list_sel, 1);
+        app.on_key(KeyCode::Down, false);
+        assert_eq!(app.list_sel, 1);
+        app.on_key(KeyCode::Char('k'), false);
+        app.on_key(KeyCode::Enter, false);
+        assert_eq!(app.screen, Screen::Board);
+        assert_eq!(open_key(&app), "PROJ-2");
+        app.on_key(KeyCode::Esc, false);
+        assert_eq!(app.screen, Screen::List);
+        app.on_key(KeyCode::Char('j'), false);
+        app.on_key(KeyCode::Char('l'), false);
+        assert_eq!(open_key(&app), "PROJ-3");
+        app.on_key(KeyCode::Backspace, false);
+        assert_eq!(app.screen, Screen::List);
+        app.on_key(KeyCode::Char('d'), false);
+        assert!(!app.hide_done);
+        assert_eq!(app.visible_stories().len(), 3);
+    }
+
+    #[test]
+    fn starting_with_a_story_key_opens_that_board() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        story(&root, "PROJ-2", &[("Two", Pr, &[])]);
+        let app = App::new(root.path().to_path_buf(), Some("PROJ-2".into()));
+        assert_eq!(app.screen, Screen::Board);
+        assert_eq!(open_key(&app), "PROJ-2");
+    }
+
+    #[test]
+    fn the_list_selection_survives_a_reload() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        story(&root, "PROJ-2", &[("Two", Pr, &[])]);
+        let mut app = App::new(root.path().to_path_buf(), None);
+        app.on_key(KeyCode::Char('j'), false);
+        set_status(&root, "PROJ-2", "T1", Status::Planning);
+        app.reload();
+        assert_eq!(app.visible_stories()[app.list_sel].key, "PROJ-2");
+        assert_eq!(app.stories[1].counts[1], 1);
+    }
+
+    #[test]
+    fn switching_story_on_the_board_skips_hidden_done_stories() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[]);
+        finish_story(&root, "PROJ-1");
+        story(&root, "PROJ-2", &[("Two", Pr, &[])]);
+        story(&root, "PROJ-3", &[("Three", Pr, &[])]);
+        let mut app = App::new(root.path().to_path_buf(), Some("PROJ-2".into()));
+        assert_eq!(app.story_position(), Some((1, 2)));
+        app.switch_story(1);
+        assert_eq!(open_key(&app), "PROJ-3");
+        app.switch_story(1);
+        assert_eq!(open_key(&app), "PROJ-2");
+        app.hide_done = false;
+        app.switch_story(-1);
+        assert_eq!(open_key(&app), "PROJ-1");
+    }
+    #[test]
+    fn story_summaries_remember_which_task_owns_each_pr_url() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        record_pr(&root, "PROJ-1", "T1", "widgets", URL12, PrState::Draft);
+        let app = App::new(root.path().to_path_buf(), None);
+        assert_eq!(app.pr_tag(URL12).as_deref(), Some("PROJ-1 · T1"));
+        assert_eq!(app.pr_tag(&format!("{URL12}/")).as_deref(), Some("PROJ-1 · T1"));
+        assert_eq!(app.pr_tag("https://github.com/acme/widgets/pull/99"), None);
+    }
+
+    #[test]
+    fn the_main_panel_lists_every_open_pr_and_tags_the_ones_on_a_story() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        record_pr(&root, "PROJ-1", "T1", "widgets", URL12, PrState::Draft);
+        let mut app = App::new(root.path().to_path_buf(), None);
+        app.apply_prs(Ok(vec![live("acme/widgets", 12, "Add notices"), live("acme/api", 99, "Unrelated")]));
+        let rows = app.pr_rows();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].tag.as_deref(), Some("PROJ-1 · T1"));
+        assert!(rows[0].live.is_some());
+        assert_eq!((rows[1].tag.clone(), rows[1].number), (None, Some(99)));
+    }
+
+    #[test]
+    fn the_story_panel_lists_only_that_storys_prs_and_falls_back_to_board_data() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[]), ("Two", Pr, &[])]);
+        story(&root, "PROJ-2", &[("Three", Pr, &[])]);
+        record_pr(&root, "PROJ-1", "T1", "widgets", URL12, PrState::Draft);
+        record_pr(&root, "PROJ-1", "T2", "widgets", URL5, PrState::Merged);
+        record_pr(&root, "PROJ-2", "T1", "api", "https://github.com/acme/api/pull/99", PrState::Draft);
+        let mut app = App::new(root.path().to_path_buf(), Some("PROJ-1".into()));
+        app.apply_prs(Ok(vec![live("acme/widgets", 12, "Add notices"), live("acme/api", 99, "Other story")]));
+        let rows = app.pr_rows();
+        assert_eq!(rows.len(), 2);
+        assert_eq!((rows[0].tag.as_deref(), rows[0].live.is_some()), (Some("T1"), true));
+        assert_eq!(rows[0].title, "Add notices");
+        assert_eq!((rows[1].tag.as_deref(), rows[1].live.is_none()), (Some("T2"), true));
+        assert_eq!((rows[1].repo.as_str(), rows[1].number), ("acme/widgets", Some(5)));
+        assert_eq!(rows[1].board_state, Some(PrState::Merged));
+    }
+
+    #[test]
+    fn tab_switches_focus_and_arrows_move_the_pr_selection() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        story(&root, "PROJ-2", &[("Two", Pr, &[])]);
+        let mut app = App::new(root.path().to_path_buf(), None);
+        app.apply_prs(Ok(vec![live("a/b", 1, "x"), live("a/b", 2, "y"), live("a/b", 3, "z")]));
+        app.on_key(KeyCode::Tab, false);
+        assert_eq!(app.focus, Focus::Prs);
+        app.on_key(KeyCode::Down, false);
+        app.on_key(KeyCode::Char('j'), false);
+        assert_eq!((app.pr_sel, app.list_sel), (2, 0));
+        app.on_key(KeyCode::Down, false);
+        assert_eq!(app.pr_sel, 2);
+        app.on_key(KeyCode::Up, false);
+        assert_eq!(app.pr_sel, 1);
+        assert!(!app.on_key(KeyCode::Esc, false));
+        assert_eq!(app.focus, Focus::Main);
+        app.on_key(KeyCode::Down, false);
+        assert_eq!((app.pr_sel, app.list_sel), (1, 1));
+        app.on_key(KeyCode::Tab, false);
+        app.on_key(KeyCode::Tab, false);
+        assert_eq!(app.focus, Focus::Main);
+    }
+
+    #[test]
+    fn enter_opens_the_pr_sheet_and_o_opens_the_pr_in_the_browser() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        let mut app = App::new(root.path().to_path_buf(), None);
+        let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        let sink = log.clone();
+        app.opener = Box::new(move |url| sink.borrow_mut().push(url.to_string()));
+        app.apply_prs(Ok(vec![live("acme/widgets", 12, "Add notices")]));
+        app.on_key(KeyCode::Char('o'), false);
+        assert!(log.borrow().is_empty(), "o only acts on the PR panel");
+        app.on_key(KeyCode::Tab, false);
+        app.on_key(KeyCode::Enter, false);
+        assert!(app.pr_sheet);
+        app.on_key(KeyCode::Char('o'), false);
+        assert_eq!(*log.borrow(), vec![URL12.to_string()]);
+        assert!(!app.on_key(KeyCode::Esc, false));
+        assert!(!app.pr_sheet);
+        assert_eq!(app.focus, Focus::Prs);
+        assert!(!app.on_key(KeyCode::Esc, false));
+        assert_eq!(app.focus, Focus::Main);
+    }
+
+    #[test]
+    fn a_feed_error_keeps_the_last_prs_and_the_next_result_clears_it() {
+        let root = TempDir::new().unwrap();
+        let mut app = App::new(root.path().to_path_buf(), None);
+        assert!(!app.prs.loaded);
+        app.apply_started();
+        assert!(app.prs.loading);
+        app.apply_prs(Ok(vec![live("a/b", 1, "x"), live("a/b", 2, "y")]));
+        assert!(app.prs.loaded && !app.prs.loading && app.prs.updated.is_some());
+        app.apply_prs(Err("rate limited".into()));
+        assert_eq!(app.prs.items.len(), 2);
+        assert_eq!(app.prs.error.as_deref(), Some("rate limited"));
+        app.apply_prs(Ok(vec![live("a/b", 1, "x")]));
+        assert!(app.prs.error.is_none());
+        assert_eq!(app.prs.items.len(), 1);
+    }
+
+    #[test]
+    fn the_pr_selection_is_clamped_when_the_list_shrinks() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        let mut app = App::new(root.path().to_path_buf(), None);
+        app.apply_prs(Ok(vec![live("a/b", 1, "x"), live("a/b", 2, "y"), live("a/b", 3, "z")]));
+        app.focus = Focus::Prs;
+        app.pr_move(5);
+        assert_eq!(app.pr_sel, 2);
+        app.apply_prs(Ok(vec![live("a/b", 1, "x")]));
+        assert_eq!(app.pr_sel, 0);
+    }
+}

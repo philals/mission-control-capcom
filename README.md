@@ -53,9 +53,43 @@ in_progress ─► in_review ─► done                          (story, via /s
 
 `blocked` is a flag with a reason, not a status. No stacked PRs: a task cannot start until its dependencies are merged. There is no per-task review status; review happens on the story. A story can only go `in_review` when every task is `done` or `dropped`. Adding a task reopens it.
 
+## Viewing the board
+
+`storyboard-tui` is a live kanban view of your stories. It is read-only, and it reloads on its own whenever a `board.json` changes, so you can leave it open next to the agents that are updating the board. It works with the keyboard and the mouse.
+
+```bash
+storyboard-tui              # the story list; click or press Enter to open one
+storyboard-tui PROJ-123     # open a story's board straight away
+```
+
+**Story list.** One row per story with its key, title, story status, `done/total` tasks, a progress bar and a count per task status. Completed stories (story status `done`) are hidden by default; click `[ Show done ]` in the header or press `d` to show them, and again to hide them.
+
+**Board.** One column per task status (a Dropped column appears only if something was dropped), boxed cards with a status line (ready to implement, waits on dependencies, blocked, PRs merged), the story status in the header, and a detail sheet for the selected card. Narrow terminals (under 60 columns) show one column at a time.
+
+| Where | Mouse | Keys |
+|---|---|---|
+| List | click a row to open it; click `[ Show done ]` / `[ Hide done ]`; wheel moves the selection | `↑↓`/`jk` select, `Enter`/`→` open, `d` show or hide done |
+| Board | click `‹ Stories` to go back; click a column or card to select it; click the selected card again for its detail; click outside a sheet to close it; wheel scrolls a column | `←→`/`hl` column, `↑↓`/`jk` card, `[` `]` switch story, `Tab` PR panel, `Enter` detail, `Esc`/`b` back to the list |
+| PR panel | click a row to select it, click again for the sheet; wheel scrolls | `Tab` focus, `↑↓` select, `Enter` sheet, `o` open on GitHub, `r` refresh |
+| Anywhere | | `r` reload, `?` help, `q` or Ctrl-C quit |
+
+**Pull requests panel.** A bottom panel lists your open pull requests with their CI stages, refreshed from GitHub in the background:
+
+- **Main screen:** *all* your open PRs from the query, including ones unrelated to any story. PRs recorded on a storyboard task are tagged `PROJ-123 · T2`.
+- **Inside a story:** only that story's PRs (the ones recorded on its tasks), tagged with the task id. A PR that GitHub no longer lists as open (for example a merged one) still shows from the board data.
+- **Each row:** a `[READY]` (green) or `[DRAFT]` (grey) badge, the repo and number, title, labels, review state, comment count and time since update. A PR that is only known from the board shows `[MERGED]` or `[CLOSED]` instead. Under it a CI summary such as `✓ 12  ✗ 1  ◔ 2  ○ 1`, then every stage that is still running, queued or failed on its own line, in that order (`◔ CI / build  running 2m 05s`, `○ CI / deploy  queued`, `✗ CI / unit  failed 1m 10s`). Passed and skipped stages are only counted; a long list is capped with `… +N more`. A thin line separates one PR from the next.
+- **Detail sheet:** select a row and press Enter (or click it twice) for the full sheet: draft or ready for review, every check grouped running, queued, failed, passed, with durations. `o` (or the button) opens the PR in your browser.
+- **Keys:** `Tab` moves focus to the panel and back, `↑↓` select a PR, `Enter` opens the sheet, `o` opens it on GitHub, `r` refreshes now. The mouse works too: click a row, click it again for the sheet, scroll over the panel.
+
+It fetches with one `gh api graphql` call (it uses your existing `gh` login, so no token is handled by this tool). It polls about every 5 seconds while any check is running or queued and about every 30 seconds otherwise, and costs roughly one GraphQL rate-limit point per poll. Nothing from GitHub is written to disk: PR data lives in memory only. If a fetch fails, the last data stays and the error shows in the panel.
+
+The query defaults to `is:pr author:@me state:open archived:false sort:updated-desc -label:icebox`. Change it with `--pr-query "..."` or `STORYBOARD_PR_QUERY`. `--no-prs` turns the panel off (for example when `gh` is not installed). On a short terminal (under about 16 rows) the panel is hidden.
+
+It needs `STORYBOARD_ROOT` or `--root` like the tool. While it runs, the terminal's own text selection is replaced by mouse clicks (hold Shift to select text in most terminals).
+
 ## Requirements
 
-Rust (to build the tool), `gh` authenticated (for `storyboard refresh` and PR work), the Atlassian MCP server (the skills read Jira and `story-break-down` can create subtasks), a `git-commit-push` agent that opens the PRs, and the `pr-looper` skill for CI and review rounds.
+Rust (to build the tool), `gh` authenticated (for `storyboard refresh`, PR work and the pull requests panel), the Atlassian MCP server (the skills read Jira and `story-break-down` can create subtasks), a `git-commit-push` agent that opens the PRs, and the `pr-looper` skill for CI and review rounds.
 
 ## Layout
 
@@ -100,7 +134,7 @@ cargo install --path . --root ~/.local --locked
 storyboard --help
 ```
 
-Everyday commands:
+Everyday commands (`storyboard-tui` is installed alongside it):
 
 ```bash
 storyboard list                      # all stories with task counts

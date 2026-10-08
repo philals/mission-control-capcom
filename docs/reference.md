@@ -62,3 +62,19 @@ Writes take an exclusive lock on `<story dir>/.board.lock` (git-ignored) around 
 save, so concurrent writers do not lose updates.
 
 Schema: `../schemas/board.schema.json`.
+
+## storyboard-tui
+
+    storyboard-tui [KEY] [--root DIR] [--pr-query QUERY] [--no-prs]
+
+A live kanban view with a story list (completed stories hidden by default, `d` or the header
+button toggles them), a board per story, and a pull requests panel. Keyboard and mouse. With `KEY`
+it opens that story's board directly, otherwise the list. It re-reads each `board.json` about four
+times a second and redraws when the content changes; if a board fails to load it keeps the last
+good view and shows the error in the footer.
+
+The pull requests panel runs one `gh api graphql` search (default
+`is:pr author:@me state:open archived:false sort:updated-desc -label:icebox`, override with
+`--pr-query` or `STORYBOARD_PR_QUERY`) in a background thread: every 5 seconds while a check is
+running or queued, every 30 seconds otherwise, or immediately on `r`. Nothing is written to disk.
+`--no-prs` disables it. See the README for the full key and mouse table.

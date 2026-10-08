@@ -15,7 +15,7 @@ const GH_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct GhLookup;
 
-fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<Option<Output>> {
+pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<Option<Output>> {
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
