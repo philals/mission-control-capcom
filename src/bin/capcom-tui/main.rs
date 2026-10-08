@@ -1,4 +1,5 @@
 mod app;
+mod cache;
 mod herdr;
 mod panel;
 mod prs;
@@ -16,6 +17,7 @@ use ratatui::crossterm::event::{
     MouseEventKind,
 };
 use ratatui::crossterm::execute;
+use ratatui::crossterm::terminal::SetTitle;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -40,13 +42,28 @@ struct Cli {
     /// Do not fetch your manual workflow runs from GitHub
     #[arg(long)]
     no_runs: bool,
+    /// Print the pane (from `herdr pane list` JSON on stdin) already running capcom-tui; used by the plugin
+    #[arg(long, hide = true)]
+    find_pane: bool,
     /// Folder new Herdr workspaces and tabs start in (default: the current folder)
     #[arg(long, env = "CAPCOM_WORKDIR")]
     workdir: Option<PathBuf>,
 }
 
+fn shared_cache() -> Option<cache::Cache> {
+    cache::Cache::default_dir().and_then(cache::Cache::open)
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if cli.find_pane {
+        let mut input = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut input)?;
+        if let Some(found) = herdr::find_pane(&input) {
+            println!("{found}");
+        }
+        return Ok(());
+    }
     let Some(root) = cli.root else {
         bail!("no stories folder: set CAPCOM_ROOT or pass --root DIR");
     };
@@ -54,8 +71,13 @@ fn main() -> Result<()> {
     if cli.no_prs {
         app.prs.disabled = true;
     } else {
-        let source = Arc::new(prs::GhSource { query: cli.pr_query });
-        let (rx, wake) = prs::spawn(source, prs::Cadence::default());
+        let cadence = prs::Cadence::default();
+        let live: Arc<dyn prs::PrSource> = Arc::new(prs::GhSource { query: cli.pr_query.clone() });
+        let source: Arc<dyn prs::PrSource> = match shared_cache() {
+            Some(cache) => Arc::new(prs::SharedSource::new(live, cache, &cli.pr_query, cadence)),
+            None => live,
+        };
+        let (rx, wake) = prs::spawn(source, cadence);
         app.attach_feed(rx, wake);
     }
     if herdr::inside_herdr() {
@@ -69,12 +91,18 @@ fn main() -> Result<()> {
         app.runs.disabled = true;
     } else {
         let repos = Arc::new(Mutex::new(Vec::new()));
-        let source = Arc::new(runs::Fetcher::new(runs::GhApi::default(), chrono::Duration::hours(3)));
-        let (rx, wake) = runs::spawn(source, repos.clone(), runs::RunCadence::default());
+        let cadence = runs::RunCadence::default();
+        let live: Arc<dyn runs::RunSource> =
+            Arc::new(runs::Fetcher::new(runs::GhApi::default(), chrono::Duration::hours(3)));
+        let source: Arc<dyn runs::RunSource> = match shared_cache() {
+            Some(cache) => Arc::new(runs::SharedSource { inner: live, cache, cadence }),
+            None => live,
+        };
+        let (rx, wake) = runs::spawn(source, repos.clone(), cadence);
         app.attach_runs(rx, wake, repos);
     }
     let mut terminal = ratatui::init();
-    execute!(std::io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
+    execute!(std::io::stdout(), EnableMouseCapture, EnableBracketedPaste, SetTitle(herdr::PANE_TITLE))?;
     let previous_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = execute!(std::io::stdout(), DisableMouseCapture, DisableBracketedPaste);

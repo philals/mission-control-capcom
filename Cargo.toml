@@ -6,7 +6,7 @@ description = "Local kanban boards for Jira stories"
 
 [dependencies]
 anyhow = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 jsonschema = { version = "0.30", default-features = false }
 ratatui = "0.30.2"

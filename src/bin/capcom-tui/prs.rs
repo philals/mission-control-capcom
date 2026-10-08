@@ -1,6 +1,8 @@
 //! GitHub pull requests for the TUI: one `gh api graphql` query, parsed, polled in the background.
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
+use crate::cache::{self, Cache};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -15,7 +17,7 @@ const GRAPHQL: &str = r#"query($q: String!) { search(query: $q, type: ISSUE, fir
 
 const GH_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Review {
     None,
     Approved,
@@ -23,7 +25,7 @@ pub enum Review {
     Required,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CheckState {
     Queued,
     Running,
@@ -32,7 +34,7 @@ pub enum CheckState {
     Skipped,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Check {
     pub name: String,
     pub workflow: Option<String>,
@@ -60,7 +62,7 @@ pub struct Counts {
     pub skipped: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullRequest {
     pub repo: String,
     pub number: u64,
@@ -250,6 +252,46 @@ pub fn check_seconds(check: &Check, now: DateTime<Utc>) -> Option<i64> {
 
 pub trait PrSource: Send + Sync {
     fn fetch(&self) -> Result<Vec<PullRequest>>;
+
+    /// A manual refresh: skip any "recent enough" shortcut.
+    fn fetch_forced(&self) -> Result<Vec<PullRequest>> {
+        self.fetch()
+    }
+}
+
+/// Shares one fetch between every open copy through the on-disk cache.
+pub struct SharedSource {
+    pub inner: Arc<dyn PrSource>,
+    pub cache: Cache,
+    pub name: String,
+    pub cadence: Cadence,
+}
+
+impl SharedSource {
+    pub fn new(inner: Arc<dyn PrSource>, cache: Cache, query: &str, cadence: Cadence) -> SharedSource {
+        SharedSource { inner, cache, name: format!("prs-{}", cache::key_of(&[query])), cadence }
+    }
+
+    fn get(&self, force: bool) -> Result<Vec<PullRequest>> {
+        let cadence = self.cadence;
+        self.cache.shared(
+            &self.name,
+            Utc::now,
+            move |prs: &Vec<PullRequest>| cadence.interval(prs),
+            force,
+            || if force { self.inner.fetch_forced() } else { self.inner.fetch() },
+        )
+    }
+}
+
+impl PrSource for SharedSource {
+    fn fetch(&self) -> Result<Vec<PullRequest>> {
+        self.get(false)
+    }
+
+    fn fetch_forced(&self) -> Result<Vec<PullRequest>> {
+        self.get(true)
+    }
 }
 
 pub struct GhSource {
@@ -289,8 +331,16 @@ impl Cadence {
     /// Poll quickly while any check is running or queued, slowly otherwise (and after errors).
     pub fn next(&self, result: &Result<Vec<PullRequest>, String>) -> Duration {
         match result {
-            Ok(prs) if prs.iter().any(PullRequest::is_active) => self.busy,
+            Ok(prs) => self.interval(prs),
             _ => self.idle,
+        }
+    }
+
+    pub fn interval(&self, prs: &[PullRequest]) -> Duration {
+        if prs.iter().any(PullRequest::is_active) {
+            self.busy
+        } else {
+            self.idle
         }
     }
 }
@@ -304,19 +354,24 @@ pub enum PrMsg {
 pub fn spawn(source: Arc<dyn PrSource>, cadence: Cadence) -> (Receiver<PrMsg>, Sender<()>) {
     let (tx, rx) = mpsc::channel();
     let (wake_tx, wake_rx) = mpsc::channel();
-    std::thread::spawn(move || loop {
+    std::thread::spawn(move || {
+        let mut forced = false;
+        loop {
         if tx.send(PrMsg::Started).is_err() {
             break;
         }
-        let result = source.fetch().map_err(|e| format!("{e:#}"));
+        let result = if forced { source.fetch_forced() } else { source.fetch() }.map_err(|e| format!("{e:#}"));
         let wait = cadence.next(&result);
         if tx.send(PrMsg::Result(result)).is_err() {
             break;
         }
-        if let Err(mpsc::RecvTimeoutError::Disconnected) = wake_rx.recv_timeout(wait) {
-            break;
+        match wake_rx.recv_timeout(wait) {
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => forced = false,
+            Ok(()) => forced = true,
         }
         while wake_rx.try_recv().is_ok() {}
+        }
     });
     (rx, wake_tx)
 }
@@ -386,6 +441,69 @@ mod tests {
             vec!["build", "deploy", "ci/legacy", "unit", "lint", "ci/other", "docs"],
             "running, queued, failed, passed, skipped"
         );
+    }
+
+    struct Counting {
+        calls: AtomicUsize,
+        forced: AtomicUsize,
+    }
+
+    impl PrSource for Counting {
+        fn fetch(&self) -> Result<Vec<PullRequest>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            parse(FIXTURE)
+        }
+
+        fn fetch_forced(&self) -> Result<Vec<PullRequest>> {
+            self.forced.fetch_add(1, Ordering::SeqCst);
+            self.fetch()
+        }
+    }
+
+    fn counting() -> Arc<Counting> {
+        Arc::new(Counting { calls: AtomicUsize::new(0), forced: AtomicUsize::new(0) })
+    }
+
+    #[test]
+    fn two_copies_with_the_same_query_share_one_github_fetch_and_other_queries_do_not() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let cache = || Cache::open(dir.path().to_path_buf()).unwrap();
+        let cadence = Cadence::default();
+        let (a, b, c) = (counting(), counting(), counting());
+        let first = SharedSource::new(a.clone(), cache(), "is:pr author:@me", cadence);
+        let second = SharedSource::new(b.clone(), cache(), "is:pr author:@me", cadence);
+        let other = SharedSource::new(c.clone(), cache(), "is:pr author:someone", cadence);
+        let got = first.fetch().unwrap();
+        assert_eq!(second.fetch().unwrap(), got, "the second copy gets the first copy's data");
+        other.fetch().unwrap();
+        assert_eq!(a.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(b.calls.load(Ordering::SeqCst), 0, "the second copy never called GitHub");
+        assert_eq!(c.calls.load(Ordering::SeqCst), 1, "a different query is fetched on its own");
+    }
+
+    #[test]
+    fn a_manual_refresh_reaches_the_source_as_a_forced_fetch() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let inner = counting();
+        let cadence = Cadence { busy: Duration::from_secs(5), idle: Duration::from_secs(30) };
+        let shared = SharedSource::new(inner.clone(), Cache::open(dir.path().to_path_buf()).unwrap(), "q", cadence);
+        shared.fetch().unwrap();
+        std::thread::sleep(Duration::from_millis(3100));
+        shared.fetch_forced().unwrap();
+        assert_eq!((inner.calls.load(Ordering::SeqCst), inner.forced.load(Ordering::SeqCst)), (2, 1));
+    }
+
+    #[test]
+    fn the_poller_forces_the_fetch_after_a_wake_but_not_on_the_timer() {
+        let inner = counting();
+        let cadence = Cadence { busy: Duration::from_millis(30), idle: Duration::from_millis(30) };
+        let (rx, wake) = spawn(inner.clone(), cadence);
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(inner.forced.load(Ordering::SeqCst), 0, "timer fetches are not forced");
+        let (_, _) = (&rx, ());
+        wake.send(()).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(inner.forced.load(Ordering::SeqCst) >= 1, "a wake is a manual refresh");
     }
 
     #[test]

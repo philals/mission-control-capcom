@@ -1,6 +1,8 @@
 //! Manual (workflow_dispatch) GitHub Actions runs that you started, across several repos.
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
+use crate::cache::{self, Cache};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::process::Command;
@@ -11,7 +13,7 @@ use capcom::refresh::run_with_timeout;
 
 const GH_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RunState {
     Queued,
     Running,
@@ -22,7 +24,7 @@ pub enum RunState {
     Skipped,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Job {
     pub name: String,
     pub state: RunState,
@@ -31,7 +33,7 @@ pub struct Job {
     pub completed_at: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Run {
     pub repo: String,
     pub id: u64,
@@ -77,7 +79,7 @@ impl Run {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Batch {
     pub runs: Vec<Run>,
     pub warnings: Vec<String>,
@@ -171,6 +173,44 @@ pub fn valid_repo(repo: &str) -> bool {
 
 pub trait RunSource: Send + Sync {
     fn fetch(&self, repos: &[String]) -> Result<Batch>;
+
+    /// A manual refresh: skip any "recent enough" shortcut.
+    fn fetch_forced(&self, repos: &[String]) -> Result<Batch> {
+        self.fetch(repos)
+    }
+}
+
+/// Shares one fetch between every open copy that watches the same repos, through the on-disk cache.
+pub struct SharedSource {
+    pub inner: Arc<dyn RunSource>,
+    pub cache: Cache,
+    pub cadence: RunCadence,
+}
+
+impl SharedSource {
+    fn get(&self, repos: &[String], force: bool) -> Result<Batch> {
+        let mut sorted: Vec<&str> = repos.iter().map(String::as_str).collect();
+        sorted.sort_unstable();
+        let name = format!("runs-{}", cache::key_of(&sorted));
+        let cadence = self.cadence;
+        self.cache.shared(
+            &name,
+            Utc::now,
+            move |batch: &Batch| cadence.interval(batch),
+            force,
+            || if force { self.inner.fetch_forced(repos) } else { self.inner.fetch(repos) },
+        )
+    }
+}
+
+impl RunSource for SharedSource {
+    fn fetch(&self, repos: &[String]) -> Result<Batch> {
+        self.get(repos, false)
+    }
+
+    fn fetch_forced(&self, repos: &[String]) -> Result<Batch> {
+        self.get(repos, true)
+    }
 }
 
 pub trait RunApi: Send + Sync {
@@ -337,8 +377,16 @@ impl RunCadence {
     /// Poll quickly while one of your runs is queued, running or waiting, slowly otherwise.
     pub fn next(&self, result: &Result<Batch, String>) -> Duration {
         match result {
-            Ok(batch) if batch.runs.iter().any(Run::is_active) => self.busy,
+            Ok(batch) => self.interval(batch),
             _ => self.idle,
+        }
+    }
+
+    pub fn interval(&self, batch: &Batch) -> Duration {
+        if batch.runs.iter().any(Run::is_active) {
+            self.busy
+        } else {
+            self.idle
         }
     }
 }
@@ -357,24 +405,31 @@ pub fn spawn(
 ) -> (Receiver<RunMsg>, Sender<()>) {
     let (tx, rx) = mpsc::channel();
     let (wake_tx, wake_rx) = mpsc::channel();
-    std::thread::spawn(move || loop {
-        if tx.send(RunMsg::Started).is_err() {
-            break;
+    std::thread::spawn(move || {
+        let mut forced = false;
+        loop {
+            if tx.send(RunMsg::Started).is_err() {
+                break;
+            }
+            let list = repos.lock().expect("repo list lock").clone();
+            let result = if list.is_empty() {
+                Ok(Batch::default())
+            } else if forced {
+                source.fetch_forced(&list).map_err(|e| format!("{e:#}"))
+            } else {
+                source.fetch(&list).map_err(|e| format!("{e:#}"))
+            };
+            let wait = cadence.next(&result);
+            if tx.send(RunMsg::Result(result)).is_err() {
+                break;
+            }
+            match wake_rx.recv_timeout(wait) {
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => forced = false,
+                Ok(()) => forced = true,
+            }
+            while wake_rx.try_recv().is_ok() {}
         }
-        let list = repos.lock().expect("repo list lock").clone();
-        let result = if list.is_empty() {
-            Ok(Batch::default())
-        } else {
-            source.fetch(&list).map_err(|e| format!("{e:#}"))
-        };
-        let wait = cadence.next(&result);
-        if tx.send(RunMsg::Result(result)).is_err() {
-            break;
-        }
-        if let Err(mpsc::RecvTimeoutError::Disconnected) = wake_rx.recv_timeout(wait) {
-            break;
-        }
-        while wake_rx.try_recv().is_ok() {}
     });
     (rx, wake_tx)
 }
@@ -589,6 +644,42 @@ mod tests {
     fn by_default_an_idle_poll_is_every_thirty_seconds_and_a_busy_one_every_ten() {
         let c = RunCadence::default();
         assert_eq!((c.busy, c.idle), (Duration::from_secs(10), Duration::from_secs(30)));
+    }
+
+    struct CountingRuns {
+        calls: AtomicUsize,
+    }
+
+    impl RunSource for CountingRuns {
+        fn fetch(&self, repos: &[String]) -> Result<Batch> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let mut batch = Batch::default();
+            batch.runs = parse_runs(&repos[0], RUNS)?;
+            Ok(batch)
+        }
+    }
+
+    #[test]
+    fn copies_watching_the_same_repos_share_one_fetch_whatever_the_order() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let cache = || Cache::open(dir.path().to_path_buf()).unwrap();
+        let (a, b, c) = (
+            Arc::new(CountingRuns { calls: AtomicUsize::new(0) }),
+            Arc::new(CountingRuns { calls: AtomicUsize::new(0) }),
+            Arc::new(CountingRuns { calls: AtomicUsize::new(0) }),
+        );
+        let cadence = RunCadence::default();
+        let first = SharedSource { inner: a.clone(), cache: cache(), cadence };
+        let second = SharedSource { inner: b.clone(), cache: cache(), cadence };
+        let third = SharedSource { inner: c.clone(), cache: cache(), cadence };
+        let repos = |names: &[&str]| names.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let got = first.fetch(&repos(&["acme/api", "acme/widgets"])).unwrap();
+        let again = second.fetch(&repos(&["acme/widgets", "acme/api"])).unwrap();
+        assert_eq!(got.runs, again.runs);
+        third.fetch(&repos(&["acme/api"])).unwrap();
+        assert_eq!(a.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(b.calls.load(Ordering::SeqCst), 0, "same repos in another order: no second fetch");
+        assert_eq!(c.calls.load(Ordering::SeqCst), 1, "a different repo list is its own entry");
     }
 
     struct Recording {

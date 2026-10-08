@@ -106,6 +106,27 @@ The query defaults to `is:pr author:@me state:open archived:false sort:updated-d
 - **No double starts:** agents are named like `proj-123-t2-plan`; if one is already running it is brought to the front instead.
 - **Where they run:** the current folder of `capcom-tui`, or `--workdir` / `CAPCOM_WORKDIR`. Nothing about Herdr is stored: workspaces are found again by their label.
 
+**Several copies, one poll.** Every open `capcom-tui` (a terminal and the Herdr plugin, say) shares one cache in `~/.cache/capcom/` (`$XDG_CACHE_HOME/capcom`, or `CAPCOM_CACHE_DIR`). A copy fetches from GitHub only when the cached data is older than the polling interval (5 s busy / 30 s idle for PRs, 10 s / 30 s for runs); a lock makes sure only one copy fetches at a time and the others reuse the result. A manual refresh (`r` or the `↻ updated` label) fetches at once, unless some copy fetched in the last 3 seconds. There is no daemon: when every copy is closed, nothing polls. Copies with a different `--pr-query` or repo list keep separate entries. Cache files are private to your user and are tidied after a day.
+
+**Herdr plugin.** The repo is also a Herdr plugin (`herdr-plugin.toml`) with one action, `capcom.open`: it opens the TUI as an overlay, or focuses the copy already open in the current workspace.
+
+```
+cargo install --path .                      # puts capcom-tui on your PATH
+herdr plugin link /path/to/capcom           # installs the plugin from this folder
+```
+
+Then bind a key in Herdr's `config.toml`:
+
+```toml
+[[keys.command]]
+key = "prefix+y"
+type = "plugin_action"
+command = "capcom.open"
+description = "open capcom"
+```
+
+Put the TUI's settings in the plugin's own config folder (`herdr plugin config-dir capcom`), in a file called `env` with one `KEY=VALUE` per line, for example `CAPCOM_ROOT=...` and `CAPCOM_WORKDIR=...` (Herdr's own environment is not your shell's).
+
 **Colours.** `capcom-tui` paints its own fixed dark theme in 1960s space-programme colours (console charcoal, cream text, a NASA-blue title and key strip, amber and orange lamps, phosphor green), so it looks the same whatever your terminal background or colour scheme is, for example a background that changes per folder. Every text colour keeps at least a 4.5:1 contrast ratio against its background, which a test checks on every screen and dialog. State is never shown by colour alone: pull requests say `[READY]` or `[DRAFT]`, and every CI stage has an icon and a word. The focused panel (or selected column) also gets a double-line border, so focus is not shown by colour alone.
 
 It needs `CAPCOM_ROOT` or `--root` like the tool. While it runs, the terminal's own text selection is replaced by mouse clicks (hold Shift to select text in most terminals).

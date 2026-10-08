@@ -102,3 +102,19 @@ same name is focused instead. Names: `<key>-<id>-plan`, `<key>-<id>-impl`, `<key
 
 A TODO task sent to IMPLEMENTING first asks "Does an agent need to implement this?". Yes launches as above. No moves the
 task with the same rules as `capcom status <KEY> <ID> implementing` and starts nothing, for work you do yourself.
+
+### Shared cache
+
+`capcom-tui` keeps `prs-<hash of query>.json` and `runs-<hash of repo list>.json` in `$CAPCOM_CACHE_DIR`, else
+`$XDG_CACHE_HOME/capcom`, else `~/.cache/capcom` (mode 0600 files in a 0700 folder; files older than a day are removed).
+Each holds `{"fetched_at", "value"}`. A poll tick reads it and calls GitHub only when `now - fetched_at` is at least the
+interval for that data (busy data is stale sooner). The fetcher holds an exclusive lock on `<name>.lock`; copies that find
+it taken wait up to 75 seconds and reuse the result. A manual refresh reuses data fetched in the last 3 seconds. Errors are
+never cached. If the folder cannot be created, the TUI simply polls on its own.
+
+### Herdr plugin
+
+`herdr-plugin.toml` defines the `tui` overlay pane (runs `capcom-tui`) and the `open` action (`scripts/open.sh`). The
+script finds a pane titled `capcom-tui` in the active workspace (`capcom-tui --find-pane` reads `herdr pane list` JSON on
+stdin), focuses it, or else opens a new overlay with the `KEY=VALUE` lines of `<plugin config dir>/env` passed as
+`--env`. The TUI sets its terminal title to `capcom-tui` at start-up so it can be found again.

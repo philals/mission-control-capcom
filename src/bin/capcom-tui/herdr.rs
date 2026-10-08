@@ -160,6 +160,21 @@ fn run_herdr(cmd: Command) -> Result<String, String> {
     }
 }
 
+/// Title Herdr shows for the pane running this program (set at start-up, so it is reliable).
+pub const PANE_TITLE: &str = "capcom-tui";
+
+/// From `herdr pane list` output: the pane already running capcom-tui, as `pane_id tab_id`.
+pub fn find_pane(list_json: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(list_json).ok()?;
+    value["result"]["panes"].as_array()?.iter().find_map(|p| {
+        let title = p["terminal_title_stripped"].as_str().or_else(|| p["terminal_title"].as_str())?;
+        if title != PANE_TITLE {
+            return None;
+        }
+        Some(format!("{} {}", p["pane_id"].as_str()?, p["tab_id"].as_str()?))
+    })
+}
+
 /// Herdr sets this in every pane it manages.
 pub fn inside_herdr() -> bool {
     std::env::var("HERDR_ENV").is_ok_and(|v| v == "1")
@@ -190,6 +205,19 @@ mod tests {
         assert_eq!(long.len(), 32);
         assert!(long.starts_with(|c: char| c.is_ascii_lowercase()));
         assert_eq!(agent_name(&["we ird.key", "T1"]), "we-ird-key-t1");
+    }
+
+    #[test]
+    fn an_existing_capcom_pane_is_found_by_its_title() {
+        let list = json!({"result": {"panes": [
+            {"pane_id": "w1:p1", "tab_id": "w1:t1", "terminal_title_stripped": "zsh"},
+            {"pane_id": "w1:p4", "tab_id": "w1:t3", "terminal_title": "capcom-tui", "terminal_title_stripped": "capcom-tui"},
+        ]}});
+        assert_eq!(find_pane(&list.to_string()).as_deref(), Some("w1:p4 w1:t3"));
+        let none = json!({"result": {"panes": [{"pane_id": "w1:p1", "tab_id": "w1:t1", "terminal_title_stripped": "capcom"}]}});
+        assert_eq!(find_pane(&none.to_string()), None, "only the exact title counts");
+        assert_eq!(find_pane("not json"), None);
+        assert_eq!(find_pane("{}"), None);
     }
 
     type Calls = Arc<Mutex<Vec<String>>>;
