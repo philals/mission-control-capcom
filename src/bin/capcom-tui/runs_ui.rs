@@ -147,6 +147,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     };
     let status_width = status.chars().count() as u16;
     let block = Block::bordered()
+        .border_type(if focused { BorderType::Double } else { BorderType::Plain })
         .border_style(Style::new().fg(if focused { theme::BLUE } else { theme::BORDER }))
         .title(Span::styled(
             format!(" {name} · {} ", runs.len()),

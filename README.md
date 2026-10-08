@@ -106,7 +106,7 @@ The query defaults to `is:pr author:@me state:open archived:false sort:updated-d
 - **No double starts:** agents are named like `proj-123-t2-plan`; if one is already running it is brought to the front instead.
 - **Where they run:** the current folder of `capcom-tui`, or `--workdir` / `CAPCOM_WORKDIR`. Nothing about Herdr is stored: workspaces are found again by their label.
 
-**Colours.** `capcom-tui` paints its own fixed dark theme (a navy background with pinned colours), so it looks the same whatever your terminal background or colour scheme is, for example a background that changes per folder. Every text colour keeps at least a 4.5:1 contrast ratio against its background, which a test checks on every screen and dialog. State is never shown by colour alone: pull requests say `[READY]` or `[DRAFT]`, and every CI stage has an icon and a word.
+**Colours.** `capcom-tui` paints its own fixed dark theme in 1960s space-programme colours (console charcoal, cream text, a NASA-blue title and key strip, amber and orange lamps, phosphor green), so it looks the same whatever your terminal background or colour scheme is, for example a background that changes per folder. Every text colour keeps at least a 4.5:1 contrast ratio against its background, which a test checks on every screen and dialog. State is never shown by colour alone: pull requests say `[READY]` or `[DRAFT]`, and every CI stage has an icon and a word. The focused panel (or selected column) also gets a double-line border, so focus is not shown by colour alone.
 
 It needs `CAPCOM_ROOT` or `--root` like the tool. While it runs, the terminal's own text selection is replaced by mouse clicks (hold Shift to select text in most terminals).
 

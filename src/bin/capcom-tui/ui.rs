@@ -238,6 +238,12 @@ fn brand(app: &App) -> Vec<Span<'static>> {
 
 const NEW_STORY_BUTTON: &str = "[ n + new story ]";
 
+/// A title or key strip: a line of text on the header colour.
+fn bar(f: &mut Frame, area: Rect, line: Line<'static>) {
+    f.render_widget(Block::new().style(Style::new().bg(theme::HEADER)), area);
+    f.render_widget(Paragraph::new(line), area);
+}
+
 fn draw_list_header(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let dim = Style::new().fg(theme::DIM);
     let mut left = brand(app);
@@ -266,7 +272,7 @@ fn draw_list_header(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         let rect = Rect::new(area.x + area.width - toggle_width, area.y, toggle_width, 1);
         hits.push((rect, Target::ToggleDone));
     }
-    f.render_widget(Paragraph::new(padded(left, right, area.width)), area);
+    bar(f, area, padded(left, right, area.width));
 }
 
 fn counts_text(s: &StorySummary) -> String {
@@ -390,7 +396,7 @@ fn draw_board_header(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
             Style::new().fg(story_color(board.story.status)),
         ));
     }
-    f.render_widget(Paragraph::new(padded(left, right, area.width)), area);
+    bar(f, area, padded(left, right, area.width));
 }
 
 fn draw_empty(f: &mut Frame, area: Rect, app: &App) {
@@ -473,7 +479,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
         Some(notice) => vec![Span::styled(notice.to_string(), Style::new().fg(panel::ORANGE).add_modifier(Modifier::BOLD))],
         None => vec![Span::styled(format!("updated {}", app.updated), dim)],
     };
-    f.render_widget(Paragraph::new(padded(left, right, area.width)), area);
+    bar(f, area, padded(left, right, area.width));
 }
 
 fn draw_board(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
@@ -530,6 +536,7 @@ fn draw_column(
     let more_above = if offset > 0 { " ▲" } else { "" };
     let more_below = if offset + visible < col.tasks.len() { " ▼" } else { "" };
     let block = Block::bordered()
+        .border_type(if selected || drop { BorderType::Double } else { BorderType::Plain })
         .border_style(Style::new().fg(accent))
         .title(Span::styled(
             format!(" {title}{more_above}{more_below} "),
@@ -1698,6 +1705,21 @@ mod tests {
         for l in out.lines().filter(|l| l.contains("[automerge]")) {
             assert!(l.contains(" ago"), "the age is cut off on: {l}");
         }
+    }
+
+    #[test]
+    fn the_focused_panel_is_marked_by_its_border_shape_not_only_by_colour() {
+        let (_root, mut app) = with_runs();
+        let out = render(&app, 170, 44);
+        assert!(!out.contains('╔'), "nothing in a panel is focused yet:\n{out}");
+        app.focus = Focus::Prs;
+        let out = render(&app, 170, 44);
+        assert_eq!(out.matches('╔').count(), 1, "only the focused panel has a double border:\n{out}");
+        app.focus = Focus::Runs;
+        let out = render(&app, 170, 44);
+        assert_eq!(out.matches('╔').count(), 1);
+        let (_root, board) = sample();
+        assert!(render(&board, 200, 30).contains('╔'), "the selected board column too");
     }
 
     #[test]
