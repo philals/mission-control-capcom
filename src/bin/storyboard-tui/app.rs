@@ -63,10 +63,12 @@ pub enum Target {
     PrDetails(usize),
     PrPanel,
     OpenPr,
+    OpenCheck(usize, usize),
     Run(usize),
+    RunDetails(usize),
     RunPanel,
-    OpenRun(usize),
     OpenJob(usize, usize),
+    OpenStage(usize),
     OpenSelectedRun,
     Tab(BottomTab),
     Sheet,
@@ -705,6 +707,38 @@ impl App {
         }
     }
 
+    /// Open one CI check of a PR row; a check without a link opens the PR instead.
+    pub fn open_check(&self, pr: usize, check: usize) {
+        let rows = self.pr_rows();
+        let Some(row) = rows.get(pr) else {
+            return;
+        };
+        let url = row
+            .live
+            .and_then(|p| p.open_checks().get(check).and_then(|c| c.url.clone()))
+            .unwrap_or_else(|| row.url.clone());
+        (self.opener)(&url);
+    }
+
+    /// Open the k-th stage listed in the sheet that is open (PR checks or run stages).
+    pub fn open_sheet_stage(&self, k: usize) {
+        let url = if self.pr_sheet {
+            let rows = self.pr_rows();
+            rows.get(self.pr_sel)
+                .and_then(|r| r.live)
+                .and_then(|p| p.ordered_checks().get(k).and_then(|c| c.url.clone()))
+        } else if self.run_sheet {
+            self.visible_runs()
+                .get(self.run_sel)
+                .and_then(|r| r.ordered_jobs().get(k).map(|j| j.url.clone()))
+        } else {
+            None
+        };
+        if let Some(url) = url {
+            (self.opener)(&url);
+        }
+    }
+
     pub fn open_selected_pr(&self) {
         let url = self.pr_rows().get(self.pr_sel).map(|r| r.url.clone());
         if let Some(url) = url {
@@ -901,6 +935,7 @@ impl App {
                 Some(Target::Sheet) => {}
                 Some(Target::OpenPr) => self.open_selected_pr(),
                 Some(Target::OpenSelectedRun) => self.open_selected_run(),
+                Some(Target::OpenStage(k)) => self.open_sheet_stage(k),
                 _ => self.close_overlays(),
             }
             return;
@@ -918,19 +953,22 @@ impl App {
                 self.pr_sheet = true;
                 return;
             }
-            Some(Target::Run(i)) => {
-                self.set_focus(Focus::Runs);
-                if self.run_sel == i {
-                    self.run_sheet = true;
-                } else {
-                    self.run_sel = i;
-                }
+            Some(Target::OpenCheck(i, j)) => {
+                self.set_focus(Focus::Prs);
+                self.pr_sel = i;
+                self.open_check(i, j);
                 return;
             }
-            Some(Target::OpenRun(i)) => {
+            Some(Target::Run(i)) => {
                 self.set_focus(Focus::Runs);
                 self.run_sel = i;
                 self.open_run(i);
+                return;
+            }
+            Some(Target::RunDetails(i)) => {
+                self.set_focus(Focus::Runs);
+                self.run_sel = i;
+                self.run_sheet = true;
                 return;
             }
             Some(Target::OpenJob(i, j)) => {
@@ -983,12 +1021,12 @@ impl App {
             return;
         }
         let target = self.hit(x, y);
-        if matches!(target, Some(Target::Pr(_) | Target::PrDetails(_) | Target::PrPanel)) {
+        if matches!(target, Some(Target::Pr(_) | Target::PrDetails(_) | Target::PrPanel | Target::OpenCheck(..))) {
             self.set_focus(Focus::Prs);
             self.pr_move(delta);
             return;
         }
-        if matches!(target, Some(Target::Run(_) | Target::RunPanel | Target::OpenRun(_) | Target::OpenJob(..))) {
+        if matches!(target, Some(Target::Run(_) | Target::RunPanel | Target::RunDetails(_) | Target::OpenJob(..))) {
             self.set_focus(Focus::Runs);
             self.run_move(delta);
             return;
@@ -1074,6 +1112,7 @@ mod tests {
                 state: CheckState::Running,
                 started_at: None,
                 completed_at: None,
+                url: None,
             }],
         }
     }

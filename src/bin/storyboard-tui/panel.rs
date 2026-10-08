@@ -13,6 +13,7 @@ type Hits = Vec<(Rect, Target)>;
 
 const OPEN_BUTTON: &str = "[ o Open in browser ]";
 const DETAILS_BUTTON: &str = "[ details ]";
+pub const SHEET_STAGE_OPEN: &str = "[ open ]";
 
 fn details_width() -> usize {
     DETAILS_BUTTON.chars().count()
@@ -133,16 +134,8 @@ fn stage_style(state: CheckState) -> (&'static str, Color, &'static str) {
     }
 }
 
-/// The stages worth watching, one per line: running, then queued, then failed.
-fn open_stages(pr: &PullRequest) -> Vec<&Check> {
-    [CheckState::Running, CheckState::Queued, CheckState::Failed]
-        .into_iter()
-        .flat_map(|state| pr.checks_in(state))
-        .collect()
-}
-
 fn stage_count(row: &PrRow) -> usize {
-    row.live.map_or(0, |pr| open_stages(pr).len())
+    row.live.map_or(0, |pr| pr.open_checks().len())
 }
 
 /// Lines a row takes (not counting the divider below it): header, CI summary, then the stages.
@@ -195,7 +188,7 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
             }
             right.push(Span::styled(relative(&pr.updated_at, now), dim()));
             summary.extend(summary_line(pr));
-            let open = open_stages(pr);
+            let open = pr.open_checks();
             let label_width = open
                 .iter()
                 .take(MAX_STAGE_LINES)
@@ -310,6 +303,12 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         if body.width > button && h >= 2 {
             hits.push((Rect::new(body.x + body.width - button, y + 1, button, 1), Target::PrDetails(i)));
         }
+        for j in 0..stage_count(row).min(MAX_STAGE_LINES) {
+            let line_y = y + 2 + j as u16;
+            if line_y < y + h {
+                hits.push((Rect::new(body.x, line_y, body.width, 1), Target::OpenCheck(i, j)));
+            }
+        }
         y += heights[i] - 1;
         if i + 1 < rows.len() && y < bottom {
             let rule = "─".repeat(body.width as usize);
@@ -323,14 +322,24 @@ fn label_row(label: &str, value: String) -> Line<'static> {
     Line::from(vec![Span::styled(format!("{label:<12}"), dim()), Span::raw(value)])
 }
 
-fn check_line(check: &Check, label_width: usize, now: DateTime<Utc>) -> Line<'static> {
+/// One check line in the sheet; checks with a link get an `[ open ]` button at the right edge.
+fn check_line(check: &Check, label_width: usize, inner_width: usize, now: DateTime<Utc>) -> Line<'static> {
     let (icon, color, word) = stage_style(check.state);
     let took = check_seconds(check, now).map_or(String::new(), |s| format!(" {}", duration_text(s)));
-    Line::from(vec![
+    let spans = vec![
         Span::styled(format!("  {icon} "), Style::new().fg(color)),
         Span::raw(format!("{:<label_width$}", check.label())),
         Span::styled(format!("   {word}{took}"), dim()),
-    ])
+    ];
+    if check.url.is_none() {
+        return Line::from(spans);
+    }
+    let button = SHEET_STAGE_OPEN.chars().count();
+    let mut spans = fit(spans, inner_width.saturating_sub(button + 1));
+    let gap = inner_width.saturating_sub(width_of(&spans) + button);
+    spans.push(Span::raw(" ".repeat(gap)));
+    spans.push(Span::styled(SHEET_STAGE_OPEN, Style::new().fg(Color::Cyan)));
+    Line::from(spans)
 }
 
 pub fn draw_sheet(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
@@ -344,6 +353,7 @@ pub fn draw_sheet(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let now = Utc::now();
     let id = row.number.map_or(row.repo.clone(), |n| format!("{}#{n}", row.repo));
     let mut lines = Vec::new();
+    let mut stage_hits: Hits = Vec::new();
     match row.live {
         Some(pr) => {
             let state = if pr.is_draft { "Draft (not ready for review)" } else { "Ready for review" };
@@ -377,9 +387,14 @@ pub fn draw_sheet(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
             lines.push(Line::raw("  no checks"));
         }
         let label_width = pr.checks.iter().map(|c| c.label().chars().count()).max().unwrap_or(0);
-        for state in [CheckState::Running, CheckState::Queued, CheckState::Failed, CheckState::Passed, CheckState::Skipped] {
-            for check in pr.checks_in(state) {
-                lines.push(check_line(check, label_width, now));
+        let inner_width = rect.width.saturating_sub(2) as usize;
+        let first_stage = lines.len();
+        for (k, check) in pr.ordered_checks().into_iter().enumerate() {
+            lines.push(check_line(check, label_width, inner_width, now));
+            let y = rect.y + 1 + (first_stage + k) as u16;
+            if check.url.is_some() && y + 1 < rect.y + rect.height {
+                let width = SHEET_STAGE_OPEN.chars().count() as u16;
+                stage_hits.push((Rect::new(rect.x + 1 + inner_width as u16 - width, y, width, 1), Target::OpenStage(k)));
             }
         }
     }
@@ -396,6 +411,7 @@ pub fn draw_sheet(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     f.render_widget(Clear, rect);
     f.render_widget(Paragraph::new(lines).block(block).wrap(Wrap { trim: false }), rect);
     hits.push((rect, Target::Sheet));
+    hits.extend(stage_hits);
     let button = Rect::new(rect.x + 2, rect.y + rect.height - 1, OPEN_BUTTON.chars().count() as u16, 1);
     hits.push((button, Target::OpenPr));
 }

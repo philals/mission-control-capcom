@@ -11,7 +11,7 @@ use storyboard::refresh::run_with_timeout;
 pub const DEFAULT_QUERY: &str =
     "is:pr author:@me state:open archived:false sort:updated-desc -label:icebox";
 
-const GRAPHQL: &str = r#"query($q: String!) { search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { number title url isDraft updatedAt reviewDecision comments { totalCount } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt checkSuite { workflowRun { workflow { name } } } } ... on StatusContext { context state targetUrl } } } } } } } }"#;
+const GRAPHQL: &str = r#"query($q: String!) { search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { number title url isDraft updatedAt reviewDecision comments { totalCount } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { workflow { name } } } } ... on StatusContext { context state targetUrl } } } } } } } }"#;
 
 const GH_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -39,6 +39,7 @@ pub struct Check {
     pub state: CheckState,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
+    pub url: Option<String>,
 }
 
 impl Check {
@@ -95,6 +96,26 @@ impl PullRequest {
     pub fn checks_in(&self, state: CheckState) -> Vec<&Check> {
         self.checks.iter().filter(|c| c.state == state).collect()
     }
+
+    fn checks_in_order(&self, order: &[CheckState]) -> Vec<&Check> {
+        order.iter().flat_map(|s| self.checks_in(*s)).collect()
+    }
+
+    /// The checks worth watching in the panel, one per line: running, queued, failed.
+    pub fn open_checks(&self) -> Vec<&Check> {
+        self.checks_in_order(&[CheckState::Running, CheckState::Queued, CheckState::Failed])
+    }
+
+    /// Every check in the order the detail sheet lists them.
+    pub fn ordered_checks(&self) -> Vec<&Check> {
+        self.checks_in_order(&[
+            CheckState::Running,
+            CheckState::Queued,
+            CheckState::Failed,
+            CheckState::Passed,
+            CheckState::Skipped,
+        ])
+    }
 }
 
 fn text(v: &Value, pointer: &str) -> Option<String> {
@@ -132,6 +153,7 @@ fn parse_check(ctx: &Value) -> Option<Check> {
             ),
             started_at: text(ctx, "/startedAt"),
             completed_at: text(ctx, "/completedAt"),
+            url: text(ctx, "/detailsUrl"),
         }),
         "StatusContext" => Some(Check {
             name: text(ctx, "/context")?,
@@ -139,6 +161,7 @@ fn parse_check(ctx: &Value) -> Option<Check> {
             state: status_state(&text(ctx, "/state").unwrap_or_default()),
             started_at: None,
             completed_at: None,
+            url: text(ctx, "/targetUrl"),
         }),
         _ => None,
     }
@@ -309,12 +332,12 @@ mod tests {
        "updatedAt":"2026-10-08T01:00:00Z","reviewDecision":"APPROVED","comments":{"totalCount":3},
        "repository":{"nameWithOwner":"acme/widgets"},"labels":{"nodes":[{"name":"bug"},{"name":"ui"}]},
        "statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[
-         {"__typename":"CheckRun","name":"build","status":"IN_PROGRESS","conclusion":null,"startedAt":"2026-10-08T01:00:10Z","completedAt":null,"checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},
+         {"__typename":"CheckRun","name":"build","status":"IN_PROGRESS","conclusion":null,"startedAt":"2026-10-08T01:00:10Z","completedAt":null,"detailsUrl":"https://github.com/acme/widgets/actions/runs/101/job/7","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},
          {"__typename":"CheckRun","name":"deploy","status":"QUEUED","conclusion":null,"startedAt":null,"completedAt":null,"checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},
          {"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-10-08T01:00:00Z","completedAt":"2026-10-08T01:01:30Z","checkSuite":{"workflowRun":null}},
          {"__typename":"CheckRun","name":"unit","status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-10-08T01:00:00Z","completedAt":"2026-10-08T01:02:00Z","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},
          {"__typename":"CheckRun","name":"docs","status":"COMPLETED","conclusion":"SKIPPED","startedAt":null,"completedAt":null,"checkSuite":{"workflowRun":null}},
-         {"__typename":"StatusContext","context":"ci/legacy","state":"PENDING","targetUrl":null},
+         {"__typename":"StatusContext","context":"ci/legacy","state":"PENDING","targetUrl":"https://ci.example/legacy/1"},
          {"__typename":"StatusContext","context":"ci/other","state":"SUCCESS","targetUrl":null}
        ]}}},
       {"number":7,"title":"Draft thing","url":"https://github.com/acme/api/pull/7","isDraft":true,
@@ -344,9 +367,25 @@ mod tests {
         let lint = a.checks.iter().find(|c| c.name == "lint").unwrap();
         assert_eq!((lint.state, lint.workflow.as_deref()), (CheckState::Passed, None));
         assert!(a.is_active());
+        assert_eq!(build.url.as_deref(), Some("https://github.com/acme/widgets/actions/runs/101/job/7"));
+        assert_eq!(lint.url, None, "a check without a link has none");
+        let legacy = a.checks.iter().find(|c| c.name == "ci/legacy").unwrap();
+        assert_eq!(legacy.url.as_deref(), Some("https://ci.example/legacy/1"));
         let b = &prs[1];
         assert!(b.is_draft && b.checks.is_empty() && b.review == Review::None);
         assert!(!b.is_active());
+    }
+
+    #[test]
+    fn checks_come_in_a_watching_order_for_the_panel_and_a_full_order_for_the_sheet() {
+        let pr = &parse(FIXTURE).unwrap()[0];
+        let names = |checks: Vec<&Check>| checks.iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(pr.open_checks()), vec!["build", "deploy", "ci/legacy", "unit"], "running, queued, failed");
+        assert_eq!(
+            names(pr.ordered_checks()),
+            vec!["build", "deploy", "ci/legacy", "unit", "lint", "ci/other", "docs"],
+            "running, queued, failed, passed, skipped"
+        );
     }
 
     #[test]

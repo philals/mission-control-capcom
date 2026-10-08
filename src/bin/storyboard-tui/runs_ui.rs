@@ -1,6 +1,6 @@
 //! The manual runs panel (beside or behind the PR panel) and the run detail sheet.
 use crate::app::{App, Focus, Screen, Target};
-use crate::panel::{dim, fit, trunc, width_of, window_offset, ORANGE};
+use crate::panel::{dim, fit, trunc, width_of, window_offset, ORANGE, SHEET_STAGE_OPEN};
 use crate::prs::{duration_text, relative};
 use crate::runs::{Job, Run, RunState};
 use chrono::{DateTime, Utc};
@@ -13,7 +13,7 @@ use ratatui::Frame;
 type Hits = Vec<(Rect, Target)>;
 
 const MAX_STAGE_LINES: usize = 8;
-const OPEN_LABEL: &str = "[ open ]";
+const DETAILS_LABEL: &str = "[ details ]";
 const SHEET_BUTTON: &str = "[ o Open run ]";
 
 fn style_of(state: RunState) -> (&'static str, Color, &'static str) {
@@ -92,7 +92,6 @@ fn job_line(job: &Job, label_width: usize, marker: &Span<'static>, now: DateTime
 fn run_lines(run: &Run, width: usize, selected: bool, now: DateTime<Utc>) -> Vec<Line<'static>> {
     let marker = Span::styled(if selected { "▌ " } else { "  " }, Style::new().fg(Color::Cyan));
     let bold = Style::new().add_modifier(Modifier::BOLD);
-    let right = vec![Span::styled(OPEN_LABEL, Style::new().fg(Color::Cyan))];
     let left = vec![
         marker.clone(),
         badge(run.state),
@@ -100,11 +99,7 @@ fn run_lines(run: &Run, width: usize, selected: bool, now: DateTime<Utc>) -> Vec
         Span::styled(format!("{}  ", run.repo), Style::new().fg(Color::Cyan)),
         Span::styled(run.name.clone(), bold),
     ];
-    let right_width = width_of(&right) + 1;
-    let mut first = fit(left, width.saturating_sub(right_width));
-    let pad = width.saturating_sub(width_of(&first) + width_of(&right));
-    first.push(Span::raw(" ".repeat(pad)));
-    first.extend(right);
+    let first = fit(left, width);
     let (_, color, word) = style_of(run.state);
     let took = run_seconds(run, now).map_or(String::new(), |s| format!(" {}", duration_text(s)));
     let mut second = vec![marker.clone(), Span::raw("  "), Span::raw(run.title.clone())];
@@ -113,6 +108,11 @@ fn run_lines(run: &Run, width: usize, selected: bool, now: DateTime<Utc>) -> Vec
     }
     second.push(Span::styled(format!("  {}", relative(&run.created_at, now)), dim()));
     second.push(Span::styled(format!("  {word}{took}"), Style::new().fg(color)));
+    let button = DETAILS_LABEL.chars().count();
+    let mut second = fit(second, width.saturating_sub(button + 1));
+    let gap = width.saturating_sub(width_of(&second) + button);
+    second.push(Span::raw(" ".repeat(gap)));
+    second.push(Span::styled(DETAILS_LABEL, Style::new().fg(Color::Cyan)));
     let style = if selected { Style::new().bg(Color::Indexed(237)) } else { Style::new() };
     let mut lines = vec![Line::from(first).style(style), Line::from(fit(second, width)).style(style)];
     let open = run.open_jobs();
@@ -208,9 +208,9 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         let lines = run_lines(run, body.width as usize, focused && i == selected, now);
         f.render_widget(Paragraph::new(lines), rect);
         hits.push((rect, Target::Run(i)));
-        let button = OPEN_LABEL.chars().count() as u16;
-        if body.width > button {
-            hits.push((Rect::new(body.x + body.width - button, y, button, 1), Target::OpenRun(i)));
+        let button = DETAILS_LABEL.chars().count() as u16;
+        if body.width > button && h >= 2 {
+            hits.push((Rect::new(body.x + body.width - button, y + 1, button, 1), Target::RunDetails(i)));
         }
         for j in 0..stage_count(run).min(MAX_STAGE_LINES) {
             let line_y = y + 2 + j as u16;
@@ -257,23 +257,26 @@ pub fn draw_sheet(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         lines.push(Line::raw("  none loaded (only running, queued or failed runs load their stages)"));
     }
     let label_width = run.jobs.iter().map(|j| j.name.chars().count()).max().unwrap_or(0);
-    for state in [
-        RunState::Running,
-        RunState::Waiting,
-        RunState::Queued,
-        RunState::Failed,
-        RunState::Success,
-        RunState::Cancelled,
-        RunState::Skipped,
-    ] {
-        for job in run.jobs.iter().filter(|j| j.state == state) {
-            let (icon, color, word) = style_of(job.state);
-            let took = job_seconds(job, now).map_or(String::new(), |s| format!(" {}", duration_text(s)));
-            lines.push(Line::from(vec![
-                Span::styled(format!("  {icon} "), Style::new().fg(color)),
-                Span::raw(format!("{:<label_width$}", job.name)),
-                Span::styled(format!("   {word}{took}"), dim()),
-            ]));
+    let inner_width = rect.width.saturating_sub(2) as usize;
+    let first_stage = lines.len();
+    let mut stage_hits: Hits = Vec::new();
+    for (k, job) in run.ordered_jobs().into_iter().enumerate() {
+        let (icon, color, word) = style_of(job.state);
+        let took = job_seconds(job, now).map_or(String::new(), |s| format!(" {}", duration_text(s)));
+        let spans = vec![
+            Span::styled(format!("  {icon} "), Style::new().fg(color)),
+            Span::raw(format!("{:<label_width$}", job.name)),
+            Span::styled(format!("   {word}{took}"), dim()),
+        ];
+        let button = SHEET_STAGE_OPEN.chars().count();
+        let mut spans = fit(spans, inner_width.saturating_sub(button + 1));
+        let gap = inner_width.saturating_sub(width_of(&spans) + button);
+        spans.push(Span::raw(" ".repeat(gap)));
+        spans.push(Span::styled(SHEET_STAGE_OPEN, Style::new().fg(Color::Cyan)));
+        lines.push(Line::from(spans));
+        let y = rect.y + 1 + (first_stage + k) as u16;
+        if y + 1 < rect.y + rect.height {
+            stage_hits.push((Rect::new(rect.x + 1 + (inner_width - button) as u16, y, button as u16, 1), Target::OpenStage(k)));
         }
     }
     let block = Block::bordered()
@@ -291,6 +294,7 @@ pub fn draw_sheet(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     f.render_widget(Clear, rect);
     f.render_widget(Paragraph::new(lines).block(block).wrap(Wrap { trim: false }), rect);
     hits.push((rect, Target::Sheet));
+    hits.extend(stage_hits);
     let button = Rect::new(rect.x + 2, rect.y + rect.height - 1, SHEET_BUTTON.chars().count() as u16, 1);
     hits.push((button, Target::OpenSelectedRun));
 }

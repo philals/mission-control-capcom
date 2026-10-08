@@ -51,12 +51,29 @@ impl Run {
         matches!(self.state, RunState::Queued | RunState::Running | RunState::Waiting)
     }
 
+    fn jobs_in_order(&self, order: &[RunState]) -> Vec<&Job> {
+        order
+            .iter()
+            .flat_map(|state| self.jobs.iter().filter(move |j| j.state == *state))
+            .collect()
+    }
+
     /// The stages worth watching, one per line: running, then waiting, queued, then failed.
     pub fn open_jobs(&self) -> Vec<&Job> {
-        [RunState::Running, RunState::Waiting, RunState::Queued, RunState::Failed]
-            .into_iter()
-            .flat_map(|state| self.jobs.iter().filter(move |j| j.state == state))
-            .collect()
+        self.jobs_in_order(&[RunState::Running, RunState::Waiting, RunState::Queued, RunState::Failed])
+    }
+
+    /// Every stage in the order the detail sheet lists them.
+    pub fn ordered_jobs(&self) -> Vec<&Job> {
+        self.jobs_in_order(&[
+            RunState::Running,
+            RunState::Waiting,
+            RunState::Queued,
+            RunState::Failed,
+            RunState::Success,
+            RunState::Cancelled,
+            RunState::Skipped,
+        ])
     }
 }
 
@@ -446,6 +463,16 @@ mod tests {
         );
         assert_eq!(jobs[1].url, "https://github.com/acme/widgets/actions/runs/101/job/2");
         assert_eq!(jobs[1].started_at.as_deref(), Some("2026-10-08T03:01:20Z"));
+    }
+
+    #[test]
+    fn the_sheet_order_of_stages_is_running_waiting_queued_failed_then_the_rest() {
+        let mut run = parse_runs("acme/widgets", RUNS).unwrap().remove(0);
+        run.jobs = parse_jobs(JOBS).unwrap();
+        let names: Vec<&str> = run.ordered_jobs().iter().map(|j| j.name.as_str()).collect();
+        assert_eq!(names, vec!["deploy", "approve", "smoke", "lint", "build"]);
+        let open: Vec<&str> = run.open_jobs().iter().map(|j| j.name.as_str()).collect();
+        assert_eq!(open, vec!["deploy", "approve", "smoke", "lint"]);
     }
 
     #[test]

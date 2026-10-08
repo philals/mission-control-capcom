@@ -568,7 +568,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("?", "toggle this help".into()),
         row("q  Ctrl-C", "quit".into()),
         Line::raw(""),
-        row("Mouse", "click a story, column or card; a PR opens on GitHub, [ details ] opens its sheet; wheel scrolls".into()),
+        row("Mouse", "click a story, column or card; a PR or run opens on GitHub, [ details ] opens its sheet, [ open ] a stage; wheel scrolls".into()),
     ];
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
@@ -854,6 +854,7 @@ mod tests {
             state,
             started_at: None,
             completed_at: None,
+            url: (name != "docs").then(|| format!("https://github.com/acme/widgets/actions/runs/1/job/{name}")),
         }
     }
 
@@ -1201,11 +1202,13 @@ mod tests {
         let out = render(&app, 170, 44);
         for want in [
             "PULL REQUESTS · 3", "MANUAL RUNS · 3", "[RUNNING]", "[SUCCESS]", "[FAILED]", "acme/widgets",
-            "Deploy nonprod", "feat/x", "[ open ]", "Deploy to nonprod", "Release",
+            "Deploy nonprod", "feat/x", "[ details ]", "Deploy to nonprod", "Release",
         ] {
             assert!(out.contains(want), "missing {want:?} in:\n{out}");
         }
         assert!(line_of(&out, "PULL REQUESTS").contains("MANUAL RUNS"), "same row, side by side:\n{out}");
+        assert_eq!(out.matches("[ details ]").count(), 6, "a details button on each PR and each run:\n{out}");
+        assert!(!out.contains("[ open ]"), "runs no longer have a separate open button:\n{out}");
         assert!(!out.contains("compile"), "passed stages are not listed:\n{out}");
     }
 
@@ -1247,14 +1250,20 @@ mod tests {
         assert!(!out.contains("acme/api#99"), "{out}");
     }
 
+    fn rightmost(out: &str, y: u16, needle: &str) -> u16 {
+        let line = out.lines().nth(y as usize).unwrap();
+        line[..line.rfind(needle).unwrap_or_else(|| panic!("{needle:?} not on line {y}:\n{out}"))].chars().count() as u16
+    }
+
     #[test]
-    fn clicking_open_opens_the_run_and_clicking_a_stage_opens_that_stage() {
+    fn clicking_a_run_opens_it_in_the_browser_and_a_stage_opens_that_stage() {
         let (_root, mut app) = with_runs();
         let log = recorder(&mut app);
         let out = render(&app, 170, 44);
-        let (x, y) = find(&out, "[ open ]");
-        app.on_click(x + 2, y);
+        let (x, y) = find(&out, "Deploy to nonprod");
+        app.on_click(x, y);
         assert_eq!(*log.borrow(), vec!["https://github.com/acme/widgets/actions/runs/101".to_string()]);
+        assert_eq!((app.focus, app.run_sel, app.run_sheet), (Focus::Runs, 0, false));
         let (x, y) = find(&out, "◔ deploy");
         app.on_click(x + 2, y);
         assert_eq!(log.borrow()[1], "https://github.com/acme/widgets/actions/runs/101/job/2");
@@ -1262,16 +1271,16 @@ mod tests {
     }
 
     #[test]
-    fn clicking_a_run_selects_it_then_opens_the_sheet_with_every_stage_and_an_open_button() {
+    fn the_details_button_opens_the_run_sheet_without_opening_the_browser() {
         let (_root, mut app) = with_runs();
         let log = recorder(&mut app);
         let out = render(&app, 170, 44);
-        let (x, y) = find(&out, "Release");
-        app.on_click(x, y);
-        assert_eq!((app.focus, app.run_sel, app.run_sheet), (Focus::Runs, 2, false));
-        render(&app, 170, 44);
-        app.on_click(x, y);
+        let y = find(&out, "Release").1;
+        let x = rightmost(&out, y, "[ details ]");
+        app.on_click(x + 2, y);
         assert!(app.run_sheet);
+        assert_eq!((app.focus, app.run_sel), (Focus::Runs, 2));
+        assert!(log.borrow().is_empty(), "details does not open the browser");
         let out = render(&app, 170, 44);
         for want in ["acme/api", "Release", "Stages (1)", "✗ publish", "failed"] {
             assert!(out.contains(want), "missing {want:?} in:\n{out}");
@@ -1282,6 +1291,50 @@ mod tests {
         assert!(app.run_sheet);
         app.on_click(0, 0);
         assert!(!app.run_sheet);
+    }
+
+    #[test]
+    fn every_stage_in_the_run_sheet_has_its_own_open_button() {
+        let (_root, mut app) = with_runs();
+        let log = recorder(&mut app);
+        app.focus = Focus::Runs;
+        app.run_sel = 0;
+        app.run_sheet = true;
+        let out = render(&app, 170, 44);
+        assert_eq!(out.matches("[ open ]").count(), 5, "five stages, five buttons:\n{out}");
+        let (y, line) = out.lines().enumerate().find(|(_, l)| l.contains("approve") && l.contains("[ open ]")).expect("approve line");
+        let x = line[..line.rfind("[ open ]").unwrap()].chars().count() as u16;
+        app.on_click(x + 2, y as u16);
+        assert_eq!(*log.borrow(), vec!["https://github.com/acme/widgets/actions/runs/101/job/4".to_string()]);
+        assert!(app.run_sheet, "opening a stage keeps the sheet");
+    }
+
+    #[test]
+    fn every_check_with_a_link_in_the_pr_sheet_has_its_own_open_button() {
+        let (_root, mut app) = with_prs();
+        let log = recorder(&mut app);
+        app.focus = Focus::Prs;
+        app.pr_sel = 0;
+        app.pr_sheet = true;
+        let out = render(&app, 170, 50);
+        assert_eq!(out.matches("[ open ]").count(), 6, "7 checks, one without a link:\n{out}");
+        let (y, line) = out.lines().enumerate().find(|(_, l)| l.contains("CI / unit") && l.contains("[ open ]")).expect("unit line");
+        let x = line[..line.rfind("[ open ]").unwrap()].chars().count() as u16;
+        app.on_click(x + 2, y as u16);
+        assert_eq!(*log.borrow(), vec!["https://github.com/acme/widgets/actions/runs/1/job/unit".to_string()]);
+        assert!(app.pr_sheet);
+        assert!(!out.lines().any(|l| l.contains("CI / docs") && l.contains("[ open ]")), "no link, no button");
+    }
+
+    #[test]
+    fn clicking_a_ci_stage_in_the_pr_panel_opens_that_check() {
+        let (_root, mut app) = with_prs();
+        let log = recorder(&mut app);
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "◔ CI / build");
+        app.on_click(x + 2, y);
+        assert_eq!(*log.borrow(), vec!["https://github.com/acme/widgets/actions/runs/1/job/build".to_string()]);
+        assert_eq!((app.focus, app.pr_sel, app.pr_sheet), (Focus::Prs, 0, false));
     }
 
     #[test]
