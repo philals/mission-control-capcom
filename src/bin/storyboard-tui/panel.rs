@@ -13,6 +13,7 @@ type Hits = Vec<(Rect, Target)>;
 
 const OPEN_BUTTON: &str = "[ o Open in browser ]";
 const MAX_STAGE_LINES: usize = 8;
+const ORANGE: Color = Color::Indexed(208);
 
 /// Height of the panel for a body of the given height; 0 means the panel is hidden.
 pub fn height(app: &App, body: u16) -> u16 {
@@ -108,7 +109,7 @@ fn summary_line(pr: &PullRequest) -> Vec<Span<'static>> {
         push(format!("◔ {}", c.running), Color::Yellow);
     }
     if c.queued > 0 {
-        push(format!("○ {}", c.queued), Color::Gray);
+        push(format!("● {}", c.queued), ORANGE);
     }
     if c.skipped > 0 {
         push(format!("⊘ {}", c.skipped), Color::DarkGray);
@@ -119,7 +120,7 @@ fn summary_line(pr: &PullRequest) -> Vec<Span<'static>> {
 fn stage_style(state: CheckState) -> (&'static str, Color, &'static str) {
     match state {
         CheckState::Running => ("◔", Color::Yellow, "running"),
-        CheckState::Queued => ("○", Color::Gray, "queued"),
+        CheckState::Queued => ("●", ORANGE, "queued"),
         CheckState::Failed => ("✗", Color::Red, "failed"),
         CheckState::Passed => ("✓", Color::Green, "passed"),
         CheckState::Skipped => ("⊘", Color::DarkGray, "skipped"),

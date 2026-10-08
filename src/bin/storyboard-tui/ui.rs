@@ -828,7 +828,7 @@ mod tests {
         for want in [
             "PULL REQUESTS · 3", "updated", "acme/widgets#12", "Add notices", "PROJ-2 · T1",
             "acme/api#99", "Unrelated chore", "approved", "✎ 3", " ago", "[bug]",
-            "✓ 3", "✗ 1", "◔ 2", "○ 1", "◔ CI / build", "◔ CI / test", "○ CI / deploy",
+            "✓ 3", "✗ 1", "◔ 2", "● 1", "◔ CI / build", "◔ CI / test", "● CI / deploy",
             "✗ CI / unit", "no checks", "[READY]", "[DRAFT]",
         ] {
             assert!(out.contains(want), "missing {want:?} in:\n{out}");
@@ -849,10 +849,26 @@ mod tests {
         let out = render(&app, 170, 44);
         let (xb, yb) = find(&out, "◔ CI / build");
         let (xt, yt) = find(&out, "◔ CI / test");
-        let (xd, yd) = find(&out, "○ CI / deploy");
+        let (xd, yd) = find(&out, "● CI / deploy");
         let (xu, yu) = find(&out, "✗ CI / unit");
         assert!(xb == xt && xt == xd && xd == xu, "stages share a column:\n{out}");
         assert_eq!((yt, yd, yu), (yb + 1, yb + 2, yb + 3), "running, queued, failed in order:\n{out}");
+    }
+
+    #[test]
+    fn pending_stages_use_a_filled_orange_circle() {
+        use ratatui::style::Color;
+        let (_root, app) = with_prs();
+        let mut term = Terminal::new(TestBackend::new(170, 44)).unwrap();
+        term.draw(|f| draw(f, &app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let text = render(&app, 170, 44);
+        let (x, y) = find(&text, "● CI / deploy");
+        assert_eq!(buf[(x, y)].symbol(), "●");
+        assert_eq!(buf[(x, y)].fg, Color::Indexed(208), "pending is orange");
+        let (sx, sy) = find(&text, "● 1");
+        assert_eq!(buf[(sx, sy)].fg, Color::Indexed(208), "the summary count matches");
+        assert!(!text.contains("○"), "no hollow circle is left:\n{text}");
     }
 
     #[test]
