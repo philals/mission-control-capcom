@@ -1,4 +1,5 @@
 //! The manual runs panel (beside or behind the PR panel) and the run detail sheet.
+use crate::theme;
 use crate::app::{App, Focus, Screen, Target};
 use crate::panel::{dim, fit, trunc, width_of, window_offset, ORANGE, SHEET_STAGE_OPEN};
 use crate::prs::{duration_text, relative};
@@ -7,7 +8,7 @@ use chrono::{DateTime, Utc};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Paragraph, Wrap};
 use ratatui::Frame;
 
 type Hits = Vec<(Rect, Target)>;
@@ -18,13 +19,13 @@ const SHEET_BUTTON: &str = "[ o Open run ]";
 
 fn style_of(state: RunState) -> (&'static str, Color, &'static str) {
     match state {
-        RunState::Running => ("◔", Color::Yellow, "running"),
-        RunState::Waiting => ("◑", Color::Magenta, "waiting"),
+        RunState::Running => ("◔", theme::YELLOW, "running"),
+        RunState::Waiting => ("◑", theme::MAGENTA, "waiting"),
         RunState::Queued => ("●", ORANGE, "queued"),
-        RunState::Failed => ("✗", Color::Red, "failed"),
-        RunState::Success => ("✓", Color::Green, "success"),
-        RunState::Cancelled => ("⊘", Color::Gray, "cancelled"),
-        RunState::Skipped => ("⊘", Color::DarkGray, "skipped"),
+        RunState::Failed => ("✗", theme::RED, "failed"),
+        RunState::Success => ("✓", theme::GREEN, "success"),
+        RunState::Cancelled => ("⊘", theme::MUTED, "cancelled"),
+        RunState::Skipped => ("⊘", theme::DIM, "skipped"),
     }
 }
 
@@ -90,13 +91,13 @@ fn job_line(job: &Job, label_width: usize, marker: &Span<'static>, now: DateTime
 
 /// The lines of one run, and how many of them are stage lines (they follow the first two).
 fn run_lines(run: &Run, width: usize, selected: bool, now: DateTime<Utc>) -> Vec<Line<'static>> {
-    let marker = Span::styled(if selected { "▌ " } else { "  " }, Style::new().fg(Color::Cyan));
+    let marker = Span::styled(if selected { "▌ " } else { "  " }, Style::new().fg(theme::CYAN));
     let bold = Style::new().add_modifier(Modifier::BOLD);
     let left = vec![
         marker.clone(),
         badge(run.state),
         Span::raw(" "),
-        Span::styled(format!("{}  ", run.repo), Style::new().fg(Color::Cyan)),
+        Span::styled(format!("{}  ", run.repo), Style::new().fg(theme::CYAN)),
         Span::styled(run.name.clone(), bold),
     ];
     let first = fit(left, width);
@@ -104,7 +105,7 @@ fn run_lines(run: &Run, width: usize, selected: bool, now: DateTime<Utc>) -> Vec
     let took = run_seconds(run, now).map_or(String::new(), |s| format!(" {}", duration_text(s)));
     let mut second = vec![marker.clone(), Span::raw("  "), Span::raw(run.title.clone())];
     if !run.branch.is_empty() {
-        second.push(Span::styled(format!("  {}", run.branch), Style::new().fg(Color::Cyan)));
+        second.push(Span::styled(format!("  {}", run.branch), Style::new().fg(theme::CYAN)));
     }
     second.push(Span::styled(format!("  {}", relative(&run.created_at, now)), dim()));
     second.push(Span::styled(format!("  {word}{took}"), Style::new().fg(color)));
@@ -112,8 +113,8 @@ fn run_lines(run: &Run, width: usize, selected: bool, now: DateTime<Utc>) -> Vec
     let mut second = fit(second, width.saturating_sub(button + 1));
     let gap = width.saturating_sub(width_of(&second) + button);
     second.push(Span::raw(" ".repeat(gap)));
-    second.push(Span::styled(DETAILS_LABEL, Style::new().fg(Color::Cyan)));
-    let style = if selected { Style::new().bg(Color::Indexed(237)) } else { Style::new() };
+    second.push(Span::styled(DETAILS_LABEL, Style::new().fg(theme::CYAN)));
+    let style = if selected { Style::new().bg(theme::SELECT) } else { Style::new() };
     let mut lines = vec![Line::from(first).style(style), Line::from(fit(second, width)).style(style)];
     let open = run.open_jobs();
     let label_width = open.iter().take(MAX_STAGE_LINES).map(|j| j.name.chars().count()).max().unwrap_or(0);
@@ -146,10 +147,10 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     };
     let status_width = status.chars().count() as u16;
     let block = Block::bordered()
-        .border_style(Style::new().fg(if focused { Color::Blue } else { Color::DarkGray }))
+        .border_style(Style::new().fg(if focused { theme::BLUE } else { theme::BORDER }))
         .title(Span::styled(
             format!(" {name} · {} ", runs.len()),
-            Style::new().fg(if focused { Color::Blue } else { Color::White }).add_modifier(Modifier::BOLD),
+            Style::new().fg(if focused { theme::BLUE } else { theme::FG }).add_modifier(Modifier::BOLD),
         ))
         .title(Line::from(Span::styled(status, dim())).right_aligned());
     let inner = block.inner(area);
@@ -170,10 +171,10 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         }
     };
     if let Some(err) = &app.runs.error {
-        note(format!("! {err}"), Color::Red, &mut top);
+        note(format!("! {err}"), theme::RED, &mut top);
     }
     for warning in app.runs.warnings.iter().take(2) {
-        note(format!("! {warning}"), Color::Yellow, &mut top);
+        note(format!("! {warning}"), theme::YELLOW, &mut top);
     }
     let body = Rect::new(inner.x, top, inner.width, (inner.y + inner.height).saturating_sub(top));
     if runs.is_empty() {
@@ -283,7 +284,7 @@ pub fn draw_sheet(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         let mut spans = fit(spans, inner_width.saturating_sub(button + 1));
         let gap = inner_width.saturating_sub(width_of(&spans) + button);
         spans.push(Span::raw(" ".repeat(gap)));
-        spans.push(Span::styled(SHEET_STAGE_OPEN, Style::new().fg(Color::Cyan)));
+        spans.push(Span::styled(SHEET_STAGE_OPEN, Style::new().fg(theme::CYAN)));
         lines.push(Line::from(spans));
         let y = rect.y + 1 + (first_stage + k) as u16;
         if y + 1 < rect.y + rect.height {
@@ -292,17 +293,17 @@ pub fn draw_sheet(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     }
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(Color::Blue))
+        .border_style(Style::new().fg(theme::BLUE))
         .title(Span::styled(
             format!(" {} · {} #{} ", run.repo, run.name, run.id),
             Style::new().add_modifier(Modifier::BOLD),
         ))
         .title_bottom(Line::from(vec![
             Span::raw(" "),
-            Span::styled(SHEET_BUTTON, Style::new().fg(Color::Cyan)),
+            Span::styled(SHEET_BUTTON, Style::new().fg(theme::CYAN)),
             Span::styled("  Esc or click outside to close ", dim()),
         ]));
-    f.render_widget(Clear, rect);
+    theme::clear(f, rect);
     f.render_widget(Paragraph::new(lines).block(block).wrap(Wrap { trim: false }), rect);
     hits.push((rect, Target::Sheet));
     hits.extend(stage_hits);

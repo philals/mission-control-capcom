@@ -1,11 +1,12 @@
 //! The pull request panel (bottom of the story list and of a board) and the PR detail sheet.
+use crate::theme;
 use crate::app::{App, Focus, PrRow, Screen, Target};
 use crate::prs::{check_seconds, duration_text, relative, Check, CheckState, PullRequest, Review};
 use chrono::{DateTime, Utc};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Paragraph, Wrap};
 use ratatui::Frame;
 use capcom::model::PrState;
 
@@ -31,7 +32,7 @@ const BADGE_CLICK_WIDTH: u16 = 7;
 const MAX_STAGE_LINES: usize = 8;
 const MAX_TITLE_LINES: usize = 3;
 const NOT_LISTED: &str = "(not in your open pull requests)";
-pub const ORANGE: Color = Color::Indexed(208);
+pub const ORANGE: Color = theme::ORANGE;
 
 /// Lines the PR rows need (rows plus the dividers between them).
 pub fn content_height(app: &App, width: usize) -> u16 {
@@ -148,14 +149,14 @@ pub fn width_of(spans: &[Span<'static>]) -> usize {
 }
 
 pub fn dim() -> Style {
-    Style::new().fg(Color::DarkGray)
+    Style::new().fg(theme::DIM)
 }
 
 fn review_span(review: Review) -> Option<Span<'static>> {
     match review {
-        Review::Approved => Some(Span::styled("✓ approved", Style::new().fg(Color::Green))),
-        Review::ChangesRequested => Some(Span::styled("✖ changes requested", Style::new().fg(Color::Red))),
-        Review::Required => Some(Span::styled("● review required", Style::new().fg(Color::Yellow))),
+        Review::Approved => Some(Span::styled("✓ approved", Style::new().fg(theme::GREEN))),
+        Review::ChangesRequested => Some(Span::styled("✖ changes requested", Style::new().fg(theme::RED))),
+        Review::Required => Some(Span::styled("● review required", Style::new().fg(theme::YELLOW))),
         Review::None => None,
     }
 }
@@ -163,13 +164,13 @@ fn review_span(review: Review) -> Option<Span<'static>> {
 /// `[READY]` (green) or `[DRAFT]` (grey) for a live PR; the board's own state for a recorded one.
 fn badge(row: &PrRow) -> Span<'static> {
     let (text, color) = match (row.live, row.board_state) {
-        (Some(pr), _) if pr.is_draft => ("[DRAFT] ", Color::DarkGray),
-        (Some(_), _) => ("[READY] ", Color::Green),
-        (None, Some(PrState::Draft)) => ("[DRAFT] ", Color::DarkGray),
-        (None, Some(PrState::Ready)) => ("[READY] ", Color::Green),
-        (None, Some(PrState::Merged)) => ("[MERGED]", Color::Magenta),
-        (None, Some(PrState::Closed)) => ("[CLOSED]", Color::Red),
-        (None, None) => ("[?]     ", Color::DarkGray),
+        (Some(pr), _) if pr.is_draft => ("[DRAFT] ", theme::DIM),
+        (Some(_), _) => ("[READY] ", theme::GREEN),
+        (None, Some(PrState::Draft)) => ("[DRAFT] ", theme::DIM),
+        (None, Some(PrState::Ready)) => ("[READY] ", theme::GREEN),
+        (None, Some(PrState::Merged)) => ("[MERGED]", theme::MAGENTA),
+        (None, Some(PrState::Closed)) => ("[CLOSED]", theme::RED),
+        (None, None) => ("[?]     ", theme::DIM),
     };
     Span::styled(text, Style::new().fg(color).add_modifier(Modifier::BOLD))
 }
@@ -185,30 +186,30 @@ fn summary_line(pr: &PullRequest) -> Vec<Span<'static>> {
         spans.push(Span::raw("  "));
     };
     if c.passed > 0 {
-        push(format!("✓ {}", c.passed), Color::Green);
+        push(format!("✓ {}", c.passed), theme::GREEN);
     }
     if c.failed > 0 {
-        push(format!("✗ {}", c.failed), Color::Red);
+        push(format!("✗ {}", c.failed), theme::RED);
     }
     if c.running > 0 {
-        push(format!("◔ {}", c.running), Color::Yellow);
+        push(format!("◔ {}", c.running), theme::YELLOW);
     }
     if c.queued > 0 {
         push(format!("● {}", c.queued), ORANGE);
     }
     if c.skipped > 0 {
-        push(format!("⊘ {}", c.skipped), Color::DarkGray);
+        push(format!("⊘ {}", c.skipped), theme::DIM);
     }
     spans
 }
 
 fn stage_style(state: CheckState) -> (&'static str, Color, &'static str) {
     match state {
-        CheckState::Running => ("◔", Color::Yellow, "running"),
+        CheckState::Running => ("◔", theme::YELLOW, "running"),
         CheckState::Queued => ("●", ORANGE, "queued"),
-        CheckState::Failed => ("✗", Color::Red, "failed"),
-        CheckState::Passed => ("✓", Color::Green, "passed"),
-        CheckState::Skipped => ("⊘", Color::DarkGray, "skipped"),
+        CheckState::Failed => ("✗", theme::RED, "failed"),
+        CheckState::Passed => ("✓", theme::GREEN, "passed"),
+        CheckState::Skipped => ("⊘", theme::DIM, "skipped"),
     }
 }
 
@@ -242,20 +243,20 @@ fn stage_line(
 }
 
 fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> Vec<Line<'static>> {
-    let marker = Span::styled(if selected { "▌ " } else { "  " }, Style::new().fg(Color::Cyan));
+    let marker = Span::styled(if selected { "▌ " } else { "  " }, Style::new().fg(theme::CYAN));
     let bold = Style::new().add_modifier(Modifier::BOLD);
     let id = match row.number {
         Some(n) => format!("{}#{n}", row.repo),
         None => row.repo.clone(),
     };
     let mut right: Vec<Span<'static>> = Vec::new();
+    let mut labels_text: Option<String> = None;
     let mut summary: Vec<Span<'static>> = vec![marker.clone(), Span::raw("  ")];
     let mut stages: Vec<Vec<Span<'static>>> = Vec::new();
     match row.live {
         Some(pr) => {
             if !pr.labels.is_empty() {
-                let labels = pr.labels.iter().map(|l| format!("[{l}]")).collect::<Vec<_>>().join(" ");
-                right.push(Span::styled(format!("{labels}  "), dim()));
+                labels_text = Some(pr.labels.iter().map(|l| format!("[{l}]")).collect::<Vec<_>>().join(" "));
             }
             if let Some(review) = review_span(pr.review) {
                 right.push(review);
@@ -289,24 +290,30 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
     }
     let mut left: Vec<Span<'static>> = vec![marker.clone(), badge(row)];
     if let Some(tag) = &row.tag {
-        left.push(Span::styled(format!(" {tag}  "), bold.fg(Color::Magenta)));
+        left.push(Span::styled(format!(" {tag}  "), bold.fg(theme::MAGENTA)));
     } else {
         left.push(Span::raw(" "));
     }
-    left.push(Span::styled(id, Style::new().fg(Color::Cyan)));
+    left.push(Span::styled(id, Style::new().fg(theme::CYAN)));
+    if let Some(labels) = labels_text {
+        let room = width.saturating_sub(width_of(&left) + width_of(&right) + 3);
+        if room >= 6 {
+            right.insert(0, Span::styled(format!("{}  ", trunc(&labels, room)), dim()));
+        }
+    }
     let right_width = width_of(&right) + 1;
     let mut first = fit(left, width.saturating_sub(right_width));
     let pad = width.saturating_sub(width_of(&first) + width_of(&right));
     first.push(Span::raw(" ".repeat(pad)));
     first.extend(right);
-    let style = if selected { Style::new().bg(Color::Indexed(237)) } else { Style::new() };
+    let style = if selected { Style::new().bg(theme::SELECT) } else { Style::new() };
     let button = details_width() + 1 + copy_width();
     let mut second = fit(summary, width.saturating_sub(button + 1));
     let gap = width.saturating_sub(width_of(&second) + button);
     second.push(Span::raw(" ".repeat(gap)));
-    second.push(Span::styled(COPY_BUTTON, Style::new().fg(Color::Cyan)));
+    second.push(Span::styled(COPY_BUTTON, Style::new().fg(theme::CYAN)));
     second.push(Span::raw(" "));
-    second.push(Span::styled(DETAILS_BUTTON, Style::new().fg(Color::Cyan)));
+    second.push(Span::styled(DETAILS_BUTTON, Style::new().fg(theme::CYAN)));
     let mut lines: Vec<Line<'static>> = title_lines(row, width)
         .into_iter()
         .map(|t| Line::from(vec![marker.clone(), Span::styled(t, bold)]).style(style))
@@ -331,10 +338,10 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     };
     let status_width = status.chars().count() as u16;
     let block = Block::bordered()
-        .border_style(Style::new().fg(if focused { Color::Blue } else { Color::DarkGray }))
+        .border_style(Style::new().fg(if focused { theme::BLUE } else { theme::BORDER }))
         .title(Span::styled(
             format!(" {name} · {} ", rows.len()),
-            Style::new().fg(if focused { Color::Blue } else { Color::White }).add_modifier(Modifier::BOLD),
+            Style::new().fg(if focused { theme::BLUE } else { theme::FG }).add_modifier(Modifier::BOLD),
         ))
         .title(Line::from(Span::styled(status, dim())).right_aligned());
     let inner = block.inner(area);
@@ -348,7 +355,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     }
     let mut top = inner.y;
     if let Some(err) = &app.prs.error {
-        let line = Line::from(Span::styled(trunc(&format!("! {err}"), inner.width as usize), Style::new().fg(Color::Red)));
+        let line = Line::from(Span::styled(trunc(&format!("! {err}"), inner.width as usize), Style::new().fg(theme::RED)));
         f.render_widget(Paragraph::new(line), Rect::new(inner.x, top, inner.width, 1));
         top += 1;
     }
@@ -432,7 +439,7 @@ fn check_line(check: &Check, label_width: usize, inner_width: usize, now: DateTi
     let mut spans = fit(spans, inner_width.saturating_sub(button + 1));
     let gap = inner_width.saturating_sub(width_of(&spans) + button);
     spans.push(Span::raw(" ".repeat(gap)));
-    spans.push(Span::styled(SHEET_STAGE_OPEN, Style::new().fg(Color::Cyan)));
+    spans.push(Span::styled(SHEET_STAGE_OPEN, Style::new().fg(theme::CYAN)));
     Line::from(spans)
 }
 
@@ -447,7 +454,7 @@ pub fn draw_confirm(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let inner = w.saturating_sub(2) as usize;
     let mut lines = vec![
         Line::raw(""),
-        Line::from(Span::styled(format!(" {}", confirm.id), Style::new().fg(Color::Cyan))),
+        Line::from(Span::styled(format!(" {}", confirm.id), Style::new().fg(theme::CYAN))),
     ];
     for t in wrap_text(&confirm.title, inner.saturating_sub(2), 2) {
         lines.push(Line::from(Span::styled(format!(" {t}"), Style::new().add_modifier(Modifier::BOLD))));
@@ -458,13 +465,13 @@ pub fn draw_confirm(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(ORANGE))
         .title(Span::styled(" Mark ready for review? ", Style::new().add_modifier(Modifier::BOLD)));
-    f.render_widget(Clear, rect);
+    theme::clear(f, rect);
     f.render_widget(Paragraph::new(lines).block(block), rect);
     let y = rect.y + rect.height.saturating_sub(2);
     let yes = Rect::new(rect.x + 2, y, CONFIRM_YES.chars().count() as u16, 1);
     let no = Rect::new(yes.x + yes.width + 2, y, CONFIRM_NO.chars().count() as u16, 1);
-    f.render_widget(Paragraph::new(Span::styled(CONFIRM_YES, Style::new().fg(Color::Green).add_modifier(Modifier::BOLD))), yes);
-    f.render_widget(Paragraph::new(Span::styled(CONFIRM_NO, Style::new().fg(Color::Cyan))), no);
+    f.render_widget(Paragraph::new(Span::styled(CONFIRM_YES, Style::new().fg(theme::GREEN).add_modifier(Modifier::BOLD))), yes);
+    f.render_widget(Paragraph::new(Span::styled(CONFIRM_NO, Style::new().fg(theme::CYAN))), no);
     hits.push((rect, Target::Sheet));
     hits.push((yes, Target::ConfirmYes));
     hits.push((no, Target::ConfirmNo));
@@ -529,14 +536,14 @@ pub fn draw_sheet(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let title = if row.title.is_empty() { format!(" {id} ") } else { format!(" {id} · {} ", row.title) };
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(Color::Blue))
+        .border_style(Style::new().fg(theme::BLUE))
         .title(Span::styled(title, Style::new().add_modifier(Modifier::BOLD)))
         .title_bottom(Line::from(vec![
             Span::raw(" "),
-            Span::styled(OPEN_BUTTON, Style::new().fg(Color::Cyan)),
+            Span::styled(OPEN_BUTTON, Style::new().fg(theme::CYAN)),
             Span::styled("  Esc or click outside to close ", dim()),
         ]));
-    f.render_widget(Clear, rect);
+    theme::clear(f, rect);
     f.render_widget(Paragraph::new(lines).block(block).wrap(Wrap { trim: false }), rect);
     hits.push((rect, Target::Sheet));
     hits.extend(stage_hits);

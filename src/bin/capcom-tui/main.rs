@@ -5,6 +5,7 @@ mod prs;
 mod runs;
 mod runs_ui;
 mod settings;
+mod theme;
 mod ui;
 
 use anyhow::{bail, Result};

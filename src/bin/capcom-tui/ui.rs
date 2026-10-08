@@ -1,9 +1,10 @@
+use crate::theme;
 use crate::app::{App, BottomTab, Column, Focus, Geometry, Screen, StorySummary, Target, STATUS_ORDER};
 use crate::{panel, runs_ui};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Paragraph, Wrap};
 use ratatui::Frame;
 use capcom::model::{Board, PrState, Status, StoryStatus, Task};
 use capcom::rules;
@@ -18,6 +19,7 @@ const RUNS_SMALL_WIDTH: u16 = 30;
 const BACK_LABEL: &str = "‹ Stories";
 
 pub fn draw(f: &mut Frame, app: &App) {
+    theme::paint(f);
     let area = f.area();
     let mut hits: Hits = Vec::new();
     let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)])
@@ -147,13 +149,13 @@ fn draw_tabs(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let style = |tab: BottomTab| {
         if app.tab == tab {
             let color = if (tab == BottomTab::Prs && app.focus == Focus::Prs) || (tab == BottomTab::Runs && app.focus == Focus::Runs) {
-                Color::Blue
+                theme::BLUE
             } else {
-                Color::White
+                theme::FG
             };
             Style::new().fg(color).add_modifier(Modifier::BOLD)
         } else {
-            Style::new().fg(Color::DarkGray)
+            Style::new().fg(theme::DIM)
         }
     };
     let prs_width = prs.chars().count() as u16;
@@ -190,9 +192,9 @@ fn label(status: Status) -> &'static str {
 
 fn story_color(status: StoryStatus) -> Color {
     match status {
-        StoryStatus::InProgress => Color::Cyan,
-        StoryStatus::InReview => Color::Magenta,
-        StoryStatus::Done => Color::Green,
+        StoryStatus::InProgress => theme::CYAN,
+        StoryStatus::InReview => theme::MAGENTA,
+        StoryStatus::Done => theme::GREEN,
     }
 }
 
@@ -222,12 +224,12 @@ fn brand(app: &App) -> Vec<Span<'static>> {
         Span::styled("🚀 CAPCOM", Style::new().fg(panel::ORANGE).add_modifier(Modifier::BOLD)),
         Span::styled(
             format!("  T+{:02}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60),
-            Style::new().fg(Color::DarkGray),
+            Style::new().fg(theme::DIM),
         ),
     ];
     if app.prs.loaded && !app.prs.disabled {
         let failing = app.prs.items.iter().any(|p| p.counts().failed > 0);
-        let (text, color) = if failing { ("NO-GO", Color::Red) } else { ("GO", Color::Green) };
+        let (text, color) = if failing { ("NO-GO", theme::RED) } else { ("GO", theme::GREEN) };
         spans.push(Span::raw("  "));
         spans.push(Span::styled(format!("● {text}"), Style::new().fg(color).add_modifier(Modifier::BOLD)));
     }
@@ -237,12 +239,12 @@ fn brand(app: &App) -> Vec<Span<'static>> {
 const NEW_STORY_BUTTON: &str = "[ n + new story ]";
 
 fn draw_list_header(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
-    let dim = Style::new().fg(Color::DarkGray);
+    let dim = Style::new().fg(theme::DIM);
     let mut left = brand(app);
     left.push(Span::styled("  STORIES", Style::new().add_modifier(Modifier::BOLD)));
     left.push(Span::raw("  "));
     let new_x = area.x + Line::from(left.clone()).width() as u16;
-    left.push(Span::styled(NEW_STORY_BUTTON, Style::new().fg(Color::Cyan)));
+    left.push(Span::styled(NEW_STORY_BUTTON, Style::new().fg(theme::CYAN)));
     let new_w = NEW_STORY_BUTTON.chars().count() as u16;
     if new_x + new_w < area.x + area.width {
         hits.push((Rect::new(new_x, area.y, new_w, 1), Target::NewStory));
@@ -257,7 +259,7 @@ fn draw_list_header(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let right = vec![
         Span::styled(counts, dim),
         Span::raw("  "),
-        Span::styled(toggle, Style::new().fg(Color::Cyan)),
+        Span::styled(toggle, Style::new().fg(theme::CYAN)),
     ];
     let toggle_width = toggle.chars().count() as u16;
     if area.width > toggle_width {
@@ -297,7 +299,7 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
             Line::from("No stories to show."),
             Line::from(Span::styled(
                 format!("{hidden} {noun} hidden - press d (or click Show done) to show them."),
-                Style::new().fg(Color::DarkGray),
+                Style::new().fg(theme::DIM),
             )),
         ];
         f.render_widget(Paragraph::new(lines).centered(), area);
@@ -318,11 +320,11 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
 
 fn draw_story_row(f: &mut Frame, area: Rect, story: &StorySummary, selected: bool) {
     let border = if selected {
-        Style::new().fg(Color::White).add_modifier(Modifier::BOLD)
+        Style::new().fg(theme::FG).add_modifier(Modifier::BOLD)
     } else if story.error.is_some() {
-        Style::new().fg(Color::Red)
+        Style::new().fg(theme::RED)
     } else {
-        Style::new().fg(Color::DarkGray)
+        Style::new().fg(theme::DIM)
     };
     let block = Block::bordered()
         .border_type(if selected { BorderType::Thick } else { BorderType::Plain })
@@ -331,11 +333,11 @@ fn draw_story_row(f: &mut Frame, area: Rect, story: &StorySummary, selected: boo
     f.render_widget(block, area);
     let width = inner.width as usize;
     let bold = Style::new().add_modifier(Modifier::BOLD);
-    let dim = Style::new().fg(Color::DarkGray);
+    let dim = Style::new().fg(theme::DIM);
     if let Some(error) = &story.error {
         let lines = vec![
             Line::from(Span::styled(story.key.clone(), bold)),
-            Line::from(Span::styled(trunc(&format!("! {error}"), width), Style::new().fg(Color::Red))),
+            Line::from(Span::styled(trunc(&format!("! {error}"), width), Style::new().fg(theme::RED))),
         ];
         f.render_widget(Paragraph::new(lines), inner);
         return;
@@ -352,8 +354,8 @@ fn draw_story_row(f: &mut Frame, area: Rect, story: &StorySummary, selected: boo
         inner.width,
     );
     let second = Line::from(vec![
-        Span::styled(format!("{}/{} done  ", story.done, story.total), Style::new().fg(Color::Green)),
-        Span::styled(progress_bar(story.done, story.total), Style::new().fg(Color::Green)),
+        Span::styled(format!("{}/{} done  ", story.done, story.total), Style::new().fg(theme::GREEN)),
+        Span::styled(progress_bar(story.done, story.total), Style::new().fg(theme::GREEN)),
         Span::raw("  "),
         Span::styled(trunc(&counts_text(story), width.saturating_sub(24)), dim),
     ]);
@@ -362,11 +364,11 @@ fn draw_story_row(f: &mut Frame, area: Rect, story: &StorySummary, selected: boo
 
 fn draw_board_header(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let bold = Style::new().add_modifier(Modifier::BOLD);
-    let dim = Style::new().fg(Color::DarkGray);
+    let dim = Style::new().fg(theme::DIM);
     let back_width = BACK_LABEL.chars().count() as u16;
     hits.push((Rect::new(area.x, area.y, back_width.min(area.width), 1), Target::Back));
     let mut left = vec![
-        Span::styled(BACK_LABEL, Style::new().fg(Color::Cyan)),
+        Span::styled(BACK_LABEL, Style::new().fg(theme::CYAN)),
         Span::raw("  "),
     ];
     left.extend(brand(app));
@@ -382,7 +384,7 @@ fn draw_board_header(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         left.push(Span::raw("  "));
         left.push(Span::styled(board.story.key.clone(), bold));
         left.push(Span::styled(format!("  {}", board.story.title), dim));
-        left.push(Span::styled(format!("  {done}/{live} done"), Style::new().fg(Color::Green)));
+        left.push(Span::styled(format!("  {done}/{live} done"), Style::new().fg(theme::GREEN)));
         right.push(Span::styled(
             format!("[ {} ]", board.story.status.as_str()),
             Style::new().fg(story_color(board.story.status)),
@@ -396,11 +398,11 @@ fn draw_empty(f: &mut Frame, area: Rect, app: &App) {
         Line::from(format!("No stories found in {}", app.root.display())),
         Line::from(Span::styled(
             "Create one with: capcom init PROJ-123 --title \"...\"",
-            Style::new().fg(Color::DarkGray),
+            Style::new().fg(theme::DIM),
         )),
     ];
     if let Some(err) = &app.error {
-        lines.push(Line::from(Span::styled(err.clone(), Style::new().fg(Color::Red))));
+        lines.push(Line::from(Span::styled(err.clone(), Style::new().fg(theme::RED))));
     }
     f.render_widget(Paragraph::new(lines).centered(), area);
 }
@@ -414,7 +416,7 @@ fn draw_new_story(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let rect = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
     let room = (w as usize).saturating_sub(6);
     let shown: String = text.chars().rev().take(room).collect::<Vec<_>>().into_iter().rev().collect();
-    let dim = Style::new().fg(Color::DarkGray);
+    let dim = Style::new().fg(theme::DIM);
     let mut lines = vec![
         Line::raw(""),
         Line::from(Span::raw(" Paste a Jira key or link, then press Enter:")),
@@ -427,19 +429,19 @@ fn draw_new_story(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     if app.herdr.is_some() {
         lines.push(Line::from(Span::styled(" Starts /story-break-down in a new Herdr workspace.", dim)));
     } else {
-        lines.push(Line::from(Span::styled(" Not running inside Herdr: nothing can be started.", Style::new().fg(Color::Red))));
+        lines.push(Line::from(Span::styled(" Not running inside Herdr: nothing can be started.", Style::new().fg(theme::RED))));
     }
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(panel::ORANGE))
         .title(Span::styled(" New story ", Style::new().add_modifier(Modifier::BOLD)));
-    f.render_widget(Clear, rect);
+    theme::clear(f, rect);
     f.render_widget(Paragraph::new(lines).block(block), rect);
     let y = rect.y + rect.height.saturating_sub(2);
     let start = Rect::new(rect.x + 2, y, START_BUTTON.chars().count() as u16, 1);
     let cancel = Rect::new(start.x + start.width + 2, y, CANCEL_BUTTON.chars().count() as u16, 1);
-    f.render_widget(Paragraph::new(Span::styled(START_BUTTON, Style::new().fg(Color::Green).add_modifier(Modifier::BOLD))), start);
-    f.render_widget(Paragraph::new(Span::styled(CANCEL_BUTTON, Style::new().fg(Color::Cyan))), cancel);
+    f.render_widget(Paragraph::new(Span::styled(START_BUTTON, Style::new().fg(theme::GREEN).add_modifier(Modifier::BOLD))), start);
+    f.render_widget(Paragraph::new(Span::styled(CANCEL_BUTTON, Style::new().fg(theme::CYAN))), cancel);
     hits.push((rect, Target::Sheet));
     hits.push((start, Target::NewStoryStart));
     hits.push((cancel, Target::NewStoryCancel));
@@ -451,10 +453,10 @@ const CANCEL_BUTTON: &str = "[ Esc Cancel ]";
 fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     if let Some(err) = &app.error {
         let text = trunc(&format!("! {err}"), area.width as usize);
-        f.render_widget(Paragraph::new(Span::styled(text, Style::new().fg(Color::Red))), area);
+        f.render_widget(Paragraph::new(Span::styled(text, Style::new().fg(theme::RED))), area);
         return;
     }
-    let dim = Style::new().fg(Color::DarkGray);
+    let dim = Style::new().fg(theme::DIM);
     let keys: &[&str] = match app.screen {
         Screen::List => &["↑↓ story", "⏎ open", "n new story", "d show/hide done", "Tab PRs/runs", "? help", "q quit"],
         Screen::Board => &[
@@ -517,9 +519,9 @@ fn draw_column(
     let accent = if drop {
         panel::ORANGE
     } else if selected {
-        Color::Blue
+        theme::BLUE
     } else {
-        Color::DarkGray
+        theme::DIM
     };
     let title = title.unwrap_or_else(|| format!("{} · {}", label(col.status), col.tasks.len()));
     let inner_height = area.height.saturating_sub(2);
@@ -531,7 +533,7 @@ fn draw_column(
         .border_style(Style::new().fg(accent))
         .title(Span::styled(
             format!(" {title}{more_above}{more_below} "),
-            Style::new().fg(if selected { Color::Blue } else { Color::White }).add_modifier(Modifier::BOLD),
+            Style::new().fg(if selected { theme::BLUE } else { theme::FG }).add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -556,25 +558,25 @@ fn unfinished_deps<'a>(task: &'a Task, board: &Board) -> Vec<&'a str> {
 
 fn status_line(task: &Task, board: &Board) -> (String, Color) {
     if let Some(b) = &task.blocked {
-        return (format!("✖ blocked: {}", b.reason), Color::Red);
+        return (format!("✖ blocked: {}", b.reason), theme::RED);
     }
     let waiting = unfinished_deps(task, board);
     match task.status {
-        Status::Todo if waiting.is_empty() => ("· todo".into(), Color::Gray),
-        Status::Todo => (format!("· todo · after {}", waiting.join(", ")), Color::Gray),
+        Status::Todo if waiting.is_empty() => ("· todo".into(), theme::MUTED),
+        Status::Todo => (format!("· todo · after {}", waiting.join(", ")), theme::MUTED),
         Status::Planning => match &task.agent {
-            Some(a) => (format!("◌ planning · {}", a.pane), Color::Yellow),
-            None => ("◌ planning".into(), Color::Yellow),
+            Some(a) => (format!("◌ planning · {}", a.pane), theme::YELLOW),
+            None => ("◌ planning".into(), theme::YELLOW),
         },
-        Status::Planned if waiting.is_empty() => ("▶ ready to implement".into(), Color::Green),
-        Status::Planned => (format!("◷ waits {}", waiting.join(", ")), Color::Yellow),
-        Status::Implementing if task.prs.is_empty() => ("● implementing".into(), Color::Cyan),
+        Status::Planned if waiting.is_empty() => ("▶ ready to implement".into(), theme::GREEN),
+        Status::Planned => (format!("◷ waits {}", waiting.join(", ")), theme::YELLOW),
+        Status::Implementing if task.prs.is_empty() => ("● implementing".into(), theme::CYAN),
         Status::Implementing => {
             let merged = task.prs.iter().filter(|p| p.state == PrState::Merged).count();
-            (format!("● implementing · PRs {merged}/{}", task.prs.len()), Color::Cyan)
+            (format!("● implementing · PRs {merged}/{}", task.prs.len()), theme::CYAN)
         }
-        Status::Done => ("✓ done".into(), Color::Green),
-        Status::Dropped => ("✕ dropped".into(), Color::DarkGray),
+        Status::Done => ("✓ done".into(), theme::GREEN),
+        Status::Dropped => ("✕ dropped".into(), theme::DIM),
     }
 }
 
@@ -582,15 +584,15 @@ fn draw_card(f: &mut Frame, area: Rect, task: &Task, board: &Board, selected: bo
     let (status, tone) = status_line(task, board);
     let ready_planned = task.status == Status::Planned && rules::is_ready(board, task);
     let border = if selected {
-        Style::new().fg(Color::White).add_modifier(Modifier::BOLD)
+        Style::new().fg(theme::FG).add_modifier(Modifier::BOLD)
     } else if task.blocked.is_some() {
-        Style::new().fg(Color::Red)
+        Style::new().fg(theme::RED)
     } else if task.status == Status::Done {
-        Style::new().fg(Color::Green)
+        Style::new().fg(theme::GREEN)
     } else if ready_planned {
-        Style::new().fg(Color::Yellow)
+        Style::new().fg(theme::YELLOW)
     } else {
-        Style::new().fg(Color::DarkGray)
+        Style::new().fg(theme::DIM)
     };
     let block = Block::bordered()
         .border_type(if selected { BorderType::Thick } else { BorderType::Plain })
@@ -612,7 +614,7 @@ fn draw_card(f: &mut Frame, area: Rect, task: &Task, board: &Board, selected: bo
             Span::raw(trunc(&task.title, width.saturating_sub(task.id.len() + 1))),
         ]),
         Line::from(Span::styled(trunc(&status, width), Style::new().fg(tone))),
-        Line::from(Span::styled(trunc(&meta, width), Style::new().fg(Color::DarkGray))),
+        Line::from(Span::styled(trunc(&meta, width), Style::new().fg(theme::DIM))),
     ];
     f.render_widget(Paragraph::new(lines), inner);
 }
@@ -625,7 +627,7 @@ fn centered(area: Rect, pct_x: u16, pct_y: u16) -> Rect {
 
 fn row(label: &str, value: String) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{label:<12}"), Style::new().fg(Color::DarkGray)),
+        Span::styled(format!("{label:<12}"), Style::new().fg(theme::DIM)),
         Span::raw(value),
     ])
 }
@@ -650,8 +652,8 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     ];
     if let Some(b) = &task.blocked {
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<12}", "Blocked"), Style::new().fg(Color::DarkGray)),
-            Span::styled(b.reason.clone(), Style::new().fg(Color::Red)),
+            Span::styled(format!("{:<12}", "Blocked"), Style::new().fg(theme::DIM)),
+            Span::styled(b.reason.clone(), Style::new().fg(theme::RED)),
         ]));
     }
     lines.push(row("Depends on", or_none(deps)));
@@ -662,7 +664,7 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     }
     lines.push(row("File", task.file.clone()));
     lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled("PRs", Style::new().fg(Color::DarkGray))));
+    lines.push(Line::from(Span::styled("PRs", Style::new().fg(theme::DIM))));
     if task.prs.is_empty() {
         lines.push(Line::raw("  none"));
     }
@@ -671,13 +673,13 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     }
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(Color::Blue))
+        .border_style(Style::new().fg(theme::BLUE))
         .title(Span::styled(
             format!(" {} · {} ", task.id, task.title),
             Style::new().add_modifier(Modifier::BOLD),
         ))
-        .title_bottom(Span::styled(" Esc or click outside to close ", Style::new().fg(Color::DarkGray)));
-    f.render_widget(Clear, rect);
+        .title_bottom(Span::styled(" Esc or click outside to close ", Style::new().fg(theme::DIM)));
+    theme::clear(f, rect);
     f.render_widget(Paragraph::new(lines).block(block).wrap(Wrap { trim: false }), rect);
     hits.push((rect, Target::Sheet));
 }
@@ -709,9 +711,9 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
     ];
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(Color::Blue))
+        .border_style(Style::new().fg(theme::BLUE))
         .title(Span::styled(" Keys ", Style::new().add_modifier(Modifier::BOLD)));
-    f.render_widget(Clear, rect);
+    theme::clear(f, rect);
     f.render_widget(Paragraph::new(lines).block(block), rect);
     hits.push((rect, Target::Sheet));
 }
@@ -1074,7 +1076,6 @@ mod tests {
 
     #[test]
     fn pending_stages_use_a_filled_orange_circle() {
-        use ratatui::style::Color;
         let (_root, app) = with_prs();
         let mut term = Terminal::new(TestBackend::new(170, 44)).unwrap();
         term.draw(|f| draw(f, &app)).unwrap();
@@ -1082,9 +1083,9 @@ mod tests {
         let text = render(&app, 170, 44);
         let (x, y) = find(&text, "● CI / deploy");
         assert_eq!(buf[(x, y)].symbol(), "●");
-        assert_eq!(buf[(x, y)].fg, Color::Indexed(208), "pending is orange");
+        assert_eq!(buf[(x, y)].fg, theme::ORANGE, "pending is orange");
         let (sx, sy) = find(&text, "● 1");
-        assert_eq!(buf[(sx, sy)].fg, Color::Indexed(208), "the summary count matches");
+        assert_eq!(buf[(sx, sy)].fg, theme::ORANGE, "the summary count matches");
         assert!(!text.contains("○"), "no hollow circle is left:\n{text}");
     }
 
@@ -1610,6 +1611,93 @@ mod tests {
         app.on_key(KeyCode::Enter, false);
         assert!(app.current_notice().unwrap().contains("already on the board"));
         assert!(launches_after(&mut app, &fake, 1).is_empty());
+    }
+
+    fn channel(c: u8) -> f64 {
+        let c = f64::from(c) / 255.0;
+        if c <= 0.03928 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    }
+
+    fn luminance(color: Color) -> f64 {
+        let Color::Rgb(r, g, b) = color else { panic!("colour {color:?} is not pinned, so the terminal would choose it") };
+        0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+    }
+
+    fn contrast(a: Color, b: Color) -> f64 {
+        let (x, y) = (luminance(a), luminance(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    /// Every visible character is in pinned colours and readable: 4.5:1 for text, 3:1 for lines.
+    fn assert_readable(app: &App, w: u16, h: u16, what: &str) {
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| draw(f, app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        for y in 0..h {
+            for x in 0..w {
+                let cell = &buf[(x, y)];
+                if x > 0 && buf[(x - 1, y)].symbol().chars().next().is_some_and(|c| c >= '\u{1F000}') {
+                    continue;
+                }
+                let (fg, bg) = (cell.fg, cell.bg);
+                assert!(matches!(bg, Color::Rgb(..)), "{what}: background of ({x},{y}) is {bg:?}");
+                if cell.symbol().trim().is_empty() {
+                    continue;
+                }
+                let line = cell.symbol().chars().all(|c| ('\u{2500}'..='\u{257f}').contains(&c));
+                let need = if line { 3.0 } else { 4.5 };
+                let got = contrast(fg, bg);
+                assert!(got >= need, "{what}: {:?} at ({x},{y}) is {got:.1}:1 ({fg:?} on {bg:?}), needs {need}", cell.symbol());
+            }
+        }
+    }
+
+    #[test]
+    fn the_colours_are_pinned_and_readable_whatever_the_terminal_background_is() {
+        let (_root, mut app) = with_runs();
+        app.focus = Focus::Prs;
+        app.pr_sel = 1;
+        assert_readable(&app, 170, 44, "story list with panels, second PR selected");
+        app.focus = Focus::Runs;
+        assert_readable(&app, 170, 44, "runs focused");
+        app.focus = Focus::Prs;
+        app.pr_sheet = true;
+        assert_readable(&app, 170, 44, "PR sheet");
+        app.pr_sheet = false;
+        app.run_sheet = true;
+        assert_readable(&app, 170, 44, "run sheet");
+        app.run_sheet = false;
+        app.help = true;
+        assert_readable(&app, 170, 44, "help");
+        app.help = false;
+        app.ask_mark_ready(1);
+        assert_readable(&app, 170, 44, "confirm dialog");
+        app.confirm = None;
+        app.open_new_story();
+        app.on_paste("PROJ-9");
+        assert_readable(&app, 170, 44, "new story box");
+        app.new_story = None;
+        assert_readable(&app, 100, 40, "narrow tabs");
+        let (_root, mut board) = sample();
+        assert_readable(&board, 200, 30, "board");
+        board.detail = true;
+        assert_readable(&board, 200, 30, "task detail");
+    }
+
+    #[test]
+    fn many_labels_give_way_so_the_review_state_and_age_stay_visible() {
+        let (_root, mut app) = with_prs();
+        let mut crowded = feed();
+        crowded[1].labels = ["automerge", "backend", "prnoc", "batch", "notices", "autoupdate"].map(String::from).to_vec();
+        app.apply_prs(Ok(crowded));
+        app.split_pct = 30;
+        app.split_pinned = true;
+        let out = render(&app, 170, 44);
+        let line = out.lines().find(|l| l.contains("[DRAFT]") || l.contains("[READY]")).unwrap();
+        assert!(line.contains("ago") || line.contains("review"), "{out}");
+        for l in out.lines().filter(|l| l.contains("[automerge]")) {
+            assert!(l.contains(" ago"), "the age is cut off on: {l}");
+        }
     }
 
     #[test]
