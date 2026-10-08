@@ -1,4 +1,5 @@
 mod app;
+mod herdr;
 mod panel;
 mod prs;
 mod runs;
@@ -10,7 +11,7 @@ use anyhow::{bail, Result};
 use app::App;
 use clap::Parser;
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, KeyModifiers, MouseButton,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyEventKind, KeyModifiers, MouseButton,
     MouseEventKind,
 };
 use ratatui::crossterm::execute;
@@ -38,6 +39,9 @@ struct Cli {
     /// Do not fetch your manual workflow runs from GitHub
     #[arg(long)]
     no_runs: bool,
+    /// Folder new Herdr workspaces and tabs start in (default: the current folder)
+    #[arg(long, env = "CAPCOM_WORKDIR")]
+    workdir: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -53,6 +57,10 @@ fn main() -> Result<()> {
         let (rx, wake) = prs::spawn(source, prs::Cadence::default());
         app.attach_feed(rx, wake);
     }
+    if herdr::inside_herdr() {
+        let cwd = cli.workdir.or_else(|| std::env::current_dir().ok()).unwrap_or_default();
+        app.herdr = Some(Arc::new(herdr::Cli::new(cwd)));
+    }
     app.settings_path = settings::default_path();
     app.load_settings();
     app.extra_repos = cli.deploy_repos;
@@ -65,14 +73,14 @@ fn main() -> Result<()> {
         app.attach_runs(rx, wake, repos);
     }
     let mut terminal = ratatui::init();
-    execute!(std::io::stdout(), EnableMouseCapture)?;
+    execute!(std::io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
     let previous_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(std::io::stdout(), DisableMouseCapture);
+        let _ = execute!(std::io::stdout(), DisableMouseCapture, DisableBracketedPaste);
         previous_hook(info);
     }));
     let result = run(&mut terminal, &mut app);
-    let _ = execute!(std::io::stdout(), DisableMouseCapture);
+    let _ = execute!(std::io::stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     result
 }
@@ -95,6 +103,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                     MouseEventKind::ScrollDown => app.on_scroll(mouse.column, mouse.row, 1),
                     _ => {}
                 },
+                Event::Paste(text) => app.on_paste(&text),
                 _ => {}
             }
         }

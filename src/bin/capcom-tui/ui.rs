@@ -90,6 +90,9 @@ pub fn draw(f: &mut Frame, app: &App) {
     if app.confirm.is_some() {
         panel::draw_confirm(f, area, app, &mut hits);
     }
+    if app.new_story.is_some() {
+        draw_new_story(f, area, app, &mut hits);
+    }
     *app.hits.borrow_mut() = hits;
 }
 
@@ -231,10 +234,19 @@ fn brand(app: &App) -> Vec<Span<'static>> {
     spans
 }
 
+const NEW_STORY_BUTTON: &str = "[ n + new story ]";
+
 fn draw_list_header(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let dim = Style::new().fg(Color::DarkGray);
     let mut left = brand(app);
     left.push(Span::styled("  STORIES", Style::new().add_modifier(Modifier::BOLD)));
+    left.push(Span::raw("  "));
+    let new_x = area.x + Line::from(left.clone()).width() as u16;
+    left.push(Span::styled(NEW_STORY_BUTTON, Style::new().fg(Color::Cyan)));
+    let new_w = NEW_STORY_BUTTON.chars().count() as u16;
+    if new_x + new_w < area.x + area.width {
+        hits.push((Rect::new(new_x, area.y, new_w, 1), Target::NewStory));
+    }
     let shown = app.visible_stories().len();
     let hidden = app.hidden_done_count();
     let mut counts = format!("{shown} shown");
@@ -393,6 +405,49 @@ fn draw_empty(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Paragraph::new(lines).centered(), area);
 }
 
+fn draw_new_story(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
+    let Some(text) = &app.new_story else {
+        return;
+    };
+    let w = (area.width * 60 / 100).max(46).min(area.width);
+    let h = 9.min(area.height);
+    let rect = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
+    let room = (w as usize).saturating_sub(6);
+    let shown: String = text.chars().rev().take(room).collect::<Vec<_>>().into_iter().rev().collect();
+    let dim = Style::new().fg(Color::DarkGray);
+    let mut lines = vec![
+        Line::raw(""),
+        Line::from(Span::raw(" Paste a Jira key or link, then press Enter:")),
+        Line::from(vec![
+            Span::raw(" "),
+            Span::styled(format!("{shown}▌"), Style::new().add_modifier(Modifier::BOLD)),
+        ]),
+        Line::raw(""),
+    ];
+    if app.herdr.is_some() {
+        lines.push(Line::from(Span::styled(" Starts /story-break-down in a new Herdr workspace.", dim)));
+    } else {
+        lines.push(Line::from(Span::styled(" Not running inside Herdr: nothing can be started.", Style::new().fg(Color::Red))));
+    }
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(panel::ORANGE))
+        .title(Span::styled(" New story ", Style::new().add_modifier(Modifier::BOLD)));
+    f.render_widget(Clear, rect);
+    f.render_widget(Paragraph::new(lines).block(block), rect);
+    let y = rect.y + rect.height.saturating_sub(2);
+    let start = Rect::new(rect.x + 2, y, START_BUTTON.chars().count() as u16, 1);
+    let cancel = Rect::new(start.x + start.width + 2, y, CANCEL_BUTTON.chars().count() as u16, 1);
+    f.render_widget(Paragraph::new(Span::styled(START_BUTTON, Style::new().fg(Color::Green).add_modifier(Modifier::BOLD))), start);
+    f.render_widget(Paragraph::new(Span::styled(CANCEL_BUTTON, Style::new().fg(Color::Cyan))), cancel);
+    hits.push((rect, Target::Sheet));
+    hits.push((start, Target::NewStoryStart));
+    hits.push((cancel, Target::NewStoryCancel));
+}
+
+const START_BUTTON: &str = "[ Enter Start ]";
+const CANCEL_BUTTON: &str = "[ Esc Cancel ]";
+
 fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     if let Some(err) = &app.error {
         let text = trunc(&format!("! {err}"), area.width as usize);
@@ -401,10 +456,10 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     }
     let dim = Style::new().fg(Color::DarkGray);
     let keys: &[&str] = match app.screen {
-        Screen::List => &["↑↓ story", "⏎ open", "d show/hide done", "Tab PRs/runs", "? help", "q quit"],
+        Screen::List => &["↑↓ story", "⏎ open", "n new story", "d show/hide done", "Tab PRs/runs", "? help", "q quit"],
         Screen::Board => &[
-            "←→ column", "↑↓ card", "[ ] story", "⏎ detail", "Tab PRs/runs", "Esc stories", "? help",
-            "q quit",
+            "←→ column", "↑↓ card", "[ ] story", "⏎ detail", "p plan", "i implement", "Tab PRs/runs",
+            "Esc stories", "? help", "q quit",
         ],
     };
     let mut left = Vec::new();
@@ -412,7 +467,10 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
         left.push(Span::styled(format!("[ {key} ]"), dim));
         left.push(Span::raw(" "));
     }
-    let right = vec![Span::styled(format!("updated {}", app.updated), dim)];
+    let right = match app.current_notice() {
+        Some(notice) => vec![Span::styled(notice.to_string(), Style::new().fg(panel::ORANGE).add_modifier(Modifier::BOLD))],
+        None => vec![Span::styled(format!("updated {}", app.updated), dim)],
+    };
     f.render_widget(Paragraph::new(padded(left, right, area.width)), area);
 }
 
@@ -429,13 +487,13 @@ fn draw_board(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         let half = area.width / 2;
         hits.push((Rect::new(area.x, area.y, half, 1), Target::PrevColumn));
         hits.push((Rect::new(area.x + half, area.y, area.width - half, 1), Target::NextColumn));
-        draw_column(f, area, &cols[i], i, true, app.row[i], board, Some(title), hits);
+        draw_column(f, area, &cols[i], i, true, false, app.row[i], board, Some(title), hits);
         return;
     }
     let rects = Layout::horizontal((0..cols.len()).map(|i| Constraint::Fill(app.col_weights[i]))).split(area);
     for (i, col) in cols.iter().enumerate() {
         hits.push((rects[i], Target::Column(i)));
-        draw_column(f, rects[i], col, i, i == app.col, app.row[i], board, None, hits);
+        draw_column(f, rects[i], col, i, i == app.col, app.drop_column() == Some(i), app.row[i], board, None, hits);
     }
     for i in 0..cols.len().saturating_sub(1) {
         let strip = Rect::new(rects[i + 1].x.saturating_sub(1), rects[i + 1].y + 1, 2, rects[i + 1].height.saturating_sub(1));
@@ -450,12 +508,19 @@ fn draw_column(
     col: &Column,
     index: usize,
     selected: bool,
+    drop: bool,
     sel_row: usize,
     board: &Board,
     title: Option<String>,
     hits: &mut Hits,
 ) {
-    let accent = if selected { Color::Blue } else { Color::DarkGray };
+    let accent = if drop {
+        panel::ORANGE
+    } else if selected {
+        Color::Blue
+    } else {
+        Color::DarkGray
+    };
     let title = title.unwrap_or_else(|| format!("{} · {}", label(col.status), col.tasks.len()));
     let inner_height = area.height.saturating_sub(2);
     let visible = ((inner_height / CARD_HEIGHT) as usize).max(1);
@@ -626,6 +691,8 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("[ ]", "switch story on the board".into()),
         row("Tab", "focus: board or list, then PRs, then manual runs".into()),
         row("o", "open the selected pull request or run in the browser".into()),
+        row("n", "new story: paste a Jira key or link to start its breakdown in Herdr".into()),
+        row("p / i", "start planning / implementing the selected task in Herdr (or drag the card)".into()),
         row("c", "copy the selected pull request's link".into()),
         row("m", "mark the selected draft ready for review (asks first)".into()),
         row("d", "show or hide completed stories (list)".into()),
@@ -866,6 +933,8 @@ mod tests {
         assert!(!app.detail);
         render(&app, 200, 30);
         app.on_click(x, y);
+        assert!(!app.detail, "a press might be the start of a drag, so the sheet opens on release");
+        app.on_release();
         assert!(app.detail);
         let out = render(&app, 200, 30);
         assert!(out.contains("Depends on"), "{out}");
@@ -1337,6 +1406,188 @@ mod tests {
         let x2 = line[..second].chars().count() as u16;
         app.on_click(x2 + 3, y);
         assert!(wake_rx.try_recv().is_ok());
+    }
+
+    struct FakeHerdr {
+        launches: std::sync::Mutex<Vec<crate::herdr::Launch>>,
+    }
+
+    impl crate::herdr::Herdr for FakeHerdr {
+        fn launch(&self, l: &crate::herdr::Launch) -> Result<crate::herdr::Outcome, String> {
+            self.launches.lock().unwrap().push(l.clone());
+            Ok(crate::herdr::Outcome::Started)
+        }
+    }
+
+    fn with_herdr(app: &mut App) -> std::sync::Arc<FakeHerdr> {
+        let fake = std::sync::Arc::new(FakeHerdr { launches: std::sync::Mutex::new(Vec::new()) });
+        app.herdr = Some(fake.clone());
+        fake
+    }
+
+    fn launches_after(app: &mut App, fake: &FakeHerdr, want: usize) -> Vec<crate::herdr::Launch> {
+        for _ in 0..200 {
+            app.poll_ready();
+            if fake.launches.lock().unwrap().len() >= want {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fake.launches.lock().unwrap().clone()
+    }
+
+    fn drag_card(app: &mut App, card: &str, column: &str) {
+        let out = render(app, 200, 30);
+        let (x, y) = find(&out, card);
+        let (cx, cy) = find(&out, column);
+        app.on_click(x, y);
+        app.on_drag(cx + 4, cy + 1);
+        app.on_drag(cx + 5, cy + 6);
+        app.on_release();
+    }
+
+    #[test]
+    fn dragging_a_todo_card_onto_planning_starts_the_plan_skill_in_the_storys_workspace() {
+        let (_root, mut app) = sample();
+        let fake = with_herdr(&mut app);
+        drag_card(&mut app, "T3 Spike it", "PLANNING");
+        let launches = launches_after(&mut app, &fake, 1);
+        assert_eq!(
+            launches,
+            vec![crate::herdr::Launch {
+                workspace: "PROJ-1".into(),
+                tab: "T3 plan".into(),
+                agent: "proj-1-t3-plan".into(),
+                prompt: "/story-plan-task PROJ-1 T3".into(),
+            }]
+        );
+        assert_eq!(app.selected_task().unwrap().status, Status::Todo, "the skill moves the card, not the drag");
+        assert!(!app.detail);
+    }
+
+    #[test]
+    fn dragging_a_ready_planned_card_onto_implementing_starts_the_implement_skill() {
+        let (_root, mut app) = sample();
+        let fake = with_herdr(&mut app);
+        drag_card(&mut app, "T1 Add endpoint", "IMPLEMENTING");
+        let launches = launches_after(&mut app, &fake, 1);
+        assert_eq!(launches.len(), 1);
+        assert_eq!(launches[0].prompt, "/story-implement-task PROJ-1 T1");
+        assert_eq!((launches[0].tab.as_str(), launches[0].agent.as_str()), ("T1 implement", "proj-1-t1-impl"));
+    }
+
+    #[test]
+    fn a_card_whose_dependencies_are_not_done_is_not_started() {
+        let (_root, mut app) = sample();
+        let fake = with_herdr(&mut app);
+        drag_card(&mut app, "T2 Wire UI", "IMPLEMENTING");
+        assert!(launches_after(&mut app, &fake, 1).is_empty());
+        assert!(app.current_notice().unwrap().contains("waits for T1"), "{:?}", app.current_notice());
+    }
+
+    #[test]
+    fn other_drops_start_nothing_and_say_why() {
+        let (_root, mut app) = sample();
+        let fake = with_herdr(&mut app);
+        drag_card(&mut app, "T3 Spike it", "DONE");
+        assert!(launches_after(&mut app, &fake, 1).is_empty());
+        assert!(app.current_notice().unwrap().contains("drop a TODO card on PLANNING"));
+    }
+
+    #[test]
+    fn dropping_a_card_back_on_its_own_column_starts_nothing_and_a_selected_card_still_opens() {
+        let (_root, mut app) = sample();
+        let fake = with_herdr(&mut app);
+        let out = render(&app, 200, 30);
+        let (x, y) = find(&out, "T3 Spike it");
+        assert_eq!(app.selected_task().unwrap().id, "T3", "already selected");
+        app.on_click(x, y);
+        app.on_drag(x + 1, y);
+        app.on_release();
+        assert!(app.detail, "pressing the selected card and not leaving its column opens the detail");
+        assert!(launches_after(&mut app, &fake, 1).is_empty());
+    }
+
+    #[test]
+    fn p_and_i_start_the_selected_task_and_outside_herdr_nothing_starts() {
+        let (_root, mut app) = sample();
+        let fake = with_herdr(&mut app);
+        app.col = 0;
+        app.row[0] = 0;
+        app.on_key(KeyCode::Char('p'), false);
+        app.col = 2;
+        app.row[2] = 0;
+        app.on_key(KeyCode::Char('i'), false);
+        let prompts: Vec<String> = launches_after(&mut app, &fake, 2).into_iter().map(|l| l.prompt).collect();
+        assert!(prompts.contains(&"/story-plan-task PROJ-1 T3".to_string()), "{prompts:?}");
+        assert!(prompts.contains(&"/story-implement-task PROJ-1 T1".to_string()), "{prompts:?}");
+        let (_root, mut plain) = sample();
+        plain.col = 0;
+        plain.on_key(KeyCode::Char('p'), false);
+        assert!(plain.current_notice().unwrap().contains("not running inside Herdr"));
+    }
+
+    #[test]
+    fn the_drop_column_lights_up_while_a_card_is_held_over_it() {
+        let (_root, mut app) = sample();
+        let out = render(&app, 200, 30);
+        let (x, y) = find(&out, "T3 Spike it");
+        let (cx, cy) = find(&out, "PLANNING");
+        app.on_click(x, y);
+        app.on_drag(cx + 4, cy + 3);
+        assert_eq!(app.drop_column(), Some(1));
+        app.on_drag(x, y);
+        assert_eq!(app.drop_column(), None, "over its own column nothing is a target");
+    }
+
+    #[test]
+    fn pasting_a_jira_link_into_the_new_story_box_starts_the_breakdown() {
+        let (_root, mut app) = two_stories();
+        let fake = with_herdr(&mut app);
+        let out = render(&app, 120, 30);
+        assert!(out.contains("[ n + new story ]"), "{out}");
+        let (x, y) = find(&out, "[ n + new story ]");
+        app.on_click(x + 3, y);
+        assert!(app.new_story.is_some());
+        app.on_paste("https://acme.atlassian.net/browse/NEW-5?focusedId=1\n");
+        let out = render(&app, 120, 30);
+        assert!(out.contains("New story") && out.contains("NEW-5?focusedId=1"), "{out}");
+        let (sx, sy) = find(&out, "[ Enter Start ]");
+        app.on_click(sx + 2, sy);
+        assert!(app.new_story.is_none());
+        let launches = launches_after(&mut app, &fake, 1);
+        assert_eq!(
+            launches,
+            vec![crate::herdr::Launch {
+                workspace: "NEW-5".into(),
+                tab: "break down".into(),
+                agent: "new-5-breakdown".into(),
+                prompt: "/story-break-down NEW-5".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn the_new_story_box_takes_keys_and_rejects_text_without_a_key_or_a_known_story() {
+        let (_root, mut app) = two_stories();
+        let fake = with_herdr(&mut app);
+        app.on_key(KeyCode::Char('n'), false);
+        for c in "hello".chars() {
+            app.on_key(KeyCode::Char(c), false);
+        }
+        app.on_key(KeyCode::Backspace, false);
+        assert_eq!(app.new_story.as_deref(), Some("hell"), "q and other keys are text while the box is open");
+        app.on_key(KeyCode::Enter, false);
+        assert!(app.new_story.is_some(), "the box stays open so the text can be fixed");
+        assert!(app.current_notice().unwrap().contains("no Jira key"));
+        app.on_key(KeyCode::Esc, false);
+        assert!(app.new_story.is_none());
+        app.on_key(KeyCode::Char('n'), false);
+        app.on_paste("PROJ-2");
+        app.on_key(KeyCode::Enter, false);
+        assert!(app.current_notice().unwrap().contains("already on the board"));
+        assert!(launches_after(&mut app, &fake, 1).is_empty());
     }
 
     #[test]

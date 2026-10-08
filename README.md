@@ -98,6 +98,13 @@ The query defaults to `is:pr author:@me state:open archived:false sort:updated-d
 
 **Sizing.** When there are no manual runs (or the panel is switched off), the runs panel shrinks to a narrow strip and the PRs get the room; it grows back as soon as there is a run, an error or a warning to show. Every panel can be resized, by mouse or keys: drag the divider between the PR and runs panels (also when the runs panel has shrunk; a size you choose is then respected even when it is empty), drag the top edge of the bottom area up or down, and on a board drag the border between two kanban columns. With the keys, `<` `>` make the PR panel narrower or wider, `+` `-` make the bottom area taller or shorter, and `,` `.` make the selected kanban column narrower or wider; `=` resets everything to automatic. **The sizes are saved** and restored the next time you start, in `~/.config/capcom/tui.json` (or `$XDG_CONFIG_HOME/capcom/tui.json`; set `CAPCOM_TUI_SETTINGS` to use another file). The file holds only those numbers, lives outside any repo, and a missing or damaged file just means the defaults.
 
+**Herdr.** Started inside a Herdr pane, `capcom-tui` can launch the skills for you (outside Herdr these are off and say so):
+
+- **New story:** press `n` (or click `[ n + new story ]`) on the story list, paste a Jira key or link and press Enter. A Herdr workspace named after the key is created and `/story-break-down KEY` starts in it.
+- **Drag to start:** drag a TODO card onto PLANNING to start `/story-plan-task KEY T2`, or a PLANNED card onto IMPLEMENTING for `/story-implement-task KEY T2` (it must have its dependencies done). `p` and `i` do the same for the selected card. Each runs in a new tab of the story's workspace; the drag itself changes nothing, the skill moves the card as its first step. Dropping on any other column explains why nothing started.
+- **No double starts:** agents are named like `proj-123-t2-plan`; if one is already running it is brought to the front instead.
+- **Where they run:** the current folder of `capcom-tui`, or `--workdir` / `CAPCOM_WORKDIR`. Nothing about Herdr is stored: workspaces are found again by their label.
+
 It needs `CAPCOM_ROOT` or `--root` like the tool. While it runs, the terminal's own text selection is replaced by mouse clicks (hold Shift to select text in most terminals).
 
 ## Requirements

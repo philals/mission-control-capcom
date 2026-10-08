@@ -1,3 +1,4 @@
+use crate::herdr::{self, Herdr, Launch, Outcome};
 use crate::prs::{PrMsg, PullRequest};
 use crate::runs::{valid_repo, Batch, Run, RunMsg};
 use crate::settings::{self, Settings, COLUMNS, DEFAULT_COLUMN_WEIGHT, DEFAULT_SPLIT, MIN_COLUMN_WEIGHT};
@@ -11,6 +12,7 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use capcom::model::{Board, PrState, Status, StoryStatus, Task};
+use capcom::rules;
 use capcom::store;
 
 const MAIN_COLUMNS: [Status; 5] = [
@@ -99,6 +101,9 @@ pub enum Target {
     OpenStage(usize),
     OpenSelectedRun,
     Tab(BottomTab),
+    NewStory,
+    NewStoryStart,
+    NewStoryCancel,
     SplitHandle,
     HeightHandle,
     /// The border between kanban column `i` and `i + 1`; carries the span of both columns.
@@ -253,6 +258,16 @@ fn open_in_browser(url: &str) {
     }
 }
 
+/// A kanban card being pressed: dropping it on another column may start an agent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CardDrag {
+    pub col: usize,
+    pub row: usize,
+    /// The press was on the already selected card, so a plain click opens its detail on release.
+    pub open: bool,
+    pub over: Option<usize>,
+}
+
 /// A pull request waiting for "mark ready for review" to be confirmed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Confirm {
@@ -261,7 +276,7 @@ pub struct Confirm {
     pub title: String,
 }
 
-const NOTICE_SECONDS: u64 = 5;
+const NOTICE_SECONDS: u64 = 8;
 
 pub type Readier = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
@@ -367,6 +382,11 @@ pub struct App {
     pub copier: Box<dyn Fn(&str)>,
     pub readier: Readier,
     pub confirm: Option<Confirm>,
+    pub herdr: Option<Arc<dyn Herdr>>,
+    /// The text typed or pasted into the "new story" box, while it is open.
+    pub new_story: Option<String>,
+    pub card_drag: Option<CardDrag>,
+    launch_done: (Sender<String>, Receiver<String>),
     pub started: std::time::Instant,
     notice: Option<(String, std::time::Instant)>,
     ready_done: (Sender<Result<String, String>>, Receiver<Result<String, String>>),
@@ -418,6 +438,10 @@ impl App {
             copier: Box::new(copy_to_clipboard),
             readier: Arc::new(gh_mark_ready),
             confirm: None,
+            herdr: None,
+            new_story: None,
+            card_drag: None,
+            launch_done: std::sync::mpsc::channel(),
             started: std::time::Instant::now(),
             notice: None,
             ready_done: std::sync::mpsc::channel(),
@@ -831,6 +855,16 @@ impl App {
     }
 
     pub fn on_drag(&mut self, x: u16, y: u16) {
+        if self.card_drag.is_some() {
+            let over = match self.hit(x, y) {
+                Some(Target::Column(c) | Target::Card { col: c, .. }) => Some(c),
+                _ => None,
+            };
+            if let Some(drag) = &mut self.card_drag {
+                drag.over = over;
+            }
+            return;
+        }
         let g = self.geometry.get();
         match self.drag {
             Some(Drag::Split) if g.bottom_w > 0 => {
@@ -856,6 +890,21 @@ impl App {
     }
 
     pub fn on_release(&mut self) {
+        if let Some(drag) = self.card_drag.take() {
+            match drag.over {
+                Some(to) if to != drag.col => {
+                    let cols = self.columns();
+                    let id = cols.get(drag.col).and_then(|c| c.tasks.get(drag.row)).map(|t| t.id.clone());
+                    let status = cols.get(to).map(|c| c.status);
+                    if let (Some(id), Some(status)) = (id, status) {
+                        self.start_work(&id, status);
+                    }
+                }
+                _ if drag.open => self.detail = true,
+                _ => {}
+            }
+            return;
+        }
         if self.drag.take().is_some() {
             self.save_settings();
         }
@@ -1026,7 +1075,116 @@ impl App {
         });
     }
 
+    /// Start an agent in Herdr in the background and report how it went.
+    pub fn run_launch(&mut self, launch: Launch) {
+        let Some(herdr) = self.herdr.clone() else {
+            self.set_notice("not running inside Herdr, so no agent can be started".into());
+            return;
+        };
+        self.set_notice(format!("starting {}…", launch.agent));
+        let done = self.launch_done.0.clone();
+        std::thread::spawn(move || {
+            let text = match herdr.launch(&launch) {
+                Ok(Outcome::Started) => format!("started {} in Herdr workspace {}", launch.agent, launch.workspace),
+                Ok(Outcome::Focused) => format!("{} is already running: brought to the front", launch.agent),
+                Err(e) => format!("could not start {}: {e}", launch.agent),
+            };
+            let _ = done.send(text);
+        });
+    }
+
+    /// Start the skill that moves a task into `to`: planning from todo, implementing from planned.
+    pub fn start_work(&mut self, task_id: &str, to: Status) {
+        let Some(key) = self.keys.get(self.story).cloned() else {
+            return;
+        };
+        let Some(board) = &self.board else {
+            return;
+        };
+        let Some(task) = board.task(task_id) else {
+            return;
+        };
+        let (skill, tab, phase) = match (task.status, to) {
+            (Status::Todo, Status::Planning) => ("story-plan-task", "plan", "plan"),
+            (Status::Planned, Status::Implementing) => {
+                if !rules::is_ready(board, task) {
+                    let waiting = task
+                        .depends_on
+                        .iter()
+                        .filter(|d| board.task(d).map_or(true, |t| t.status != Status::Done))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.set_notice(format!("{task_id} waits for {waiting} to be done"));
+                    return;
+                }
+                ("story-implement-task", "implement", "impl")
+            }
+            (from, to) if from == to => return,
+            _ => {
+                self.set_notice("drop a TODO card on PLANNING to plan it, or a PLANNED card on IMPLEMENTING".into());
+                return;
+            }
+        };
+        let launch = Launch {
+            workspace: key.clone(),
+            tab: format!("{task_id} {tab}"),
+            agent: herdr::agent_name(&[&key, task_id, phase]),
+            prompt: format!("/{skill} {key} {task_id}"),
+        };
+        self.run_launch(launch);
+    }
+
+    pub fn start_selected(&mut self, to: Status) {
+        if let Some(id) = self.selected_task().map(|t| t.id.clone()) {
+            self.start_work(&id, to);
+        }
+    }
+
+    pub fn open_new_story(&mut self) {
+        self.new_story = Some(String::new());
+    }
+
+    pub fn on_paste(&mut self, text: &str) {
+        if let Some(buffer) = &mut self.new_story {
+            buffer.push_str(&text.replace(['\r', '\n'], " "));
+        }
+    }
+
+    pub fn submit_new_story(&mut self) {
+        let Some(text) = self.new_story.clone() else {
+            return;
+        };
+        let Some(key) = herdr::find_key(&text) else {
+            self.set_notice("no Jira key found in that text".into());
+            return;
+        };
+        self.new_story = None;
+        if self.keys.contains(&key) {
+            self.set_notice(format!("{key} is already on the board"));
+            return;
+        }
+        self.run_launch(Launch {
+            workspace: key.clone(),
+            tab: "break down".into(),
+            agent: herdr::agent_name(&[&key, "breakdown"]),
+            prompt: format!("/story-break-down {key}"),
+        });
+    }
+
+    /// The column a pressed card is currently held over, for highlighting the drop target.
+    pub fn drop_column(&self) -> Option<usize> {
+        self.card_drag.as_ref().and_then(|d| d.over).filter(|c| Some(*c) != self.card_drag.as_ref().map(|d| d.col))
+    }
+
     pub fn poll_ready(&mut self) {
+        let mut texts = Vec::new();
+        while let Ok(text) = self.launch_done.1.try_recv() {
+            texts.push(text);
+        }
+        if let Some(last) = texts.pop() {
+            self.set_notice(last);
+        }
         while let Ok(result) = self.ready_done.1.try_recv() {
             match result {
                 Ok(id) => self.set_notice(format!("{id} is ready for review")),
@@ -1114,6 +1272,24 @@ impl App {
     pub fn on_key(&mut self, code: KeyCode, ctrl: bool) -> bool {
         if ctrl {
             return code == KeyCode::Char('c');
+        }
+        if self.new_story.is_some() {
+            match code {
+                KeyCode::Enter => self.submit_new_story(),
+                KeyCode::Esc => self.new_story = None,
+                KeyCode::Backspace => {
+                    if let Some(b) = &mut self.new_story {
+                        b.pop();
+                    }
+                }
+                KeyCode::Char(c) => {
+                    if let Some(b) = &mut self.new_story {
+                        b.push(c);
+                    }
+                }
+                _ => {}
+            }
+            return false;
         }
         if self.confirm.is_some() {
             match code {
@@ -1237,6 +1413,7 @@ impl App {
                 self.open_selected()
             }
             KeyCode::Char('d') => self.toggle_hide_done(),
+            KeyCode::Char('n') => self.open_new_story(),
             KeyCode::Char('r') => self.reload_now(),
             _ => {}
         }
@@ -1253,6 +1430,8 @@ impl App {
             KeyCode::Char('[') => self.switch_story(-1),
             KeyCode::Char(']') => self.switch_story(1),
             KeyCode::Enter | KeyCode::Char(' ') => self.detail = !self.detail,
+            KeyCode::Char('p') => self.start_selected(Status::Planning),
+            KeyCode::Char('i') => self.start_selected(Status::Implementing),
             KeyCode::Char('r') => self.reload_now(),
             _ => {}
         }
@@ -1270,6 +1449,15 @@ impl App {
 
     pub fn on_click(&mut self, x: u16, y: u16) {
         let target = self.hit(x, y);
+        if self.new_story.is_some() {
+            match target {
+                Some(Target::NewStoryStart) => self.submit_new_story(),
+                Some(Target::NewStoryCancel) => self.new_story = None,
+                Some(Target::Sheet) => {}
+                _ => self.new_story = None,
+            }
+            return;
+        }
         if self.confirm.is_some() {
             match target {
                 Some(Target::ConfirmYes) => self.confirm_ready(),
@@ -1379,13 +1567,12 @@ impl App {
             Some(Target::Back) => self.back(),
             Some(Target::Column(c)) => self.col = c,
             Some(Target::Card { col, row }) => {
-                if self.col == col && self.row[col] == row {
-                    self.detail = true;
-                } else {
-                    self.col = col;
-                    self.row[col] = row;
-                }
+                let open = self.col == col && self.row[col] == row;
+                self.col = col;
+                self.row[col] = row;
+                self.card_drag = Some(CardDrag { col, row, open, over: None });
             }
+            Some(Target::NewStory) => self.open_new_story(),
             Some(Target::PrevColumn) => self.move_col(-1),
             Some(Target::NextColumn) => self.move_col(1),
             _ => {}

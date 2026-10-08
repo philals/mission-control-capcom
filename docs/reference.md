@@ -65,7 +65,7 @@ Schema: `../schemas/board.schema.json`.
 
 ## capcom-tui
 
-    capcom-tui [KEY] [--root DIR] [--pr-query QUERY] [--no-prs] [--deploy-repos REPOS] [--no-runs]
+    capcom-tui [KEY] [--root DIR] [--pr-query QUERY] [--no-prs] [--deploy-repos REPOS] [--no-runs] [--workdir DIR]
 
 A live kanban view with a story list (completed stories hidden by default, `d` or the header
 button toggles them), a board per story, and a pull requests panel. Keyboard and mouse. With `KEY`
@@ -90,3 +90,11 @@ active or failed runs and cached once finished. A finished run is dropped 3 hour
 Panel sizes (PR/runs split, bottom height, kanban column widths) are saved when you change them, in
 `$CAPCOM_TUI_SETTINGS`, else `$XDG_CONFIG_HOME/capcom/tui.json`, else
 `~/.config/capcom/tui.json`. Values are clamped on load; a missing or damaged file means defaults.
+
+### Herdr launches
+
+Only when `HERDR_ENV=1` (the TUI is running in a Herdr pane). `--workdir` / `CAPCOM_WORKDIR` (default: the current
+folder) is where new workspaces and tabs start. A launch looks for a workspace labelled with the story key (creating it,
+`--no-focus`, if missing), puts the agent in a new tab of it (the root tab of a new workspace), then runs
+`herdr agent start NAME --kind claude --pane P` and `herdr agent prompt NAME "/skill KEY [ID]"`. A live agent with the
+same name is focused instead. Names: `<key>-<id>-plan`, `<key>-<id>-impl`, `<key>-breakdown`, lowercased, at most 32 characters.

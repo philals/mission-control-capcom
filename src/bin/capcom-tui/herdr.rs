@@ -1,0 +1,273 @@
+//! Starts agents in Herdr: one workspace per story, one tab per piece of work.
+use serde_json::Value;
+use std::path::PathBuf;
+use std::process::Command;
+use std::time::Duration;
+
+/// One agent to start: where it lives and what it is told.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Launch {
+    pub workspace: String,
+    pub tab: String,
+    pub agent: String,
+    pub prompt: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    Started,
+    /// An agent with that name was already running, so it was brought to the front instead.
+    Focused,
+}
+
+pub trait Herdr: Send + Sync {
+    fn launch(&self, launch: &Launch) -> Result<Outcome, String>;
+}
+
+/// Herdr names agents `[a-z][a-z0-9_-]{0,31}`.
+pub fn agent_name(parts: &[&str]) -> String {
+    let joined = parts.join("-").to_lowercase();
+    let mut name: String = joined
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect();
+    if !name.starts_with(|c: char| c.is_ascii_lowercase()) {
+        name.insert(0, 'a');
+    }
+    name.truncate(32);
+    name
+}
+
+/// The first Jira-style key (`PROJ-123`) in pasted text, such as a plain key or a browse URL.
+pub fn find_key(text: &str) -> Option<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_ascii_alphabetic() && (i == 0 || !chars[i - 1].is_ascii_alphanumeric()) {
+            let mut j = i;
+            while j < chars.len() && chars[j].is_ascii_alphanumeric() {
+                j += 1;
+            }
+            if j - i >= 2 && j + 1 < chars.len() && chars[j] == '-' && chars[j + 1].is_ascii_digit() {
+                let mut k = j + 1;
+                while k < chars.len() && chars[k].is_ascii_digit() {
+                    k += 1;
+                }
+                if !chars.get(k).is_some_and(|c| c.is_ascii_alphabetic()) {
+                    let word: String = chars[i..j].iter().collect();
+                    let digits: String = chars[j + 1..k].iter().collect();
+                    return Some(format!("{}-{digits}", word.to_uppercase()));
+                }
+            }
+            i = j.max(i + 1);
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+pub type Runner = Box<dyn Fn(&[String]) -> Result<Value, String> + Send + Sync>;
+
+pub struct Cli {
+    run: Runner,
+    cwd: PathBuf,
+}
+
+impl Cli {
+    pub fn new(cwd: PathBuf) -> Cli {
+        Cli { run: Box::new(herdr_json), cwd }
+    }
+
+    #[cfg(test)]
+    pub fn with_runner(cwd: PathBuf, run: Runner) -> Cli {
+        Cli { run, cwd }
+    }
+
+    fn call(&self, args: &[&str]) -> Result<Value, String> {
+        let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+        (self.run)(&args)
+    }
+
+    fn find_workspace(&self, label: &str) -> Result<Option<String>, String> {
+        let list = self.call(&["workspace", "list"])?;
+        Ok(list["result"]["workspaces"]
+            .as_array()
+            .and_then(|all| all.iter().find(|w| w["label"] == label))
+            .and_then(|w| w["workspace_id"].as_str())
+            .map(str::to_string))
+    }
+
+    fn agent_running(&self, name: &str) -> Result<bool, String> {
+        let list = self.call(&["agent", "list"])?;
+        Ok(list["result"]["agents"].as_array().is_some_and(|all| all.iter().any(|a| a["name"] == name)))
+    }
+
+    /// The pane to start the agent in: the root pane of a new workspace, or of a new tab in the
+    /// story's workspace.
+    fn new_pane(&self, l: &Launch) -> Result<String, String> {
+        let cwd = self.cwd.to_string_lossy().to_string();
+        let pane = |v: &Value| v["result"]["root_pane"]["pane_id"].as_str().map(str::to_string);
+        match self.find_workspace(&l.workspace)? {
+            Some(id) => {
+                let made = self.call(&["tab", "create", "--workspace", &id, "--label", &l.tab, "--cwd", &cwd, "--no-focus"])?;
+                pane(&made).ok_or_else(|| "herdr did not return the new tab's pane".to_string())
+            }
+            None => {
+                let made = self.call(&["workspace", "create", "--label", &l.workspace, "--cwd", &cwd, "--no-focus"])?;
+                if let Some(tab) = made["result"]["tab"]["tab_id"].as_str() {
+                    let _ = self.call(&["tab", "rename", tab, &l.tab]);
+                }
+                pane(&made).ok_or_else(|| "herdr did not return the new workspace's pane".to_string())
+            }
+        }
+    }
+}
+
+impl Herdr for Cli {
+    fn launch(&self, l: &Launch) -> Result<Outcome, String> {
+        if self.agent_running(&l.agent)? {
+            self.call(&["agent", "focus", &l.agent])?;
+            return Ok(Outcome::Focused);
+        }
+        let pane = self.new_pane(l)?;
+        self.call(&["agent", "start", &l.agent, "--kind", "claude", "--pane", &pane])?;
+        self.call(&["agent", "prompt", &l.agent, &l.prompt])?;
+        Ok(Outcome::Started)
+    }
+}
+
+fn herdr_json(args: &[String]) -> Result<Value, String> {
+    let mut cmd = Command::new("herdr");
+    cmd.args(args);
+    let out = run_herdr(cmd)?;
+    serde_json::from_str(&out).map_err(|e| format!("herdr gave unreadable output: {e}"))
+}
+
+fn run_herdr(cmd: Command) -> Result<String, String> {
+    match capcom::refresh::run_with_timeout(cmd, Duration::from_secs(60)) {
+        Ok(Some(out)) if out.status.success() => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
+        Ok(Some(out)) => {
+            let text = String::from_utf8_lossy(&out.stderr).to_string();
+            let message = serde_json::from_str::<Value>(&text)
+                .ok()
+                .and_then(|v| v["error"]["message"].as_str().map(str::to_string))
+                .unwrap_or_else(|| text.lines().next().unwrap_or("herdr failed").to_string());
+            Err(message)
+        }
+        Ok(None) => Err("herdr timed out".into()),
+        Err(e) => Err(format!("could not run herdr: {e}")),
+    }
+}
+
+/// Herdr sets this in every pane it manages.
+pub fn inside_herdr() -> bool {
+    std::env::var("HERDR_ENV").is_ok_and(|v| v == "1")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn keys_are_found_in_plain_text_and_in_urls() {
+        assert_eq!(find_key("PROJ-123").as_deref(), Some("PROJ-123"));
+        assert_eq!(find_key("  proj-7 \n").as_deref(), Some("PROJ-7"));
+        assert_eq!(find_key("https://acme.atlassian.net/browse/ABC2-45?focusedId=9").as_deref(), Some("ABC2-45"));
+        assert_eq!(find_key("see https://x.example/jira/DEMO-482#c").as_deref(), Some("DEMO-482"));
+        assert_eq!(find_key("no key here, 2026-10-09"), None);
+        assert_eq!(find_key("A-1"), None, "a key needs at least two letters");
+        assert_eq!(find_key("PROJ-12abc"), None);
+    }
+
+    #[test]
+    fn agent_names_follow_herdrs_rules() {
+        assert_eq!(agent_name(&["PROJ-123", "T2", "plan"]), "proj-123-t2-plan");
+        assert_eq!(agent_name(&["9x"]), "a9x");
+        let long = agent_name(&["A".repeat(40).as_str(), "t1"]);
+        assert_eq!(long.len(), 32);
+        assert!(long.starts_with(|c: char| c.is_ascii_lowercase()));
+        assert_eq!(agent_name(&["we ird.key", "T1"]), "we-ird-key-t1");
+    }
+
+    type Calls = Arc<Mutex<Vec<String>>>;
+
+    fn cli(workspaces: Value, agents: Value) -> (Cli, Calls) {
+        let calls: Calls = Arc::new(Mutex::new(Vec::new()));
+        let log = calls.clone();
+        let run: Runner = Box::new(move |args| {
+            log.lock().unwrap().push(args.join(" "));
+            let a: Vec<&str> = args.iter().map(String::as_str).collect();
+            Ok(match a.as_slice() {
+                ["workspace", "list"] => json!({"result": {"workspaces": workspaces}}),
+                ["agent", "list"] => json!({"result": {"agents": agents}}),
+                ["workspace", "create", ..] => json!({"result": {
+                    "workspace": {"workspace_id": "w9"}, "tab": {"tab_id": "w9:t1"}, "root_pane": {"pane_id": "w9:p1"}}}),
+                ["tab", "create", ..] => json!({"result": {"tab": {"tab_id": "w3:t2"}, "root_pane": {"pane_id": "w3:p2"}}}),
+                _ => json!({"result": {}}),
+            })
+        });
+        (Cli::with_runner(PathBuf::from("/work"), run), calls)
+    }
+
+    fn launch() -> Launch {
+        Launch {
+            workspace: "PROJ-123".into(),
+            tab: "T2 plan".into(),
+            agent: "proj-123-t2-plan".into(),
+            prompt: "/story-plan-task PROJ-123 T2".into(),
+        }
+    }
+
+    #[test]
+    fn a_story_without_a_workspace_gets_one_and_its_first_pane_runs_the_agent() {
+        let (cli, calls) = cli(json!([{"label": "other", "workspace_id": "w1"}]), json!([]));
+        assert_eq!(cli.launch(&launch()), Ok(Outcome::Started));
+        let calls = calls.lock().unwrap();
+        assert!(calls.contains(&"workspace create --label PROJ-123 --cwd /work --no-focus".to_string()), "{calls:?}");
+        assert!(calls.contains(&"tab rename w9:t1 T2 plan".to_string()), "{calls:?}");
+        assert!(calls.contains(&"agent start proj-123-t2-plan --kind claude --pane w9:p1".to_string()), "{calls:?}");
+        assert_eq!(calls.last().unwrap(), "agent prompt proj-123-t2-plan /story-plan-task PROJ-123 T2");
+    }
+
+    #[test]
+    fn a_story_with_a_workspace_gets_a_new_tab_in_it() {
+        let (cli, calls) = cli(json!([{"label": "PROJ-123", "workspace_id": "w3"}]), json!([]));
+        assert_eq!(cli.launch(&launch()), Ok(Outcome::Started));
+        let calls = calls.lock().unwrap();
+        assert!(
+            calls.contains(&"tab create --workspace w3 --label T2 plan --cwd /work --no-focus".to_string()),
+            "{calls:?}"
+        );
+        assert!(calls.contains(&"agent start proj-123-t2-plan --kind claude --pane w3:p2".to_string()));
+        assert!(!calls.iter().any(|c| c.starts_with("workspace create")));
+    }
+
+    #[test]
+    fn a_running_agent_is_focused_not_started_twice() {
+        let (cli, calls) = cli(json!([]), json!([{"name": "proj-123-t2-plan", "pane_id": "w3:p2"}]));
+        assert_eq!(cli.launch(&launch()), Ok(Outcome::Focused));
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.last().unwrap(), "agent focus proj-123-t2-plan");
+        assert!(!calls.iter().any(|c| c.starts_with("agent start") || c.starts_with("agent prompt")));
+    }
+
+    #[test]
+    fn a_herdr_error_stops_the_launch_and_is_reported() {
+        let run: Runner = Box::new(|args| {
+            if args[0] == "agent" && args[1] == "start" {
+                Err("agent_not_ready".into())
+            } else if args[0] == "agent" {
+                Ok(json!({"result": {"agents": []}}))
+            } else if args[0] == "workspace" && args[1] == "list" {
+                Ok(json!({"result": {"workspaces": []}}))
+            } else {
+                Ok(json!({"result": {"root_pane": {"pane_id": "w9:p1"}, "tab": {"tab_id": "w9:t1"}}}))
+            }
+        });
+        let cli = Cli::with_runner(PathBuf::from("/work"), run);
+        assert_eq!(cli.launch(&launch()), Err("agent_not_ready".to_string()));
+    }
+}
