@@ -99,3 +99,6 @@ folder) is where new workspaces and tabs start. A launch looks for a workspace l
 `--no-focus`, if missing), puts the agent in a new tab of it (the root tab of a new workspace), then runs
 `herdr agent start NAME --kind claude --pane P` and `herdr agent prompt NAME "/skill KEY [ID]"`. A live agent with the
 same name is focused instead. Names: `<key>-<id>-plan`, `<key>-<id>-impl`, `<key>-breakdown`, lowercased, at most 32 characters.
+
+A TODO task sent to IMPLEMENTING first asks "Does an agent need to implement this?". Yes launches as above. No moves the
+task with the same rules as `capcom status <KEY> <ID> implementing` and starts nothing, for work you do yourself.
