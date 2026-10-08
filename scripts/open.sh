@@ -45,5 +45,6 @@ if [ -n "$config_dir" ] && [ -f "$config_dir/env" ]; then
   done < "$config_dir/env"
 fi
 
+# Overlays always open over the active pane, so no workspace or target pane is given.
 exec "$herdr_bin" plugin pane open --plugin capcom --entrypoint tui --placement overlay \
-  --workspace "$workspace_id" --focus "${env_args[@]}"
+  --focus "${env_args[@]}"
