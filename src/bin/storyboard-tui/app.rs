@@ -1,4 +1,5 @@
 use crate::prs::{PrMsg, PullRequest};
+use crate::runs::{valid_repo, Batch, Run, RunMsg};
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
 use std::cell::RefCell;
@@ -7,6 +8,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use storyboard::model::{Board, PrState, Status, StoryStatus, Task};
 use storyboard::store;
 
@@ -37,6 +39,14 @@ pub enum Screen {
 pub enum Focus {
     Main,
     Prs,
+    Runs,
+}
+
+/// Which bottom panel shows when the terminal is too narrow for both side by side.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BottomTab {
+    Prs,
+    Runs,
 }
 
 /// What a mouse click on a rectangle does. Rectangles are recorded while drawing.
@@ -52,6 +62,12 @@ pub enum Target {
     Pr(usize),
     PrPanel,
     OpenPr,
+    Run(usize),
+    RunPanel,
+    OpenRun(usize),
+    OpenJob(usize, usize),
+    OpenSelectedRun,
+    Tab(BottomTab),
     Sheet,
 }
 
@@ -145,6 +161,17 @@ pub struct PrData {
     pub disabled: bool,
 }
 
+#[derive(Default)]
+pub struct RunData {
+    pub items: Vec<Run>,
+    pub warnings: Vec<String>,
+    pub error: Option<String>,
+    pub updated: Option<String>,
+    pub loaded: bool,
+    pub loading: bool,
+    pub disabled: bool,
+}
+
 /// One line of the pull request panel: a live GitHub PR, or a PR known only from the board.
 pub struct PrRow<'a> {
     pub live: Option<&'a PullRequest>,
@@ -207,8 +234,15 @@ pub struct App {
     pub pr_sel: usize,
     pub pr_sheet: bool,
     pub prs: PrData,
+    pub runs: RunData,
+    pub run_sel: usize,
+    pub run_sheet: bool,
+    pub tab: BottomTab,
+    pub extra_repos: Vec<String>,
     pub opener: Box<dyn Fn(&str)>,
     feed: Option<(Receiver<PrMsg>, Sender<()>)>,
+    run_feed: Option<(Receiver<RunMsg>, Sender<()>)>,
+    run_repos: Option<Arc<Mutex<Vec<String>>>>,
     sig: Signature,
 }
 
@@ -238,8 +272,15 @@ impl App {
             pr_sel: 0,
             pr_sheet: false,
             prs: PrData::default(),
+            runs: RunData::default(),
+            run_sel: 0,
+            run_sheet: false,
+            tab: BottomTab::Prs,
+            extra_repos: Vec::new(),
             opener: Box::new(open_in_browser),
             feed: None,
+            run_feed: None,
+            run_repos: None,
         };
         app.load_current();
         app.focus_first_column();
@@ -298,6 +339,7 @@ impl App {
             self.select_task(&id);
         }
         self.clamp();
+        self.sync_run_repos();
     }
 
     pub fn visible_stories(&self) -> Vec<&StorySummary> {
@@ -394,6 +436,12 @@ impl App {
             self.row[i] = self.row[i].min(len.saturating_sub(1));
         }
         self.pr_clamp();
+        self.run_clamp();
+    }
+
+    fn run_clamp(&mut self) {
+        let len = self.visible_runs().len();
+        self.run_sel = self.run_sel.min(len.saturating_sub(1));
     }
 
     fn pr_clamp(&mut self) {
@@ -424,6 +472,9 @@ impl App {
         if let Some((_, wake)) = &self.feed {
             let _ = wake.send(());
         }
+        if let Some((_, wake)) = &self.run_feed {
+            let _ = wake.send(());
+        }
     }
 
     pub fn apply_started(&mut self) {
@@ -442,6 +493,144 @@ impl App {
             Err(e) => self.prs.error = Some(e),
         }
         self.pr_clamp();
+        self.sync_run_repos();
+    }
+
+    pub fn attach_runs(&mut self, rx: Receiver<RunMsg>, wake: Sender<()>, repos: Arc<Mutex<Vec<String>>>) {
+        self.run_feed = Some((rx, wake));
+        self.run_repos = Some(repos);
+        self.sync_run_repos();
+    }
+
+    pub fn poll_runs(&mut self) {
+        let mut messages = Vec::new();
+        if let Some((rx, _)) = &self.run_feed {
+            while let Ok(msg) = rx.try_recv() {
+                messages.push(msg);
+            }
+        }
+        for msg in messages {
+            match msg {
+                RunMsg::Started => self.apply_run_started(),
+                RunMsg::Result(result) => self.apply_runs(result),
+            }
+        }
+    }
+
+    pub fn apply_run_started(&mut self) {
+        self.runs.loading = true;
+    }
+
+    pub fn apply_runs(&mut self, result: Result<Batch, String>) {
+        self.runs.loading = false;
+        self.runs.loaded = true;
+        match result {
+            Ok(batch) => {
+                self.runs.items = batch.runs;
+                self.runs.warnings = batch.warnings;
+                self.runs.error = None;
+                self.runs.updated = Some(now());
+            }
+            Err(e) => self.runs.error = Some(e),
+        }
+        self.run_clamp();
+    }
+
+    /// Repos to look for manual runs in: your open PRs, the PRs recorded on stories, and the extra list.
+    pub fn deploy_repos(&self) -> Vec<String> {
+        let mut repos: Vec<String> = self.prs.items.iter().map(|p| p.repo.clone()).collect();
+        for story in &self.stories {
+            repos.extend(story.prs.iter().filter_map(|(url, _)| url_parts(url).map(|(repo, _)| repo)));
+        }
+        repos.extend(self.extra_repos.iter().cloned());
+        repos.retain(|r| valid_repo(r));
+        repos.sort();
+        repos.dedup();
+        repos
+    }
+
+    fn sync_run_repos(&self) {
+        let (Some(shared), Some((_, wake))) = (&self.run_repos, &self.run_feed) else {
+            return;
+        };
+        let wanted = self.deploy_repos();
+        let mut current = shared.lock().expect("repo list lock");
+        if *current != wanted {
+            *current = wanted;
+            drop(current);
+            let _ = wake.send(());
+        }
+    }
+
+    fn story_repos(&self) -> Vec<String> {
+        let Some(board) = &self.board else {
+            return Vec::new();
+        };
+        board
+            .tasks
+            .iter()
+            .flat_map(|t| t.prs.iter())
+            .filter_map(|p| url_parts(&p.url).map(|(repo, _)| repo))
+            .collect()
+    }
+
+    /// Every manual run on the main screen; only runs in the open story's repos on a board.
+    pub fn visible_runs(&self) -> Vec<&Run> {
+        match self.screen {
+            Screen::List => self.runs.items.iter().collect(),
+            Screen::Board => {
+                let repos = self.story_repos();
+                self.runs
+                    .items
+                    .iter()
+                    .filter(|r| repos.iter().any(|x| x.eq_ignore_ascii_case(&r.repo)))
+                    .collect()
+            }
+        }
+    }
+
+    pub fn run_move(&mut self, delta: i32) {
+        let len = self.visible_runs().len() as i32;
+        if len > 0 {
+            self.run_sel = (self.run_sel as i32 + delta).clamp(0, len - 1) as usize;
+        }
+    }
+
+    pub fn open_run(&self, index: usize) {
+        let url = self.visible_runs().get(index).map(|r| r.url.clone());
+        if let Some(url) = url {
+            (self.opener)(&url);
+        }
+    }
+
+    pub fn open_job(&self, run: usize, job: usize) {
+        let url = self
+            .visible_runs()
+            .get(run)
+            .and_then(|r| r.open_jobs().get(job).map(|j| j.url.clone()));
+        if let Some(url) = url {
+            (self.opener)(&url);
+        }
+    }
+
+    pub fn open_selected_run(&self) {
+        self.open_run(self.run_sel);
+    }
+
+    fn close_overlays(&mut self) {
+        self.detail = false;
+        self.help = false;
+        self.pr_sheet = false;
+        self.run_sheet = false;
+    }
+
+    fn set_focus(&mut self, focus: Focus) {
+        self.focus = focus;
+        match focus {
+            Focus::Prs => self.tab = BottomTab::Prs,
+            Focus::Runs => self.tab = BottomTab::Runs,
+            Focus::Main => {}
+        }
     }
 
     pub fn pr_tag(&self, url: &str) -> Option<String> {
@@ -519,6 +708,8 @@ impl App {
         self.focus = Focus::Main;
         self.pr_sel = 0;
         self.pr_sheet = false;
+        self.run_sel = 0;
+        self.run_sheet = false;
     }
 
     pub fn columns(&self) -> Vec<Column<'_>> {
@@ -592,21 +783,48 @@ impl App {
                 self.help = !self.help;
                 return false;
             }
-            KeyCode::Esc if self.detail || self.help || self.pr_sheet => {
-                self.detail = false;
-                self.help = false;
-                self.pr_sheet = false;
+            KeyCode::Esc if self.detail || self.help || self.pr_sheet || self.run_sheet => {
+                self.close_overlays();
                 return false;
             }
-            KeyCode::Tab | KeyCode::BackTab => {
-                self.focus = if self.focus == Focus::Main { Focus::Prs } else { Focus::Main };
+            KeyCode::Tab => {
+                let next = match self.focus {
+                    Focus::Main => Focus::Prs,
+                    Focus::Prs => Focus::Runs,
+                    Focus::Runs => Focus::Main,
+                };
+                self.set_focus(next);
+                return false;
+            }
+            KeyCode::BackTab => {
+                let next = match self.focus {
+                    Focus::Main => Focus::Runs,
+                    Focus::Runs => Focus::Prs,
+                    Focus::Prs => Focus::Main,
+                };
+                self.set_focus(next);
                 return false;
             }
             KeyCode::Char('o') if self.focus == Focus::Prs => {
                 self.open_selected_pr();
                 return false;
             }
+            KeyCode::Char('o') if self.focus == Focus::Runs => {
+                self.open_selected_run();
+                return false;
+            }
             _ => {}
+        }
+        if self.focus == Focus::Runs {
+            match code {
+                KeyCode::Up | KeyCode::Char('k') => self.run_move(-1),
+                KeyCode::Down | KeyCode::Char('j') => self.run_move(1),
+                KeyCode::Enter | KeyCode::Char(' ') => self.run_sheet = !self.run_sheet,
+                KeyCode::Esc => self.focus = Focus::Main,
+                KeyCode::Char('r') => self.refresh_prs(),
+                _ => {}
+            }
+            return false;
         }
         if self.focus == Focus::Prs {
             match code {
@@ -670,26 +888,59 @@ impl App {
 
     pub fn on_click(&mut self, x: u16, y: u16) {
         let target = self.hit(x, y);
-        if self.detail || self.help || self.pr_sheet {
+        if self.detail || self.help || self.pr_sheet || self.run_sheet {
             match target {
                 Some(Target::Sheet) => {}
                 Some(Target::OpenPr) => self.open_selected_pr(),
-                _ => {
-                    self.detail = false;
-                    self.help = false;
-                    self.pr_sheet = false;
-                }
+                Some(Target::OpenSelectedRun) => self.open_selected_run(),
+                _ => self.close_overlays(),
             }
             return;
         }
-        if let Some(Target::Pr(i)) = target {
-            self.focus = Focus::Prs;
-            if self.pr_sel == i {
-                self.pr_sheet = true;
-            } else {
-                self.pr_sel = i;
+        match target {
+            Some(Target::Pr(i)) => {
+                self.set_focus(Focus::Prs);
+                if self.pr_sel == i {
+                    self.pr_sheet = true;
+                } else {
+                    self.pr_sel = i;
+                }
+                return;
             }
-            return;
+            Some(Target::Run(i)) => {
+                self.set_focus(Focus::Runs);
+                if self.run_sel == i {
+                    self.run_sheet = true;
+                } else {
+                    self.run_sel = i;
+                }
+                return;
+            }
+            Some(Target::OpenRun(i)) => {
+                self.set_focus(Focus::Runs);
+                self.run_sel = i;
+                self.open_run(i);
+                return;
+            }
+            Some(Target::OpenJob(i, j)) => {
+                self.set_focus(Focus::Runs);
+                self.run_sel = i;
+                self.open_job(i, j);
+                return;
+            }
+            Some(Target::Tab(tab)) => {
+                self.set_focus(if tab == BottomTab::Prs { Focus::Prs } else { Focus::Runs });
+                return;
+            }
+            Some(Target::PrPanel) => {
+                self.set_focus(Focus::Prs);
+                return;
+            }
+            Some(Target::RunPanel) => {
+                self.set_focus(Focus::Runs);
+                return;
+            }
+            _ => {}
         }
         if target.is_some() {
             self.focus = Focus::Main;
@@ -712,19 +963,23 @@ impl App {
             }
             Some(Target::PrevColumn) => self.move_col(-1),
             Some(Target::NextColumn) => self.move_col(1),
-            Some(Target::PrPanel) => self.focus = Focus::Prs,
             _ => {}
         }
     }
 
     pub fn on_scroll(&mut self, x: u16, y: u16, delta: i32) {
-        if self.detail || self.help || self.pr_sheet {
+        if self.detail || self.help || self.pr_sheet || self.run_sheet {
             return;
         }
         let target = self.hit(x, y);
         if matches!(target, Some(Target::Pr(_) | Target::PrPanel)) {
-            self.focus = Focus::Prs;
+            self.set_focus(Focus::Prs);
             self.pr_move(delta);
+            return;
+        }
+        if matches!(target, Some(Target::Run(_) | Target::RunPanel | Target::OpenRun(_) | Target::OpenJob(..))) {
+            self.set_focus(Focus::Runs);
+            self.run_move(delta);
             return;
         }
         match self.screen {
@@ -744,6 +999,7 @@ mod tests {
     use super::*;
     use ratatui::crossterm::event::KeyCode;
     use crate::prs::{Check, CheckState, PullRequest, Review};
+    use crate::runs::{Batch, Job, Run, RunState};
     use storyboard::model::{PrState, StoryStatus};
     use storyboard::model::TaskType::{self, Pr, Spike};
     use storyboard::{ops, rules, store};
@@ -817,6 +1073,39 @@ mod tests {
 
     const URL12: &str = "https://github.com/acme/widgets/pull/12";
     const URL5: &str = "https://github.com/acme/widgets/pull/5";
+
+    fn run(repo: &str, id: u64, state: RunState) -> Run {
+        Run {
+            repo: repo.into(),
+            id,
+            name: "Deploy nonprod".into(),
+            title: "Deploy".into(),
+            branch: "main".into(),
+            url: format!("https://github.com/{repo}/actions/runs/{id}"),
+            state,
+            created_at: "2026-10-08T03:00:00Z".into(),
+            started_at: None,
+            updated_at: "2026-10-08T03:01:00Z".into(),
+            jobs: vec![Job {
+                name: "deploy".into(),
+                state: RunState::Running,
+                url: format!("https://github.com/{repo}/actions/runs/{id}/job/1"),
+                started_at: None,
+                completed_at: None,
+            }],
+        }
+    }
+
+    fn batch(runs: Vec<Run>) -> Result<Batch, String> {
+        Ok(Batch { runs, warnings: vec![] })
+    }
+
+    fn recorder(app: &mut App) -> std::rc::Rc<std::cell::RefCell<Vec<String>>> {
+        let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        let sink = log.clone();
+        app.opener = Box::new(move |url| sink.borrow_mut().push(url.to_string()));
+        log
+    }
 
     fn open_key(app: &App) -> String {
         app.board.as_ref().unwrap().story.key.clone()
@@ -1169,7 +1458,8 @@ mod tests {
         assert_eq!((app.pr_sel, app.list_sel), (1, 1));
         app.on_key(KeyCode::Tab, false);
         app.on_key(KeyCode::Tab, false);
-        assert_eq!(app.focus, Focus::Main);
+        app.on_key(KeyCode::Tab, false);
+        assert_eq!(app.focus, Focus::Main, "main, PRs, runs, then back to main");
     }
 
     #[test]
@@ -1223,5 +1513,124 @@ mod tests {
         assert_eq!(app.pr_sel, 2);
         app.apply_prs(Ok(vec![live("a/b", 1, "x")]));
         assert_eq!(app.pr_sel, 0);
+    }
+    #[test]
+    fn the_repos_to_check_combine_pr_repos_story_prs_and_the_extra_list() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        record_pr(&root, "PROJ-1", "T1", "widgets", URL5, PrState::Merged);
+        let mut app = App::new(root.path().to_path_buf(), None);
+        app.apply_prs(Ok(vec![live("acme/api", 99, "x")]));
+        app.extra_repos = vec!["acme/ops".into(), "bad repo".into(), "acme/api".into()];
+        assert_eq!(app.deploy_repos(), vec!["acme/api", "acme/ops", "acme/widgets"]);
+    }
+
+    #[test]
+    fn the_shared_repo_list_follows_the_app_and_wakes_the_poller() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        record_pr(&root, "PROJ-1", "T1", "widgets", URL5, PrState::Merged);
+        let mut app = App::new(root.path().to_path_buf(), None);
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let (wake_tx, wake_rx) = std::sync::mpsc::channel();
+        let shared = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        app.attach_runs(rx, wake_tx, shared.clone());
+        assert_eq!(*shared.lock().unwrap(), vec!["acme/widgets"]);
+        while wake_rx.try_recv().is_ok() {}
+        app.apply_prs(Ok(vec![live("acme/new", 1, "x")]));
+        assert_eq!(*shared.lock().unwrap(), vec!["acme/new", "acme/widgets"]);
+        assert!(wake_rx.try_recv().is_ok(), "a changed repo list refreshes the runs at once");
+        app.apply_prs(Ok(vec![live("acme/new", 1, "x")]));
+        assert!(wake_rx.try_recv().is_err(), "no change, no wake");
+    }
+
+    #[test]
+    fn run_data_tracks_loading_results_warnings_and_errors() {
+        let root = TempDir::new().unwrap();
+        let mut app = App::new(root.path().to_path_buf(), None);
+        assert!(!app.runs.loaded);
+        app.apply_run_started();
+        assert!(app.runs.loading);
+        let mut ok = Batch { runs: vec![run("acme/widgets", 1, RunState::Running)], warnings: vec!["acme/api: HTTP 403".into()] };
+        app.apply_runs(Ok(ok.clone()));
+        assert!(app.runs.loaded && !app.runs.loading && app.runs.updated.is_some());
+        assert_eq!(app.runs.warnings, vec!["acme/api: HTTP 403"]);
+        app.apply_runs(Err("rate limited".into()));
+        assert_eq!(app.runs.items.len(), 1);
+        assert_eq!(app.runs.error.as_deref(), Some("rate limited"));
+        ok.warnings.clear();
+        app.apply_runs(Ok(ok));
+        assert!(app.runs.error.is_none() && app.runs.warnings.is_empty());
+    }
+
+    #[test]
+    fn the_story_view_only_shows_runs_in_the_storys_repos() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        record_pr(&root, "PROJ-1", "T1", "widgets", URL12, PrState::Draft);
+        let mut app = App::new(root.path().to_path_buf(), None);
+        app.apply_runs(batch(vec![run("acme/widgets", 1, RunState::Running), run("acme/api", 2, RunState::Success)]));
+        assert_eq!(app.visible_runs().len(), 2, "the main screen shows every run");
+        app.open_story("PROJ-1");
+        let runs = app.visible_runs();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].repo, "acme/widgets");
+    }
+
+    #[test]
+    fn tab_cycles_main_prs_runs_and_arrows_move_the_run_selection() {
+        let root = TempDir::new().unwrap();
+        let mut app = App::new(root.path().to_path_buf(), None);
+        app.apply_runs(batch(vec![run("a/b", 1, RunState::Running), run("a/b", 2, RunState::Success), run("a/b", 3, RunState::Failed)]));
+        app.on_key(KeyCode::Tab, false);
+        assert_eq!((app.focus, app.tab), (Focus::Prs, BottomTab::Prs));
+        app.on_key(KeyCode::Tab, false);
+        assert_eq!((app.focus, app.tab), (Focus::Runs, BottomTab::Runs));
+        app.on_key(KeyCode::Down, false);
+        app.on_key(KeyCode::Char('j'), false);
+        app.on_key(KeyCode::Down, false);
+        assert_eq!(app.run_sel, 2);
+        app.on_key(KeyCode::Up, false);
+        assert_eq!(app.run_sel, 1);
+        app.on_key(KeyCode::Tab, false);
+        assert_eq!(app.focus, Focus::Main);
+        assert_eq!(app.list_sel, 0);
+    }
+
+    #[test]
+    fn enter_opens_the_run_sheet_and_o_opens_the_run_in_the_browser() {
+        let root = TempDir::new().unwrap();
+        let mut app = App::new(root.path().to_path_buf(), None);
+        let log = recorder(&mut app);
+        app.apply_runs(batch(vec![run("acme/widgets", 7, RunState::Running)]));
+        app.focus = Focus::Runs;
+        app.on_key(KeyCode::Enter, false);
+        assert!(app.run_sheet);
+        app.on_key(KeyCode::Char('o'), false);
+        assert_eq!(*log.borrow(), vec!["https://github.com/acme/widgets/actions/runs/7".to_string()]);
+        assert!(!app.on_key(KeyCode::Esc, false));
+        assert!(!app.run_sheet);
+        assert_eq!(app.focus, Focus::Runs);
+        assert!(!app.on_key(KeyCode::Esc, false));
+        assert_eq!(app.focus, Focus::Main);
+    }
+
+    #[test]
+    fn opening_a_run_or_a_stage_uses_their_own_links_and_the_selection_is_clamped() {
+        let root = TempDir::new().unwrap();
+        let mut app = App::new(root.path().to_path_buf(), None);
+        let log = recorder(&mut app);
+        app.apply_runs(batch(vec![run("a/b", 1, RunState::Running), run("a/b", 2, RunState::Running)]));
+        app.open_run(1);
+        app.open_job(0, 0);
+        assert_eq!(
+            *log.borrow(),
+            vec!["https://github.com/a/b/actions/runs/2".to_string(), "https://github.com/a/b/actions/runs/1/job/1".to_string()]
+        );
+        app.focus = Focus::Runs;
+        app.run_move(5);
+        assert_eq!(app.run_sel, 1);
+        app.apply_runs(batch(vec![run("a/b", 1, RunState::Running)]));
+        assert_eq!(app.run_sel, 0);
     }
 }

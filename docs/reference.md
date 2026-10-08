@@ -65,7 +65,7 @@ Schema: `../schemas/board.schema.json`.
 
 ## storyboard-tui
 
-    storyboard-tui [KEY] [--root DIR] [--pr-query QUERY] [--no-prs]
+    storyboard-tui [KEY] [--root DIR] [--pr-query QUERY] [--no-prs] [--deploy-repos REPOS] [--no-runs]
 
 A live kanban view with a story list (completed stories hidden by default, `d` or the header
 button toggles them), a board per story, and a pull requests panel. Keyboard and mouse. With `KEY`
@@ -78,3 +78,10 @@ The pull requests panel runs one `gh api graphql` search (default
 `--pr-query` or `STORYBOARD_PR_QUERY`) in a background thread: every 5 seconds while a check is
 running or queued, every 30 seconds otherwise, or immediately on `r`. Nothing is written to disk.
 `--no-prs` disables it. See the README for the full key and mouse table.
+
+The manual runs panel lists the GitHub Actions runs you started with the "Run workflow" button
+(`event=workflow_dispatch`, filtered to your login, which is looked up at run time through `gh` and
+kept in memory). The repos come from your open PRs, the PRs recorded on stories, and
+`--deploy-repos` / `STORYBOARD_DEPLOY_REPOS` (comma separated `owner/name`). One REST call per repo
+every 10 seconds while any run is active, every 60 seconds otherwise; stages are fetched only for
+active or failed runs and cached once finished. `--no-runs` disables it.

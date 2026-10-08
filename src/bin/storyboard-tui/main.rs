@@ -1,6 +1,8 @@
 mod app;
 mod panel;
 mod prs;
+mod runs;
+mod runs_ui;
 mod ui;
 
 use anyhow::{bail, Result};
@@ -12,7 +14,7 @@ use ratatui::crossterm::event::{
 };
 use ratatui::crossterm::execute;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[derive(Parser)]
@@ -29,6 +31,12 @@ struct Cli {
     /// Do not fetch pull requests from GitHub
     #[arg(long)]
     no_prs: bool,
+    /// Extra repos (owner/name, comma separated) to look for your manual workflow runs in
+    #[arg(long, env = "STORYBOARD_DEPLOY_REPOS", value_delimiter = ',')]
+    deploy_repos: Vec<String>,
+    /// Do not fetch your manual workflow runs from GitHub
+    #[arg(long)]
+    no_runs: bool,
 }
 
 fn main() -> Result<()> {
@@ -43,6 +51,15 @@ fn main() -> Result<()> {
         let source = Arc::new(prs::GhSource { query: cli.pr_query });
         let (rx, wake) = prs::spawn(source, prs::Cadence::default());
         app.attach_feed(rx, wake);
+    }
+    app.extra_repos = cli.deploy_repos;
+    if cli.no_runs {
+        app.runs.disabled = true;
+    } else {
+        let repos = Arc::new(Mutex::new(Vec::new()));
+        let source = Arc::new(runs::Fetcher::new(runs::GhApi::default(), chrono::Duration::hours(24)));
+        let (rx, wake) = runs::spawn(source, repos.clone(), runs::RunCadence::default());
+        app.attach_runs(rx, wake, repos);
     }
     let mut terminal = ratatui::init();
     execute!(std::io::stdout(), EnableMouseCapture)?;
@@ -77,6 +94,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             }
         }
         app.poll_feed();
+        app.poll_runs();
         if app.needs_reload() {
             app.reload();
         }

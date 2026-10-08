@@ -71,6 +71,7 @@ storyboard-tui PROJ-123     # open a story's board straight away
 | List | click a row to open it; click `[ Show done ]` / `[ Hide done ]`; wheel moves the selection | `↑↓`/`jk` select, `Enter`/`→` open, `d` show or hide done |
 | Board | click `‹ Stories` to go back; click a column or card to select it; click the selected card again for its detail; click outside a sheet to close it; wheel scrolls a column | `←→`/`hl` column, `↑↓`/`jk` card, `[` `]` switch story, `Tab` PR panel, `Enter` detail, `Esc`/`b` back to the list |
 | PR panel | click a row to select it, click again for the sheet; wheel scrolls | `Tab` focus, `↑↓` select, `Enter` sheet, `o` open on GitHub, `r` refresh |
+| Runs panel | click `[ open ]` or a stage to open it on GitHub; click a run, then again, for its sheet; click a tab when narrow; wheel scrolls | `Tab` focus, `↑↓` select, `Enter` sheet, `o` open run, `r` refresh |
 | Anywhere | | `r` reload, `?` help, `q` or Ctrl-C quit |
 
 **Pull requests panel.** A bottom panel lists your open pull requests with their CI stages, refreshed from GitHub in the background:
@@ -81,9 +82,17 @@ storyboard-tui PROJ-123     # open a story's board straight away
 - **Detail sheet:** select a row and press Enter (or click it twice) for the full sheet: draft or ready for review, every check grouped running, queued, failed, passed, with durations. `o` (or the button) opens the PR in your browser.
 - **Keys:** `Tab` moves focus to the panel and back, `↑↓` select a PR, `Enter` opens the sheet, `o` opens it on GitHub, `r` refreshes now. The mouse works too: click a row, click it again for the sheet, scroll over the panel.
 
-It fetches with one `gh api graphql` call (it uses your existing `gh` login, so no token is handled by this tool). It polls about every 5 seconds while any check is running or queued and about every 30 seconds otherwise, and costs roughly one GraphQL rate-limit point per poll. Nothing from GitHub is written to disk: PR data lives in memory only. If a fetch fails, the last data stays and the error shows in the panel.
+The PR panel fetches with one `gh api graphql` call (it uses your existing `gh` login, so no token is handled by this tool). It polls about every 5 seconds while any check is running or queued and about every 30 seconds otherwise, and costs roughly one GraphQL rate-limit point per poll. Nothing from GitHub is written to disk: PR data lives in memory only. If a fetch fails, the last data stays and the error shows in the panel.
 
 The query defaults to `is:pr author:@me state:open archived:false sort:updated-desc -label:icebox`. Change it with `--pr-query "..."` or `STORYBOARD_PR_QUERY`. `--no-prs` turns the panel off (for example when `gh` is not installed). On a short terminal (under about 16 rows) the panel is hidden.
+
+**Manual runs panel.** Next to the pull requests panel (side by side when the terminal is about 150 columns wide or more, otherwise as a second tab, `[ Pull requests · 3 ]  [ Manual runs · 2 (1 active) ]`, with a live count of active runs) is a panel of the GitHub Actions runs *you* started by hand (the "Run workflow" button, `workflow_dispatch`), whatever each repo calls its workflow. This is where a manual nonprod deploy shows up.
+
+- **Which repos:** GitHub cannot list your runs across repos, so the tool asks each repo in turn. The repos are the ones from your open PRs, the PRs recorded on your stories' tasks, and any you add with `STORYBOARD_DEPLOY_REPOS=org/a,org/b` (or `--deploy-repos`). Inside a story it shows only runs in that story's repos.
+- **Each run:** a `[RUNNING]`, `[WAITING]` (needs approval), `[QUEUED]`, `[SUCCESS]`, `[FAILED]` or `[CANCELLED]` badge, the repo, the workflow name, the run's title, branch, time since it started and how long it ran. Stages that are running, waiting, queued or failed are listed one per line underneath (running first), like the CI stages on a PR. Successful runs show no stages.
+- **Click through:** click `[ open ]` to open the run on GitHub, or click any stage line to open that stage. Click a run to select it and click it again (or press Enter) for the full sheet with every stage; `o` opens the selected run too.
+- **Timeliness:** one REST call per repo (run in parallel) about every 10 seconds while any of your runs is active and about every 60 seconds otherwise, plus one call per active or failed run for its stages (finished runs are cached). Only the last 24 hours and anything still active are shown. `r` refreshes now.
+- **Off switch and keys:** `--no-runs` turns it off. `Tab` moves focus main, pull requests, runs; `↑↓` select; the wheel scrolls.
 
 It needs `STORYBOARD_ROOT` or `--root` like the tool. While it runs, the terminal's own text selection is replaced by mouse clicks (hold Shift to select text in most terminals).
 

@@ -13,23 +13,24 @@ type Hits = Vec<(Rect, Target)>;
 
 const OPEN_BUTTON: &str = "[ o Open in browser ]";
 const MAX_STAGE_LINES: usize = 8;
-const ORANGE: Color = Color::Indexed(208);
+pub const ORANGE: Color = Color::Indexed(208);
 
-/// Height of the panel for a body of the given height; 0 means the panel is hidden.
-pub fn height(app: &App, body: u16) -> u16 {
-    match app.screen {
-        Screen::List if body >= 16 => (body * 45 / 100).max(8),
-        Screen::Board if body >= 18 => {
-            let rows = app.pr_rows();
-            let content: u16 = rows.iter().map(|r| row_height(r) + 1).sum::<u16>().saturating_sub(1);
-            let extra = 2 + u16::from(app.prs.error.is_some());
-            (content.max(1) + extra).min(body * 40 / 100).max(5)
-        }
-        _ => 0,
-    }
+/// Lines the PR rows need (rows plus the dividers between them).
+pub fn content_height(app: &App) -> u16 {
+    let rows = app.pr_rows();
+    rows.iter().map(|r| row_height(r) + 1).sum::<u16>().saturating_sub(1)
 }
 
-fn trunc(text: &str, width: usize) -> String {
+/// First row to draw so that the selected row (heights include the divider) fits in `avail` lines.
+pub fn window_offset(heights: &[u16], selected: usize, avail: u16) -> usize {
+    let mut offset = 0;
+    while offset < selected && heights[offset..=selected].iter().sum::<u16>() > avail + 1 {
+        offset += 1;
+    }
+    offset
+}
+
+pub fn trunc(text: &str, width: usize) -> String {
     if text.chars().count() <= width {
         return text.to_string();
     }
@@ -39,7 +40,7 @@ fn trunc(text: &str, width: usize) -> String {
 }
 
 /// Cut a run of spans to fit a width, ending with an ellipsis when something was dropped.
-fn fit(spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
+pub fn fit(spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
     let mut out = Vec::new();
     let mut used = 0;
     for span in spans {
@@ -58,11 +59,11 @@ fn fit(spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
     out
 }
 
-fn width_of(spans: &[Span<'static>]) -> usize {
+pub fn width_of(spans: &[Span<'static>]) -> usize {
     spans.iter().map(|s| s.content.chars().count()).sum()
 }
 
-fn dim() -> Style {
+pub fn dim() -> Style {
     Style::new().fg(Color::DarkGray)
 }
 
@@ -282,10 +283,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     }
     let heights: Vec<u16> = rows.iter().map(|r| row_height(r) + 1).collect();
     let selected = app.pr_sel.min(rows.len() - 1);
-    let mut offset = 0;
-    while offset < selected && heights[offset..=selected].iter().sum::<u16>() > body.height + 1 {
-        offset += 1;
-    }
+    let offset = window_offset(&heights, selected, body.height);
     let now = Utc::now();
     let mut y = body.y;
     let bottom = body.y + body.height;

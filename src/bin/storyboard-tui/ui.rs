@@ -1,5 +1,5 @@
-use crate::app::{App, Column, Screen, StorySummary, Target, STATUS_ORDER};
-use crate::panel;
+use crate::app::{App, BottomTab, Column, Focus, Screen, StorySummary, Target, STATUS_ORDER};
+use crate::{panel, runs_ui};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -13,6 +13,7 @@ type Hits = Vec<(Rect, Target)>;
 const CARD_HEIGHT: u16 = 5;
 const STORY_ROW_HEIGHT: u16 = 4;
 const COMPACT_BELOW: u16 = 60;
+const WIDE_FROM: u16 = 150;
 const BACK_LABEL: &str = "‹ Stories";
 
 pub fn draw(f: &mut Frame, app: &App) {
@@ -20,7 +21,8 @@ pub fn draw(f: &mut Frame, app: &App) {
     let mut hits: Hits = Vec::new();
     let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)])
         .split(area);
-    let panel_height = panel::height(app, rows[1].height);
+    let wide = area.width >= WIDE_FROM;
+    let panel_height = bottom_height(app, rows[1].height, wide);
     let (main, panel_area) = if panel_height > 0 {
         let parts = Layout::vertical([Constraint::Min(3), Constraint::Length(panel_height)]).split(rows[1]);
         (parts[0], Some(parts[1]))
@@ -41,18 +43,91 @@ pub fn draw(f: &mut Frame, app: &App) {
             }
         }
     }
-    if let Some(panel_area) = panel_area {
-        panel::draw_panel(f, panel_area, app, &mut hits);
+    if let Some(bottom) = panel_area {
+        if wide {
+            let halves = Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)]).split(bottom);
+            panel::draw_panel(f, halves[0], app, &mut hits);
+            runs_ui::draw_panel(f, halves[1], app, &mut hits);
+        } else {
+            let tab_row = Rect::new(bottom.x, bottom.y, bottom.width, 1);
+            let rest = Rect::new(bottom.x, bottom.y + 1, bottom.width, bottom.height.saturating_sub(1));
+            draw_tabs(f, tab_row, app, &mut hits);
+            match app.tab {
+                BottomTab::Prs => panel::draw_panel(f, rest, app, &mut hits),
+                BottomTab::Runs => runs_ui::draw_panel(f, rest, app, &mut hits),
+            }
+        }
     }
     draw_footer(f, rows[2], app);
     if app.help {
         draw_help(f, area, &mut hits);
     } else if app.pr_sheet {
         panel::draw_sheet(f, area, app, &mut hits);
+    } else if app.run_sheet {
+        runs_ui::draw_sheet(f, area, app, &mut hits);
     } else if app.detail && app.screen == Screen::Board {
         draw_detail(f, area, app, &mut hits);
     }
     *app.hits.borrow_mut() = hits;
+}
+
+/// Height of the bottom area for a body of the given height; 0 hides it.
+fn bottom_height(app: &App, body: u16, wide: bool) -> u16 {
+    match app.screen {
+        Screen::List if body >= 16 => (body * 45 / 100).max(8),
+        Screen::Board if body >= 18 => {
+            let prs = panel::content_height(app);
+            let runs = runs_ui::content_height(app);
+            let content = if wide {
+                prs.max(runs)
+            } else if app.tab == BottomTab::Prs {
+                prs
+            } else {
+                runs
+            };
+            let errors = u16::from(app.prs.error.is_some() || app.runs.error.is_some());
+            let extra = 2 + errors + u16::from(!wide);
+            (content.max(1) + extra).min(body * 40 / 100).max(5)
+        }
+        _ => 0,
+    }
+}
+
+fn draw_tabs(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
+    let runs = app.visible_runs();
+    let active = runs.iter().filter(|r| r.is_active()).count();
+    let prs = format!("[ Pull requests · {} ]", app.pr_rows().len());
+    let runs_label = if active > 0 {
+        format!("[ Manual runs · {} ({active} active) ]", runs.len())
+    } else {
+        format!("[ Manual runs · {} ]", runs.len())
+    };
+    let style = |tab: BottomTab| {
+        if app.tab == tab {
+            let color = if (tab == BottomTab::Prs && app.focus == Focus::Prs) || (tab == BottomTab::Runs && app.focus == Focus::Runs) {
+                Color::Blue
+            } else {
+                Color::White
+            };
+            Style::new().fg(color).add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(Color::DarkGray)
+        }
+    };
+    let prs_width = prs.chars().count() as u16;
+    let runs_width = runs_label.chars().count() as u16;
+    hits.push((Rect::new(area.x, area.y, prs_width.min(area.width), 1), Target::Tab(BottomTab::Prs)));
+    let runs_x = area.x + prs_width + 2;
+    if runs_x < area.x + area.width {
+        let width = runs_width.min(area.x + area.width - runs_x);
+        hits.push((Rect::new(runs_x, area.y, width, 1), Target::Tab(BottomTab::Runs)));
+    }
+    let line = Line::from(vec![
+        Span::styled(prs, style(BottomTab::Prs)),
+        Span::raw("  "),
+        Span::styled(runs_label, style(BottomTab::Runs)),
+    ]);
+    f.render_widget(Paragraph::new(line), area);
 }
 
 fn label(status: Status) -> &'static str {
@@ -265,9 +340,9 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     }
     let dim = Style::new().fg(Color::DarkGray);
     let keys: &[&str] = match app.screen {
-        Screen::List => &["↑↓ story", "⏎ open", "d show/hide done", "Tab PRs", "? help", "q quit"],
+        Screen::List => &["↑↓ story", "⏎ open", "d show/hide done", "Tab PRs/runs", "? help", "q quit"],
         Screen::Board => &[
-            "←→ column", "↑↓ card", "[ ] story", "⏎ detail", "Tab PRs", "Esc stories", "? help",
+            "←→ column", "↑↓ card", "[ ] story", "⏎ detail", "Tab PRs/runs", "Esc stories", "? help",
             "q quit",
         ],
     };
@@ -485,15 +560,15 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("← →  h l", "move between columns (open a story from the list)".into()),
         row("Enter", "open a story, or open a card's detail".into()),
         row("[ ]", "switch story on the board".into()),
-        row("Tab", "move focus between the board or list and the PR panel".into()),
-        row("o", "open the selected pull request in the browser (PR panel)".into()),
+        row("Tab", "focus: board or list, then PRs, then manual runs".into()),
+        row("o", "open the selected pull request or run in the browser".into()),
         row("d", "show or hide completed stories (list)".into()),
         row("Esc  b", "back to the list, or close a sheet".into()),
         row("r", "reload now (it also reloads by itself)".into()),
         row("?", "toggle this help".into()),
         row("q  Ctrl-C", "quit".into()),
         Line::raw(""),
-        row("Mouse", "click a story, column, card, PR or button; wheel scrolls".into()),
+        row("Mouse", "click a story, column, card, PR, run, stage or button; wheel scrolls".into()),
     ];
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
@@ -507,7 +582,8 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{App, Focus, Screen};
+    use crate::app::{App, BottomTab, Focus, Screen};
+    use crate::runs::{Batch, Job, Run, RunState};
     use crate::prs::{Check, CheckState, PullRequest, Review};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -833,7 +909,7 @@ mod tests {
         ] {
             assert!(out.contains(want), "missing {want:?} in:\n{out}");
         }
-        assert!(out.contains("Tab PRs"), "{out}");
+        assert!(out.contains("Tab PRs/runs"), "{out}");
         for gone in ["running: ", "queued: ", "failed: ", "CI / lint"] {
             assert!(!out.contains(gone), "{gone:?} should not appear in:\n{out}");
         }
@@ -1028,5 +1104,193 @@ mod tests {
         app.on_scroll(x, y, -1);
         assert_eq!(app.pr_sel, 0);
         assert_eq!(app.list_sel, 0, "the story list is untouched");
+    }
+    fn job(name: &str, state: RunState, run: u64, id: u64) -> Job {
+        Job {
+            name: name.into(),
+            state,
+            url: format!("https://github.com/acme/widgets/actions/runs/{run}/job/{id}"),
+            started_at: None,
+            completed_at: None,
+        }
+    }
+
+    fn run(repo: &str, id: u64, title: &str, state: RunState, jobs: Vec<Job>) -> Run {
+        Run {
+            repo: repo.into(),
+            id,
+            name: "Deploy nonprod".into(),
+            title: title.into(),
+            branch: "feat/x".into(),
+            url: format!("https://github.com/{repo}/actions/runs/{id}"),
+            state,
+            created_at: "2026-10-08T03:00:00Z".into(),
+            started_at: None,
+            updated_at: "2026-10-08T03:01:00Z".into(),
+            jobs,
+        }
+    }
+
+    fn runs_feed() -> Batch {
+        Batch {
+            runs: vec![
+                run(
+                    "acme/widgets",
+                    101,
+                    "Deploy to nonprod",
+                    RunState::Running,
+                    vec![
+                        job("compile", RunState::Success, 101, 1),
+                        job("lint", RunState::Failed, 101, 5),
+                        job("smoke", RunState::Queued, 101, 3),
+                        job("deploy", RunState::Running, 101, 2),
+                        job("approve", RunState::Waiting, 101, 4),
+                    ],
+                ),
+                run("acme/widgets", 100, "Earlier deploy", RunState::Success, vec![]),
+                run("acme/api", 55, "Release", RunState::Failed, vec![job("publish", RunState::Failed, 55, 9)]),
+            ],
+            warnings: vec![],
+        }
+    }
+
+    fn with_runs() -> (TempDir, App) {
+        let (root, mut app) = with_prs();
+        app.apply_runs(Ok(runs_feed()));
+        (root, app)
+    }
+
+    fn recorder(app: &mut App) -> std::rc::Rc<std::cell::RefCell<Vec<String>>> {
+        let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        let sink = log.clone();
+        app.opener = Box::new(move |url| sink.borrow_mut().push(url.to_string()));
+        log
+    }
+
+    #[test]
+    fn a_wide_terminal_shows_pull_requests_and_manual_runs_side_by_side() {
+        let (_root, app) = with_runs();
+        let out = render(&app, 170, 44);
+        for want in [
+            "PULL REQUESTS · 3", "MANUAL RUNS · 3", "[RUNNING]", "[SUCCESS]", "[FAILED]", "acme/widgets",
+            "Deploy nonprod", "feat/x", "[ open ]", "Deploy to nonprod", "Release",
+        ] {
+            assert!(out.contains(want), "missing {want:?} in:\n{out}");
+        }
+        assert!(line_of(&out, "PULL REQUESTS").contains("MANUAL RUNS"), "same row, side by side:\n{out}");
+        assert!(!out.contains("compile"), "passed stages are not listed:\n{out}");
+    }
+
+    #[test]
+    fn run_stages_are_listed_vertically_running_then_waiting_then_queued_then_failed() {
+        let (_root, app) = with_runs();
+        let out = render(&app, 170, 44);
+        let (xd, yd) = find(&out, "◔ deploy");
+        let (xa, ya) = find(&out, "◑ approve");
+        let (xs, ys) = find(&out, "● smoke");
+        let (xl, yl) = find(&out, "✗ lint");
+        assert!(xd == xa && xa == xs && xs == xl, "one column:\n{out}");
+        assert_eq!((ya, ys, yl), (yd + 1, yd + 2, yd + 3), "{out}");
+    }
+
+    #[test]
+    fn runs_are_separated_by_dividers() {
+        let (_root, app) = with_runs();
+        let out = render(&app, 170, 44);
+        let col = find(&out, "MANUAL RUNS").0 as usize;
+        let first = find(&out, "Deploy to nonprod").1 as usize;
+        let second = find(&out, "Earlier deploy").1 as usize;
+        let between: Vec<String> = out.lines().skip(first + 1).take(second - first - 1).map(|l| l.chars().skip(col).collect()).collect();
+        assert!(between.iter().any(|l| l.contains("────────")), "{out}");
+    }
+
+    #[test]
+    fn a_narrow_terminal_uses_tabs_with_live_counts_and_a_click_switches_tab() {
+        let (_root, mut app) = with_runs();
+        let out = render(&app, 120, 44);
+        assert!(out.contains("[ Pull requests · 3 ]"), "{out}");
+        assert!(out.contains("[ Manual runs · 3 (1 active) ]"), "{out}");
+        assert!(out.contains("acme/api#99") && !out.contains("[RUNNING]"), "{out}");
+        let (x, y) = find(&out, "[ Manual runs");
+        app.on_click(x + 2, y);
+        assert_eq!((app.tab, app.focus), (BottomTab::Runs, Focus::Runs));
+        let out = render(&app, 120, 44);
+        assert!(out.contains("[RUNNING]") && out.contains("MANUAL RUNS · 3"), "{out}");
+        assert!(!out.contains("acme/api#99"), "{out}");
+    }
+
+    #[test]
+    fn clicking_open_opens_the_run_and_clicking_a_stage_opens_that_stage() {
+        let (_root, mut app) = with_runs();
+        let log = recorder(&mut app);
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "[ open ]");
+        app.on_click(x + 2, y);
+        assert_eq!(*log.borrow(), vec!["https://github.com/acme/widgets/actions/runs/101".to_string()]);
+        let (x, y) = find(&out, "◔ deploy");
+        app.on_click(x + 2, y);
+        assert_eq!(log.borrow()[1], "https://github.com/acme/widgets/actions/runs/101/job/2");
+        assert!(!app.run_sheet, "click-through does not open the sheet");
+    }
+
+    #[test]
+    fn clicking_a_run_selects_it_then_opens_the_sheet_with_every_stage_and_an_open_button() {
+        let (_root, mut app) = with_runs();
+        let log = recorder(&mut app);
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "Release");
+        app.on_click(x, y);
+        assert_eq!((app.focus, app.run_sel, app.run_sheet), (Focus::Runs, 2, false));
+        render(&app, 170, 44);
+        app.on_click(x, y);
+        assert!(app.run_sheet);
+        let out = render(&app, 170, 44);
+        for want in ["acme/api", "Release", "Stages (1)", "✗ publish", "failed"] {
+            assert!(out.contains(want), "missing {want:?} in:\n{out}");
+        }
+        let (bx, by) = find(&out, "[ o Open run ]");
+        app.on_click(bx + 3, by);
+        assert_eq!(*log.borrow(), vec!["https://github.com/acme/api/actions/runs/55".to_string()]);
+        assert!(app.run_sheet);
+        app.on_click(0, 0);
+        assert!(!app.run_sheet);
+    }
+
+    #[test]
+    fn the_story_board_shows_only_runs_for_the_storys_repos() {
+        let (_root, mut app) = with_runs();
+        app.open_story("PROJ-2");
+        let out = render(&app, 170, 44);
+        assert!(out.contains("STORY MANUAL RUNS · 2"), "{out}");
+        assert!(!out.contains("Release"), "{out}");
+    }
+
+    #[test]
+    fn the_runs_panel_explains_loading_empty_error_and_warning_states() {
+        let (_root, mut app) = two_stories();
+        app.focus = Focus::Runs;
+        let out = render(&app, 170, 40);
+        assert!(out.contains("Loading manual runs"), "{out}");
+        app.apply_runs(Ok(Batch::default()));
+        let out = render(&app, 170, 40);
+        assert!(out.contains("No manual runs in the last 24 hours"), "{out}");
+        app.apply_runs(Ok(Batch { runs: vec![], warnings: vec!["acme/api: HTTP 403".into()] }));
+        let out = render(&app, 170, 40);
+        assert!(out.contains("acme/api: HTTP 403"), "{out}");
+        app.apply_runs(Err("gh failed: not logged in".into()));
+        let out = render(&app, 170, 40);
+        assert!(out.contains("gh failed: not logged in"), "{out}");
+    }
+
+    #[test]
+    fn scrolling_over_the_runs_panel_moves_the_run_selection() {
+        let (_root, mut app) = with_runs();
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "Earlier deploy");
+        app.on_scroll(x, y, 1);
+        assert_eq!((app.focus, app.run_sel), (Focus::Runs, 1));
+        app.on_scroll(x, y, -1);
+        assert_eq!(app.run_sel, 0);
+        assert_eq!((app.list_sel, app.pr_sel), (0, 0));
     }
 }
