@@ -83,7 +83,7 @@ The manual runs panel lists the GitHub Actions runs you started with the "Run wo
 (`event=workflow_dispatch`, filtered to your login, which is looked up at run time through `gh` and
 kept in memory). The repos come from your open PRs, the PRs recorded on stories, and
 `--deploy-repos` / `CAPCOM_DEPLOY_REPOS` (comma separated `owner/name`). One REST call per repo
-every 10 seconds while any run is active, every 60 seconds otherwise; stages are fetched only for
+every 10 seconds while any run is active, every 30 seconds otherwise; stages are fetched only for
 active or failed runs and cached once finished. A finished run is dropped 3 hours after it finished.
 `--no-runs` disables it.
 

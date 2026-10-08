@@ -88,6 +88,8 @@ pub enum Target {
     ConfirmYes,
     ConfirmNo,
     PrPanel,
+    /// The "updated" label in a panel title: click to refresh now.
+    Refresh,
     OpenPr,
     OpenCheck(usize, usize),
     Run(usize),
@@ -1287,6 +1289,10 @@ impl App {
             return;
         }
         match target {
+            Some(Target::Refresh) => {
+                self.refresh_prs();
+                return;
+            }
             Some(Target::SplitHandle) => {
                 self.drag = Some(Drag::Split);
                 return;

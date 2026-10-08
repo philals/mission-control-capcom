@@ -74,6 +74,9 @@ pub fn draw(f: &mut Frame, app: &App) {
             }
         }
     }
+    // the refresh labels sit on the border that the height handle also covers; they win
+    let refresh: Vec<_> = hits.iter().filter(|(_, t)| *t == Target::Refresh).cloned().collect();
+    hits.extend(refresh);
     draw_footer(f, rows[2], app);
     if app.help {
         draw_help(f, area, &mut hits);
@@ -1312,6 +1315,28 @@ mod tests {
         assert!(out.contains("● NO-GO"), "a failed check is a no-go:\n{out}");
         app.on_key(KeyCode::Enter, false);
         assert!(render(&app, 120, 30).contains("CAPCOM"), "the board header has it too");
+    }
+
+    #[test]
+    fn the_updated_label_of_each_panel_is_a_refresh_button() {
+        let (_root, mut app) = with_prs();
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let (wake_tx, wake_rx) = std::sync::mpsc::channel();
+        app.attach_feed(rx, wake_tx);
+        let out = render(&app, 170, 44);
+        assert_eq!(out.matches("↻ updated").count(), 1, "the PR panel has it:\n{out}");
+        let (x, y) = find(&out, "↻ updated");
+        app.on_click(x + 3, y);
+        assert!(wake_rx.try_recv().is_ok(), "clicking the label refreshes at once");
+        assert!(app.pr_sheet == false && app.focus == Focus::Main, "and does nothing else");
+        app.apply_runs(Ok(runs_feed()));
+        let out = render(&app, 170, 44);
+        assert_eq!(out.matches("↻ updated").count(), 2, "the runs panel has it too:\n{out}");
+        let line = out.lines().nth(y as usize).unwrap();
+        let second = line.rmatches("↻ updated").next().map(|_| line.rfind("↻ updated").unwrap()).unwrap();
+        let x2 = line[..second].chars().count() as u16;
+        app.on_click(x2 + 3, y);
+        assert!(wake_rx.try_recv().is_ok());
     }
 
     #[test]

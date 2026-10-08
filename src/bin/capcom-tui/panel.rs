@@ -321,13 +321,15 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let rows = app.pr_rows();
     let focused = app.focus == Focus::Prs;
     let name = if app.screen == Screen::List { "PULL REQUESTS" } else { "STORY PULL REQUESTS" };
+    let notice = app.current_notice().is_some();
     let status = if let Some(notice) = app.current_notice() {
         format!(" {notice} ")
     } else if app.prs.loading {
-        " refreshing… ".to_string()
+        " ↻ refreshing… ".to_string()
     } else {
-        app.prs.updated.as_ref().map_or(String::new(), |u| format!(" updated {u} "))
+        app.prs.updated.as_ref().map_or(String::new(), |u| format!(" ↻ updated {u} "))
     };
+    let status_width = status.chars().count() as u16;
     let block = Block::bordered()
         .border_style(Style::new().fg(if focused { Color::Blue } else { Color::DarkGray }))
         .title(Span::styled(
@@ -338,6 +340,9 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let inner = block.inner(area);
     f.render_widget(block, area);
     hits.push((area, Target::PrPanel));
+    if !notice && status_width > 0 && status_width + 2 < area.width {
+        hits.push((Rect::new(area.x + area.width - 1 - status_width, area.y, status_width, 1), Target::Refresh));
+    }
     if inner.height == 0 || inner.width == 0 {
         return;
     }

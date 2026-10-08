@@ -329,7 +329,7 @@ pub struct RunCadence {
 
 impl Default for RunCadence {
     fn default() -> Self {
-        RunCadence { busy: Duration::from_secs(10), idle: Duration::from_secs(60) }
+        RunCadence { busy: Duration::from_secs(10), idle: Duration::from_secs(30) }
     }
 }
 
@@ -583,6 +583,12 @@ mod tests {
         assert_eq!(cadence.next(&batch(runs.clone())), Duration::from_secs(10));
         assert_eq!(cadence.next(&batch(runs[1..].to_vec())), Duration::from_secs(60));
         assert_eq!(cadence.next(&Err("boom".into())), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn by_default_an_idle_poll_is_every_thirty_seconds_and_a_busy_one_every_ten() {
+        let c = RunCadence::default();
+        assert_eq!((c.busy, c.idle), (Duration::from_secs(10), Duration::from_secs(30)));
     }
 
     struct Recording {
