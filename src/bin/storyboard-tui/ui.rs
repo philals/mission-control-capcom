@@ -62,10 +62,8 @@ pub fn draw(f: &mut Frame, app: &App) {
             panel::draw_panel(f, halves[0], app, &mut hits);
             runs_ui::draw_panel(f, halves[1], app, &mut hits);
             hits.push((Rect::new(bottom.x, bottom.y, bottom.width, 1), Target::HeightHandle));
-            if !small {
-                let strip = Rect::new(halves[1].x.saturating_sub(1), halves[1].y + 1, 2, halves[1].height.saturating_sub(1));
-                hits.push((strip, Target::SplitHandle));
-            }
+            let strip = Rect::new(halves[1].x.saturating_sub(1), halves[1].y + 1, 2, halves[1].height.saturating_sub(1));
+            hits.push((strip, Target::SplitHandle));
         } else {
             let tab_row = Rect::new(bottom.x, bottom.y, bottom.width, 1);
             let rest = Rect::new(bottom.x, bottom.y + 1, bottom.width, bottom.height.saturating_sub(1));
@@ -92,7 +90,7 @@ pub fn draw(f: &mut Frame, app: &App) {
 /// An empty (or switched off) manual runs panel shrinks to a narrow strip, unless it has an
 /// error or a warning that needs room to be read.
 fn runs_small(app: &App) -> bool {
-    let quiet = app.runs.error.is_none() && app.runs.warnings.is_empty();
+    let quiet = !app.split_pinned && app.runs.error.is_none() && app.runs.warnings.is_empty();
     quiet && (app.runs.disabled || (app.runs.loaded && app.visible_runs().is_empty()))
 }
 
@@ -411,11 +409,14 @@ fn draw_board(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         draw_column(f, area, &cols[i], i, true, app.row[i], board, Some(title), hits);
         return;
     }
-    let rects = Layout::horizontal(vec![Constraint::Ratio(1, cols.len() as u32); cols.len()])
-        .split(area);
+    let rects = Layout::horizontal((0..cols.len()).map(|i| Constraint::Fill(app.col_weights[i]))).split(area);
     for (i, col) in cols.iter().enumerate() {
         hits.push((rects[i], Target::Column(i)));
         draw_column(f, rects[i], col, i, i == app.col, app.row[i], board, None, hits);
+    }
+    for i in 0..cols.len().saturating_sub(1) {
+        let strip = Rect::new(rects[i + 1].x.saturating_sub(1), rects[i + 1].y + 1, 2, rects[i + 1].height.saturating_sub(1));
+        hits.push((strip, Target::ColumnHandle(i, rects[i].x, rects[i + 1].x + rects[i + 1].width)));
     }
 }
 
@@ -607,7 +608,8 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("r", "reload now (it also reloads by itself)".into()),
         row("< >", "make the PR panel narrower or wider (or drag the divider)".into()),
         row("+ -", "make the bottom panels taller or shorter (or drag their top edge)".into()),
-        row("=", "reset the panel sizes".into()),
+        row(", .", "make the selected kanban column narrower or wider (or drag a column border)".into()),
+        row("=", "reset all panel sizes".into()),
         row("?", "toggle this help".into()),
         row("q  Ctrl-C", "quit".into()),
         Line::raw(""),
@@ -1572,5 +1574,44 @@ mod tests {
         assert!(app.bottom_pct.is_some_and(|p| p > 45));
         let hits = app.hits.borrow();
         assert!(!hits.iter().any(|(_, t)| *t == crate::app::Target::SplitHandle), "tabs have no divider");
+    }
+    #[test]
+    fn dragging_a_column_border_resizes_the_two_neighbouring_columns() {
+        let (_root, mut app) = sample();
+        let out = render(&app, 200, 30);
+        let (planning_x, _) = find(&out, "PLANNING");
+        let (planned_x, _) = find(&out, "PLANNED");
+        let widths = |out: &str| (find(out, "PLANNING").0, find(out, "PLANNED").0);
+        assert_eq!(widths(&out), (planning_x, planned_x));
+        app.on_click(planning_x - 2, 6);
+        app.on_drag(planning_x - 22, 6);
+        app.on_release();
+        let out = render(&app, 200, 30);
+        let (new_planning_x, new_planned_x) = widths(&out);
+        assert!(new_planning_x + 18 <= planning_x, "the border moved left by about 20 ({planning_x} -> {new_planning_x}):\n{out}");
+        let before = planned_x - planning_x;
+        let after = new_planned_x - new_planning_x;
+        assert!(after > before, "the column to the right of the border grew: {before} -> {after}");
+        assert!(app.col_weights[0] < 100 && app.col_weights[1] > 100, "{:?}", app.col_weights);
+    }
+
+    #[test]
+    fn the_shrunken_runs_strip_can_be_dragged_wider_and_then_stays_that_wide() {
+        let (_root, mut app) = with_prs();
+        app.apply_runs(Ok(Batch::default()));
+        let out = render(&app, 170, 44);
+        let (tx, ty) = find(&out, "MANUAL RUNS");
+        assert!(tx >= 134, "starts as a narrow strip");
+        app.on_click(tx - 2, ty + 3);
+        app.on_drag(100, ty + 3);
+        app.on_release();
+        assert!(app.split_pinned);
+        let out = render(&app, 170, 44);
+        let x = runs_x(&out);
+        assert!((97..=103).contains(&x), "now about 70 columns wide, starting near 100, not {x}:\n{out}");
+        app.apply_runs(Ok(Batch::default()));
+        assert!(runs_x(&render(&app, 170, 44)) < 110, "a size you chose is respected even when empty");
+        app.on_key(KeyCode::Char('='), false);
+        assert!(runs_x(&render(&app, 170, 44)) >= 134, "reset: automatic again");
     }
 }

@@ -1,5 +1,6 @@
 use crate::prs::{PrMsg, PullRequest};
 use crate::runs::{valid_repo, Batch, Run, RunMsg};
+use crate::settings::{self, Settings, COLUMNS, DEFAULT_COLUMN_WEIGHT, DEFAULT_SPLIT, MIN_COLUMN_WEIGHT};
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
 use std::cell::{Cell, RefCell};
@@ -54,6 +55,7 @@ pub enum BottomTab {
 pub enum Drag {
     Split,
     Height,
+    Column { index: usize, x0: u16, x1: u16 },
 }
 
 /// Where the body and the bottom panels were last drawn, so a drag can turn a position into a size.
@@ -92,6 +94,8 @@ pub enum Target {
     Tab(BottomTab),
     SplitHandle,
     HeightHandle,
+    /// The border between kanban column `i` and `i + 1`; carries the span of both columns.
+    ColumnHandle(usize, u16, u16),
     Sheet,
 }
 
@@ -267,6 +271,12 @@ pub struct App {
     pub split_pct: u16,
     /// Height of the bottom area as a percentage of the body; None lets the layout decide.
     pub bottom_pct: Option<u16>,
+    /// Once you size the panels yourself, an empty runs panel no longer shrinks on its own.
+    pub split_pinned: bool,
+    /// Relative widths of the kanban columns.
+    pub col_weights: [u16; COLUMNS],
+    /// Where the panel sizes are remembered; None keeps them for this session only.
+    pub settings_path: Option<PathBuf>,
     pub geometry: Cell<Geometry>,
     drag: Option<Drag>,
     pub opener: Box<dyn Fn(&str)>,
@@ -307,8 +317,11 @@ impl App {
             run_sheet: false,
             tab: BottomTab::Prs,
             extra_repos: Vec::new(),
-            split_pct: 58,
+            split_pct: DEFAULT_SPLIT,
             bottom_pct: None,
+            split_pinned: false,
+            col_weights: [DEFAULT_COLUMN_WEIGHT; COLUMNS],
+            settings_path: None,
             geometry: Cell::new(Geometry::default()),
             drag: None,
             opener: Box::new(open_in_browser),
@@ -651,8 +664,55 @@ impl App {
         self.open_run(self.run_sel);
     }
 
+    pub fn settings(&self) -> Settings {
+        Settings {
+            split_pct: self.split_pct,
+            bottom_pct: self.bottom_pct,
+            split_pinned: self.split_pinned,
+            columns: self.col_weights.to_vec(),
+        }
+    }
+
+    pub fn load_settings(&mut self) {
+        let Some(path) = &self.settings_path else {
+            return;
+        };
+        let saved = settings::load(path);
+        self.split_pct = saved.split_pct;
+        self.bottom_pct = saved.bottom_pct;
+        self.split_pinned = saved.split_pinned;
+        for (slot, weight) in self.col_weights.iter_mut().zip(saved.columns) {
+            *slot = weight;
+        }
+    }
+
+    /// Remember the sizes; failing to write them never gets in the way.
+    fn save_settings(&self) {
+        if let Some(path) = &self.settings_path {
+            let _ = settings::save(path, &self.settings());
+        }
+    }
+
     pub fn resize_split(&mut self, delta: i16) {
         self.split_pct = (self.split_pct as i16 + delta).clamp(SPLIT_RANGE.0 as i16, SPLIT_RANGE.1 as i16) as u16;
+        self.split_pinned = true;
+        self.save_settings();
+    }
+
+    /// Grow (or shrink) the selected kanban column at the expense of its neighbour.
+    pub fn resize_column(&mut self, delta: i16) {
+        let count = self.columns().len();
+        if self.screen != Screen::Board || count < 2 {
+            return;
+        }
+        let i = self.col.min(count - 1);
+        let j = if i + 1 < count { i + 1 } else { i - 1 };
+        let min = MIN_COLUMN_WEIGHT as i16;
+        let (wi, wj) = (self.col_weights[i] as i16, self.col_weights[j] as i16);
+        let change = delta.clamp(min - wi, wj - min);
+        self.col_weights[i] = (wi + change) as u16;
+        self.col_weights[j] = (wj - change) as u16;
+        self.save_settings();
     }
 
     pub fn resize_bottom(&mut self, delta: i16) {
@@ -662,11 +722,16 @@ impl App {
         });
         let next = (base as i16 + delta).clamp(HEIGHT_RANGE.0 as i16, HEIGHT_RANGE.1 as i16);
         self.bottom_pct = Some(next as u16);
+        self.save_settings();
     }
 
     pub fn reset_layout(&mut self) {
-        self.split_pct = 58;
-        self.bottom_pct = None;
+        let defaults = Settings::default();
+        self.split_pct = defaults.split_pct;
+        self.bottom_pct = defaults.bottom_pct;
+        self.split_pinned = defaults.split_pinned;
+        self.col_weights = [DEFAULT_COLUMN_WEIGHT; COLUMNS];
+        self.save_settings();
     }
 
     pub fn on_drag(&mut self, x: u16, y: u16) {
@@ -675,18 +740,29 @@ impl App {
             Some(Drag::Split) if g.bottom_w > 0 => {
                 let pct = u32::from(x.saturating_sub(g.bottom_x)) * 100 / u32::from(g.bottom_w);
                 self.split_pct = (pct as u16).clamp(SPLIT_RANGE.0, SPLIT_RANGE.1);
+                self.split_pinned = true;
             }
             Some(Drag::Height) if g.body_h > 0 => {
                 let bottom = (i32::from(g.body_y) + i32::from(g.body_h) - i32::from(y)).max(0) as u32;
                 let pct = bottom * 100 / u32::from(g.body_h);
                 self.bottom_pct = Some((pct as u16).clamp(HEIGHT_RANGE.0, HEIGHT_RANGE.1));
             }
+            Some(Drag::Column { index, x0, x1 }) if x1 > x0 && index + 1 < COLUMNS => {
+                let total = self.col_weights[index] + self.col_weights[index + 1];
+                let inside = x.clamp(x0, x1) - x0;
+                let left = (u32::from(total) * u32::from(inside) / u32::from(x1 - x0)) as u16;
+                let left = left.clamp(MIN_COLUMN_WEIGHT, total - MIN_COLUMN_WEIGHT);
+                self.col_weights[index] = left;
+                self.col_weights[index + 1] = total - left;
+            }
             _ => {}
         }
     }
 
     pub fn on_release(&mut self) {
-        self.drag = None;
+        if self.drag.take().is_some() {
+            self.save_settings();
+        }
     }
 
     fn close_overlays(&mut self) {
@@ -918,6 +994,14 @@ impl App {
                 self.reset_layout();
                 return false;
             }
+            KeyCode::Char('.') => {
+                self.resize_column(20);
+                return false;
+            }
+            KeyCode::Char(',') => {
+                self.resize_column(-20);
+                return false;
+            }
             KeyCode::Tab => {
                 let next = match self.focus {
                     Focus::Main => Focus::Prs,
@@ -1036,6 +1120,10 @@ impl App {
             }
             Some(Target::HeightHandle) => {
                 self.drag = Some(Drag::Height);
+                return;
+            }
+            Some(Target::ColumnHandle(index, x0, x1)) => {
+                self.drag = Some(Drag::Column { index, x0, x1 });
                 return;
             }
             Some(Target::Pr(i)) => {
@@ -1779,5 +1867,68 @@ mod tests {
         assert_eq!(app.run_sel, 1);
         app.apply_runs(batch(vec![run("a/b", 1, RunState::Running)]));
         assert_eq!(app.run_sel, 0);
+    }
+    fn temp_settings() -> (TempDir, std::path::PathBuf) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("tui.json");
+        (dir, path)
+    }
+
+    #[test]
+    fn layout_changes_are_saved_and_restored_in_the_next_session() {
+        let root = TempDir::new().unwrap();
+        let (_dir, path) = temp_settings();
+        let mut app = App::new(root.path().to_path_buf(), None);
+        app.settings_path = Some(path.clone());
+        app.on_key(KeyCode::Char('>'), false);
+        app.on_key(KeyCode::Char('+'), false);
+        let mut next = App::new(root.path().to_path_buf(), None);
+        next.settings_path = Some(path.clone());
+        next.load_settings();
+        assert_eq!((next.split_pct, next.bottom_pct, next.split_pinned), (63, Some(50), true));
+        next.on_key(KeyCode::Char('='), false);
+        let mut third = App::new(root.path().to_path_buf(), None);
+        third.settings_path = Some(path);
+        third.load_settings();
+        assert_eq!((third.split_pct, third.bottom_pct, third.split_pinned), (58, None, false), "reset is saved too");
+    }
+
+    #[test]
+    fn nothing_is_written_without_a_settings_path_and_a_drag_saves_on_release() {
+        let root = TempDir::new().unwrap();
+        let mut app = App::new(root.path().to_path_buf(), None);
+        app.on_key(KeyCode::Char('>'), false);
+        let (_dir, path) = temp_settings();
+        app.settings_path = Some(path.clone());
+        app.geometry.set(Geometry { body_y: 1, body_h: 40, bottom_x: 0, bottom_w: 200 });
+        app.hits.borrow_mut().push((Rect::new(100, 20, 2, 5), Target::SplitHandle));
+        app.on_click(100, 21);
+        app.on_drag(140, 21);
+        assert!(!path.exists(), "nothing is saved while dragging");
+        app.on_release();
+        assert!(path.exists(), "the release saves");
+        assert_eq!(crate::settings::load(&path).split_pct, 70);
+    }
+
+    #[test]
+    fn column_keys_resize_the_selected_column_at_its_neighbours_expense() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        let mut app = new(&root);
+        assert_eq!(app.col_weights[..2], [100, 100]);
+        app.on_key(KeyCode::Char('.'), false);
+        assert_eq!(app.col_weights[..2], [120, 80]);
+        app.on_key(KeyCode::Char(','), false);
+        app.on_key(KeyCode::Char(','), false);
+        assert_eq!(app.col_weights[..2], [80, 120]);
+        for _ in 0..20 {
+            app.on_key(KeyCode::Char(','), false);
+        }
+        assert_eq!(app.col_weights[..2], [20, 180], "no column goes below the minimum");
+        app.col = 4;
+        app.on_key(KeyCode::Char('.'), false);
+        assert_eq!(app.col_weights[3..5], [80, 120], "the last column takes from the one before it");
+        app.on_key(KeyCode::Char('='), false);
+        assert_eq!(app.col_weights, [100; 6]);
     }
 }

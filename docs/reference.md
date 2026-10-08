@@ -86,3 +86,7 @@ kept in memory). The repos come from your open PRs, the PRs recorded on stories,
 every 10 seconds while any run is active, every 60 seconds otherwise; stages are fetched only for
 active or failed runs and cached once finished. A finished run is dropped 3 hours after it finished.
 `--no-runs` disables it.
+
+Panel sizes (PR/runs split, bottom height, kanban column widths) are saved when you change them, in
+`$STORYBOARD_TUI_SETTINGS`, else `$XDG_CONFIG_HOME/storyboard/tui.json`, else
+`~/.config/storyboard/tui.json`. Values are clamped on load; a missing or damaged file means defaults.

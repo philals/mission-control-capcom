@@ -3,6 +3,7 @@ mod panel;
 mod prs;
 mod runs;
 mod runs_ui;
+mod settings;
 mod ui;
 
 use anyhow::{bail, Result};
@@ -52,6 +53,8 @@ fn main() -> Result<()> {
         let (rx, wake) = prs::spawn(source, prs::Cadence::default());
         app.attach_feed(rx, wake);
     }
+    app.settings_path = settings::default_path();
+    app.load_settings();
     app.extra_repos = cli.deploy_repos;
     if cli.no_runs {
         app.runs.disabled = true;
