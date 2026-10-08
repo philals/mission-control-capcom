@@ -209,12 +209,29 @@ fn padded(left: Vec<Span<'static>>, right: Vec<Span<'static>>, width: u16) -> Li
     Line::from(spans)
 }
 
+/// The brand, the mission clock and the go/no-go light (no-go while any open PR has a failed check).
+fn brand(app: &App) -> Vec<Span<'static>> {
+    let secs = app.started.elapsed().as_secs();
+    let mut spans = vec![
+        Span::styled("🚀 CAPCOM", Style::new().fg(panel::ORANGE).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("  T+{:02}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60),
+            Style::new().fg(Color::DarkGray),
+        ),
+    ];
+    if app.prs.loaded && !app.prs.disabled {
+        let failing = app.prs.items.iter().any(|p| p.counts().failed > 0);
+        let (text, color) = if failing { ("NO-GO", Color::Red) } else { ("GO", Color::Green) };
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(format!("● {text}"), Style::new().fg(color).add_modifier(Modifier::BOLD)));
+    }
+    spans
+}
+
 fn draw_list_header(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let dim = Style::new().fg(Color::DarkGray);
-    let left = vec![
-        Span::styled("◇ capcom", Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::styled("  Stories", Style::new().add_modifier(Modifier::BOLD)),
-    ];
+    let mut left = brand(app);
+    left.push(Span::styled("  STORIES", Style::new().add_modifier(Modifier::BOLD)));
     let shown = app.visible_stories().len();
     let hidden = app.hidden_done_count();
     let mut counts = format!("{shown} shown");
@@ -336,8 +353,8 @@ fn draw_board_header(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let mut left = vec![
         Span::styled(BACK_LABEL, Style::new().fg(Color::Cyan)),
         Span::raw("  "),
-        Span::styled("◇ capcom", bold.fg(Color::Cyan)),
     ];
+    left.extend(brand(app));
     let mut right = Vec::new();
     if let Some((pos, count)) = app.story_position() {
         if count > 1 {
@@ -782,7 +799,7 @@ mod tests {
     fn the_story_list_shows_rows_counts_and_the_done_toggle() {
         let (_root, mut app) = two_stories();
         let out = render(&app, 120, 30);
-        for want in ["Stories", "PROJ-2", "Story PROJ-2", "[ in_progress ]", "0/2 done", "2 todo", "[ Show done ]", "1 done hidden", "q quit"] {
+        for want in ["STORIES", "PROJ-2", "Story PROJ-2", "[ in_progress ]", "0/2 done", "2 todo", "[ Show done ]", "1 done hidden", "q quit"] {
             assert!(out.contains(want), "missing {want:?} in:\n{out}");
         }
         assert!(!out.contains("PROJ-1"), "{out}");
@@ -1280,6 +1297,21 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(app.current_notice().unwrap().contains("not permitted"));
+    }
+
+    #[test]
+    fn the_header_has_the_brand_a_mission_clock_and_a_go_no_go_light() {
+        let (_root, mut app) = two_stories();
+        let out = render(&app, 120, 30);
+        assert!(out.contains("🚀") && out.contains("CAPCOM") && out.contains("T+00:00:"), "{out}");
+        assert!(!out.contains("GO"), "no light before the pull requests have loaded:\n{out}");
+        app.apply_prs(Ok(vec![]));
+        assert!(render(&app, 120, 30).contains("● GO"));
+        app.apply_prs(Ok(feed()));
+        let out = render(&app, 120, 30);
+        assert!(out.contains("● NO-GO"), "a failed check is a no-go:\n{out}");
+        app.on_key(KeyCode::Enter, false);
+        assert!(render(&app, 120, 30).contains("CAPCOM"), "the board header has it too");
     }
 
     #[test]

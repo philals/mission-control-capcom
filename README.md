@@ -55,7 +55,7 @@ in_progress ─► in_review ─► done                          (story, via /s
 
 ## Viewing the board
 
-`capcom-tui` is a live kanban view of your stories. It is read-only, and it reloads on its own whenever a `board.json` changes, so you can leave it open next to the agents that are updating the board. It works with the keyboard and the mouse.
+`capcom-tui` is a live kanban view of your stories.  The header carries the 🚀 CAPCOM brand, a mission clock (`T+` since you started it) and a go/no-go light: `● NO-GO` while any of your open PRs has a failed check, otherwise `● GO`. It is read-only, and it reloads on its own whenever a `board.json` changes, so you can leave it open next to the agents that are updating the board. It works with the keyboard and the mouse.
 
 ```bash
 capcom-tui              # the story list; click or press Enter to open one
