@@ -19,12 +19,80 @@ fn details_width() -> usize {
     DETAILS_BUTTON.chars().count()
 }
 const MAX_STAGE_LINES: usize = 8;
+const MAX_TITLE_LINES: usize = 3;
+const NOT_LISTED: &str = "(not in your open pull requests)";
 pub const ORANGE: Color = Color::Indexed(208);
 
 /// Lines the PR rows need (rows plus the dividers between them).
-pub fn content_height(app: &App) -> u16 {
+pub fn content_height(app: &App, width: usize) -> u16 {
     let rows = app.pr_rows();
-    rows.iter().map(|r| row_height(r) + 1).sum::<u16>().saturating_sub(1)
+    rows.iter().map(|r| row_height(r, width) + 1).sum::<u16>().saturating_sub(1)
+}
+
+/// Break text over lines on word boundaries (a word longer than a line is split), cutting after
+/// `max_lines` with an ellipsis only when it still does not fit.
+pub fn wrap_text(text: &str, width: usize, max_lines: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![String::new()];
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        let mut word = word.to_string();
+        while word.chars().count() > width {
+            if !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+            }
+            lines.push(word.chars().take(width).collect());
+            word = word.chars().skip(width).collect();
+        }
+        if word.is_empty() {
+            continue;
+        }
+        let needed = if current.is_empty() {
+            word.chars().count()
+        } else {
+            current.chars().count() + 1 + word.chars().count()
+        };
+        if needed <= width {
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(&word);
+        } else {
+            lines.push(std::mem::take(&mut current));
+            current = word;
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        return vec![String::new()];
+    }
+    if lines.len() > max_lines {
+        lines.truncate(max_lines);
+        if let Some(last) = lines.last_mut() {
+            if last.chars().count() >= width {
+                last.pop();
+            }
+            last.push('…');
+        }
+    }
+    lines
+}
+
+fn title_of(row: &PrRow) -> String {
+    if row.live.is_none() && row.title.is_empty() {
+        NOT_LISTED.to_string()
+    } else {
+        row.title.clone()
+    }
+}
+
+/// The title, wrapped onto its own full-width lines (after the two-column marker).
+fn title_lines(row: &PrRow, width: usize) -> Vec<String> {
+    wrap_text(&title_of(row), width.saturating_sub(2), MAX_TITLE_LINES)
 }
 
 /// First row to draw so that the selected row (heights include the divider) fits in `avail` lines.
@@ -138,11 +206,12 @@ fn stage_count(row: &PrRow) -> usize {
     row.live.map_or(0, |pr| pr.open_checks().len())
 }
 
-/// Lines a row takes (not counting the divider below it): header, CI summary, then the stages.
-fn row_height(row: &PrRow) -> u16 {
+/// Lines a row takes (not counting the divider below it): the title, the badge and repo line,
+/// the CI summary, then the stages.
+fn row_height(row: &PrRow, width: usize) -> u16 {
     let stages = stage_count(row);
     let shown = stages.min(MAX_STAGE_LINES) + usize::from(stages > MAX_STAGE_LINES);
-    (2 + shown) as u16
+    (title_lines(row, width).len() + 2 + shown) as u16
 }
 
 fn stage_line(
@@ -172,7 +241,6 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
     let mut right: Vec<Span<'static>> = Vec::new();
     let mut summary: Vec<Span<'static>> = vec![marker.clone(), Span::raw("  ")];
     let mut stages: Vec<Vec<Span<'static>>> = Vec::new();
-    let mut title = row.title.clone();
     match row.live {
         Some(pr) => {
             if !pr.labels.is_empty() {
@@ -207,21 +275,15 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
                 ]);
             }
         }
-        None => {
-            if title.is_empty() {
-                title = "(not in your open pull requests)".to_string();
-            }
-            summary.push(Span::styled("no live check data", dim()));
-        }
+        None => summary.push(Span::styled("no live check data", dim())),
     }
-    let mut left: Vec<Span<'static>> = vec![marker, badge(row)];
+    let mut left: Vec<Span<'static>> = vec![marker.clone(), badge(row)];
     if let Some(tag) = &row.tag {
         left.push(Span::styled(format!(" {tag}  "), bold.fg(Color::Magenta)));
     } else {
         left.push(Span::raw(" "));
     }
-    left.push(Span::styled(format!("{id}  "), Style::new().fg(Color::Cyan)));
-    left.push(Span::styled(title, bold));
+    left.push(Span::styled(id, Style::new().fg(Color::Cyan)));
     let right_width = width_of(&right) + 1;
     let mut first = fit(left, width.saturating_sub(right_width));
     let pad = width.saturating_sub(width_of(&first) + width_of(&right));
@@ -233,7 +295,12 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
     let gap = width.saturating_sub(width_of(&second) + button);
     second.push(Span::raw(" ".repeat(gap)));
     second.push(Span::styled(DETAILS_BUTTON, Style::new().fg(Color::Cyan)));
-    let mut lines = vec![Line::from(first).style(style), Line::from(second).style(style)];
+    let mut lines: Vec<Line<'static>> = title_lines(row, width)
+        .into_iter()
+        .map(|t| Line::from(vec![marker.clone(), Span::styled(t, bold)]).style(style))
+        .collect();
+    lines.push(Line::from(first).style(style));
+    lines.push(Line::from(second).style(style));
     lines.extend(stages.into_iter().map(|s| Line::from(fit(s, width)).style(style)));
     lines
 }
@@ -284,7 +351,8 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         }
         return;
     }
-    let heights: Vec<u16> = rows.iter().map(|r| row_height(r) + 1).collect();
+    let width = body.width as usize;
+    let heights: Vec<u16> = rows.iter().map(|r| row_height(r, width) + 1).collect();
     let selected = app.pr_sel.min(rows.len() - 1);
     let offset = window_offset(&heights, selected, body.height);
     let now = Utc::now();
@@ -300,11 +368,12 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         f.render_widget(Paragraph::new(lines), rect);
         hits.push((rect, Target::Pr(i)));
         let button = details_width() as u16;
-        if body.width > button && h >= 2 {
-            hits.push((Rect::new(body.x + body.width - button, y + 1, button, 1), Target::PrDetails(i)));
+        let title_n = title_lines(row, width).len() as u16;
+        if body.width > button && h > title_n + 1 {
+            hits.push((Rect::new(body.x + body.width - button, y + title_n + 1, button, 1), Target::PrDetails(i)));
         }
         for j in 0..stage_count(row).min(MAX_STAGE_LINES) {
-            let line_y = y + 2 + j as u16;
+            let line_y = y + title_n + 2 + j as u16;
             if line_y < y + h {
                 hits.push((Rect::new(body.x, line_y, body.width, 1), Target::OpenCheck(i, j)));
             }
@@ -414,4 +483,32 @@ pub fn draw_sheet(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     hits.extend(stage_hits);
     let button = Rect::new(rect.x + 2, rect.y + rect.height - 1, OPEN_BUTTON.chars().count() as u16, 1);
     hits.push((button, Target::OpenPr));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrap_text;
+
+    #[test]
+    fn titles_wrap_on_word_boundaries() {
+        assert_eq!(wrap_text("one two three four", 9, 3), vec!["one two", "three", "four"]);
+        assert_eq!(wrap_text("short", 40, 3), vec!["short"]);
+    }
+
+    #[test]
+    fn a_word_longer_than_the_line_is_broken_instead_of_hidden() {
+        assert_eq!(wrap_text("abcdefghij", 4, 5), vec!["abcd", "efgh", "ij"]);
+    }
+
+    #[test]
+    fn only_a_very_long_title_is_cut_and_the_cut_is_marked() {
+        assert_eq!(wrap_text("aaa bbb ccc ddd eee", 7, 2), vec!["aaa bbb", "ccc dd…"]);
+        assert_eq!(wrap_text("aaa bbb ccc ddd", 7, 2), vec!["aaa bbb", "ccc ddd"], "fits exactly: no mark");
+    }
+
+    #[test]
+    fn empty_text_and_zero_width_do_not_panic() {
+        assert_eq!(wrap_text("", 10, 3), vec![""]);
+        assert_eq!(wrap_text("anything", 0, 3), vec![""]);
+    }
 }

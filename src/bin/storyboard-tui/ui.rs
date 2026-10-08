@@ -1,4 +1,4 @@
-use crate::app::{App, BottomTab, Column, Focus, Screen, StorySummary, Target, STATUS_ORDER};
+use crate::app::{App, BottomTab, Column, Focus, Geometry, Screen, StorySummary, Target, STATUS_ORDER};
 use crate::{panel, runs_ui};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -14,6 +14,7 @@ const CARD_HEIGHT: u16 = 5;
 const STORY_ROW_HEIGHT: u16 = 4;
 const COMPACT_BELOW: u16 = 60;
 const WIDE_FROM: u16 = 150;
+const RUNS_SMALL_WIDTH: u16 = 30;
 const BACK_LABEL: &str = "‹ Stories";
 
 pub fn draw(f: &mut Frame, app: &App) {
@@ -22,7 +23,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)])
         .split(area);
     let wide = area.width >= WIDE_FROM;
-    let panel_height = bottom_height(app, rows[1].height, wide);
+    let panel_height = bottom_height(app, rows[1].height, wide, area.width);
     let (main, panel_area) = if panel_height > 0 {
         let parts = Layout::vertical([Constraint::Min(3), Constraint::Length(panel_height)]).split(rows[1]);
         (parts[0], Some(parts[1]))
@@ -43,11 +44,28 @@ pub fn draw(f: &mut Frame, app: &App) {
             }
         }
     }
+    app.geometry.set(Geometry {
+        body_y: rows[1].y,
+        body_h: rows[1].height,
+        bottom_x: panel_area.map_or(area.x, |b| b.x),
+        bottom_w: panel_area.map_or(area.width, |b| b.width),
+    });
     if let Some(bottom) = panel_area {
         if wide {
-            let halves = Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)]).split(bottom);
+            let small = runs_small(app);
+            let halves = if small {
+                Layout::horizontal([Constraint::Min(20), Constraint::Length(RUNS_SMALL_WIDTH)]).split(bottom)
+            } else {
+                Layout::horizontal([Constraint::Percentage(app.split_pct), Constraint::Percentage(100 - app.split_pct)])
+                    .split(bottom)
+            };
             panel::draw_panel(f, halves[0], app, &mut hits);
             runs_ui::draw_panel(f, halves[1], app, &mut hits);
+            hits.push((Rect::new(bottom.x, bottom.y, bottom.width, 1), Target::HeightHandle));
+            if !small {
+                let strip = Rect::new(halves[1].x.saturating_sub(1), halves[1].y + 1, 2, halves[1].height.saturating_sub(1));
+                hits.push((strip, Target::SplitHandle));
+            }
         } else {
             let tab_row = Rect::new(bottom.x, bottom.y, bottom.width, 1);
             let rest = Rect::new(bottom.x, bottom.y + 1, bottom.width, bottom.height.saturating_sub(1));
@@ -71,12 +89,29 @@ pub fn draw(f: &mut Frame, app: &App) {
     *app.hits.borrow_mut() = hits;
 }
 
+/// An empty (or switched off) manual runs panel shrinks to a narrow strip, unless it has an
+/// error or a warning that needs room to be read.
+fn runs_small(app: &App) -> bool {
+    let quiet = app.runs.error.is_none() && app.runs.warnings.is_empty();
+    quiet && (app.runs.disabled || (app.runs.loaded && app.visible_runs().is_empty()))
+}
+
 /// Height of the bottom area for a body of the given height; 0 hides it.
-fn bottom_height(app: &App, body: u16, wide: bool) -> u16 {
+fn bottom_height(app: &App, body: u16, wide: bool, width: u16) -> u16 {
+    if let Some(pct) = app.bottom_pct {
+        return if body >= 12 { (body * pct / 100).clamp(5, body - 4) } else { 0 };
+    }
     match app.screen {
         Screen::List if body >= 16 => (body * 45 / 100).max(8),
         Screen::Board if body >= 18 => {
-            let prs = panel::content_height(app);
+            let pr_width = if !wide {
+                width
+            } else if runs_small(app) {
+                width.saturating_sub(RUNS_SMALL_WIDTH)
+            } else {
+                (u32::from(width) * u32::from(app.split_pct) / 100) as u16
+            };
+            let prs = panel::content_height(app, usize::from(pr_width.saturating_sub(2)));
             let runs = runs_ui::content_height(app);
             let content = if wide {
                 prs.max(runs)
@@ -121,6 +156,11 @@ fn draw_tabs(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     if runs_x < area.x + area.width {
         let width = runs_width.min(area.x + area.width - runs_x);
         hits.push((Rect::new(runs_x, area.y, width, 1), Target::Tab(BottomTab::Runs)));
+    }
+    let used = prs_width + 2 + runs_width;
+    if area.width > used + 2 {
+        let free = Rect::new(area.x + used + 2, area.y, area.width - used - 2, 1);
+        hits.push((free, Target::HeightHandle));
     }
     let line = Line::from(vec![
         Span::styled(prs, style(BottomTab::Prs)),
@@ -565,6 +605,9 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("d", "show or hide completed stories (list)".into()),
         row("Esc  b", "back to the list, or close a sheet".into()),
         row("r", "reload now (it also reloads by itself)".into()),
+        row("< >", "make the PR panel narrower or wider (or drag the divider)".into()),
+        row("+ -", "make the bottom panels taller or shorter (or drag their top edge)".into()),
+        row("=", "reset the panel sizes".into()),
         row("?", "toggle this help".into()),
         row("q  Ctrl-C", "quit".into()),
         Line::raw(""),
@@ -583,6 +626,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
 mod tests {
     use super::*;
     use crate::app::{App, BottomTab, Focus, Screen};
+    use ratatui::crossterm::event::KeyCode;
     use crate::runs::{Batch, Job, Run, RunState};
     use crate::prs::{Check, CheckState, PullRequest, Review};
     use ratatui::backend::TestBackend;
@@ -952,8 +996,8 @@ mod tests {
     fn draft_and_ready_pull_requests_are_clearly_different() {
         let (_root, app) = with_prs();
         let out = render(&app, 170, 44);
-        let ready = line_of(&out, "Add notices");
-        let draft = line_of(&out, "Unrelated chore");
+        let ready = line_of(&out, "acme/widgets#12");
+        let draft = line_of(&out, "acme/api#99");
         assert!(ready.contains("[READY]") && !ready.contains("[DRAFT]"), "{ready}");
         assert!(draft.contains("[DRAFT]") && !draft.contains("[READY]"), "{draft}");
     }
@@ -962,8 +1006,8 @@ mod tests {
     fn a_divider_separates_one_pull_request_from_the_next() {
         let (_root, app) = with_prs();
         let out = render(&app, 170, 44);
-        let first = find(&out, "acme/widgets#12").1 as usize;
-        let second = find(&out, "acme/api#99").1 as usize;
+        let first = find(&out, "Add notices").1 as usize;
+        let second = find(&out, "Unrelated chore").1 as usize;
         let between: Vec<&str> = out.lines().skip(first + 1).take(second - first - 1).collect();
         assert!(between.iter().any(|l| l.contains("────────")), "{out}");
         assert!(
@@ -986,13 +1030,13 @@ mod tests {
     fn a_long_stage_list_is_capped_and_the_selected_pr_stays_fully_visible() {
         let (_root, mut app) = two_stories();
         app.apply_prs(Ok(vec![busy_pr(1, 12), busy_pr(2, 3), busy_pr(3, 3)]));
-        let out = render(&app, 140, 34);
+        let out = render(&app, 140, 36);
         assert!(out.contains("CI / job07"), "{out}");
         assert!(!out.contains("CI / job08"), "{out}");
         assert!(out.contains("… +4 more"), "{out}");
         app.focus = Focus::Prs;
         app.pr_sel = 2;
-        let out = render(&app, 140, 34);
+        let out = render(&app, 140, 36);
         assert!(out.contains("acme/svc3#3"), "{out}");
         assert!(out.contains("CI / job02"), "the whole selected row is visible:\n{out}");
         assert!(!out.contains("acme/svc1#1"), "{out}");
@@ -1087,7 +1131,7 @@ mod tests {
     fn the_details_button_of_a_later_pr_opens_that_prs_sheet() {
         let (_root, mut app) = with_prs();
         let out = render(&app, 170, 44);
-        let y_second = find(&out, "Unrelated chore").1 + 1;
+        let y_second = find(&out, "Unrelated chore").1 + 2;
         let x = out.lines().nth(y_second as usize).unwrap().find("[ details ]").expect("button on the CI line");
         let x = out.lines().nth(y_second as usize).unwrap()[..x].chars().count() as u16;
         app.on_click(x + 1, y_second);
@@ -1354,10 +1398,11 @@ mod tests {
         assert!(out.contains("Loading manual runs"), "{out}");
         app.apply_runs(Ok(Batch::default()));
         let out = render(&app, 170, 40);
-        assert!(out.contains("No manual runs in the last 3 hours"), "{out}");
+        assert!(out.contains("No manual runs"), "{out}");
         app.apply_runs(Ok(Batch { runs: vec![], warnings: vec!["acme/api: HTTP 403".into()] }));
         let out = render(&app, 170, 40);
         assert!(out.contains("acme/api: HTTP 403"), "{out}");
+        assert!(out.contains("No manual runs in the last 3 hours"), "with room, the full message shows:\n{out}");
         app.apply_runs(Err("gh failed: not logged in".into()));
         let out = render(&app, 170, 40);
         assert!(out.contains("gh failed: not logged in"), "{out}");
@@ -1373,5 +1418,159 @@ mod tests {
         app.on_scroll(x, y, -1);
         assert_eq!(app.run_sel, 0);
         assert_eq!((app.list_sel, app.pr_sel), (0, 0));
+    }
+    fn titled(title: &str) -> PullRequest {
+        let mut pr = feed().remove(0);
+        pr.title = title.to_string();
+        pr
+    }
+
+    #[test]
+    fn the_pr_title_has_its_own_line_and_is_never_cut_off() {
+        let (_root, mut app) = with_prs();
+        let long = "Add a very long descriptive title that explains the whole change in great detail so that it has to wrap";
+        app.apply_prs(Ok(vec![titled(long)]));
+        for width in [170u16, 120, 90] {
+            let out = render(&app, width, 44);
+            for word in long.split_whitespace() {
+                assert!(out.contains(word), "width {width}: {word:?} is missing:\n{out}");
+            }
+            assert!(!line_of(&out, "Add a very long").contains("[READY]"), "the title has a line of its own:\n{out}");
+            let pr_cols = if width >= 150 { usize::from(width) * 58 / 100 } else { usize::from(width) };
+            let cut = out.lines().filter(|l| l.chars().take(pr_cols).any(|c| c == '…')).count();
+            assert_eq!(cut, 0, "width {width}: nothing in the PR panel is truncated:\n{out}");
+        }
+        let out = render(&app, 170, 44);
+        let title_y = find(&out, "Add a very long").1;
+        let meta_y = find(&out, "acme/widgets#12").1;
+        assert!(meta_y > title_y, "the title comes first, then the badge and repo line:\n{out}");
+    }
+
+    #[test]
+    fn a_title_that_fits_takes_one_line_and_clicking_it_still_opens_the_pr() {
+        let (_root, mut app) = with_prs();
+        let log = recorder(&mut app);
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "Add notices");
+        assert_eq!(find(&out, "acme/widgets#12").1, y + 1, "the repo line directly follows a one-line title");
+        app.on_click(x, y);
+        assert_eq!(*log.borrow(), vec!["https://github.com/acme/widgets/pull/12".to_string()]);
+    }
+
+    fn runs_x(out: &str) -> u16 {
+        find(out, "MANUAL RUNS").0
+    }
+
+    #[test]
+    fn an_empty_manual_runs_panel_is_narrow_and_leaves_the_room_to_the_prs() {
+        let (_root, mut app) = with_prs();
+        assert!(runs_x(&render(&app, 170, 44)) < 110, "still loading: normal width, no jumping around");
+        app.apply_runs(Ok(Batch::default()));
+        let out = render(&app, 170, 44);
+        assert!(runs_x(&out) >= 170 - 36, "empty runs panel is narrow:\n{out}");
+        assert!(out.contains("No manual runs"), "{out}");
+        app.apply_runs(Ok(runs_feed()));
+        assert!(runs_x(&render(&app, 170, 44)) < 110, "runs back: wide again");
+        app.apply_runs(Ok(Batch::default()));
+        app.apply_runs(Err("gh failed: not logged in".into()));
+        assert!(runs_x(&render(&app, 170, 44)) < 110, "an error needs room to be read");
+        app.apply_runs(Ok(Batch { runs: vec![], warnings: vec!["acme/api: HTTP 403".into()] }));
+        assert!(runs_x(&render(&app, 170, 44)) < 110, "a warning needs room to be read");
+    }
+
+    #[test]
+    fn keys_resize_the_panels_within_limits_and_equals_resets() {
+        let (_root, mut app) = with_runs();
+        assert_eq!((app.split_pct, app.bottom_pct), (58, None));
+        app.on_key(KeyCode::Char('>'), false);
+        assert_eq!(app.split_pct, 63);
+        app.on_key(KeyCode::Char('<'), false);
+        app.on_key(KeyCode::Char('<'), false);
+        assert_eq!(app.split_pct, 53);
+        for _ in 0..20 {
+            app.on_key(KeyCode::Char('<'), false);
+        }
+        assert_eq!(app.split_pct, 25);
+        for _ in 0..30 {
+            app.on_key(KeyCode::Char('>'), false);
+        }
+        assert_eq!(app.split_pct, 80);
+        app.on_key(KeyCode::Char('+'), false);
+        assert_eq!(app.bottom_pct, Some(50), "from the list default of 45");
+        for _ in 0..20 {
+            app.on_key(KeyCode::Char('+'), false);
+        }
+        assert_eq!(app.bottom_pct, Some(80));
+        for _ in 0..30 {
+            app.on_key(KeyCode::Char('-'), false);
+        }
+        assert_eq!(app.bottom_pct, Some(15));
+        app.on_key(KeyCode::Char('='), false);
+        assert_eq!((app.split_pct, app.bottom_pct), (58, None));
+    }
+
+    #[test]
+    fn dragging_the_divider_resizes_the_two_panels() {
+        let (_root, mut app) = with_runs();
+        let out = render(&app, 170, 44);
+        let (tx, ty) = find(&out, "MANUAL RUNS");
+        app.on_click(tx - 2, ty + 3);
+        assert!(!app.run_sheet && app.focus == Focus::Main, "grabbing the divider is not a click on a run");
+        app.on_drag(120, ty + 3);
+        app.on_release();
+        assert_eq!(app.split_pct, 70);
+        let out = render(&app, 170, 44);
+        let x = runs_x(&out);
+        assert!((117..=123).contains(&x), "the runs panel now starts near column 120, not {x}:\n{out}");
+        let (tx2, _) = find(&out, "MANUAL RUNS");
+        app.on_click(tx2 - 2, ty + 3);
+        app.on_drag(2, ty + 3);
+        assert_eq!(app.split_pct, 25, "dragged to the far left it stops at the limit");
+        app.on_release();
+        app.on_drag(150, ty + 3);
+        assert_eq!(app.split_pct, 25, "after releasing, moving the pointer changes nothing");
+    }
+
+    #[test]
+    fn dragging_the_top_edge_resizes_the_bottom_area() {
+        let (_root, mut app) = with_runs();
+        let out = render(&app, 170, 44);
+        let (_, y) = find(&out, "PULL REQUESTS");
+        app.on_click(60, y);
+        app.on_drag(60, y - 6);
+        app.on_release();
+        assert!(app.bottom_pct.is_some_and(|p| p > 45));
+        let out = render(&app, 170, 44);
+        let new_y = find(&out, "PULL REQUESTS").1;
+        assert!((4..=7).contains(&(y - new_y)), "the panels moved up by about 6 rows ({y} -> {new_y}):\n{out}");
+        app.on_click(60, new_y);
+        app.on_drag(60, 40);
+        app.on_release();
+        assert_eq!(app.bottom_pct, Some(15), "dragged almost to the bottom it stops at the smallest size");
+    }
+
+    #[test]
+    fn the_height_setting_also_applies_inside_a_story_and_keeps_the_board_usable() {
+        let (_root, mut app) = with_runs();
+        app.open_story("PROJ-2");
+        let auto_y = find(&render(&app, 170, 44), "STORY PULL REQUESTS").1;
+        app.bottom_pct = Some(70);
+        let out = render(&app, 170, 44);
+        let y = find(&out, "STORY PULL REQUESTS").1;
+        assert!(y < auto_y, "a taller bottom area starts higher ({auto_y} -> {y})");
+        assert!(out.contains("TODO") && out.contains("PLANNED"), "the board is still drawn:\n{out}");
+    }
+
+    #[test]
+    fn narrow_terminals_can_still_resize_the_height_but_have_no_divider() {
+        let (_root, mut app) = with_runs();
+        let out = render(&app, 120, 44);
+        let y = find(&out, "[ Pull requests").1;
+        app.on_click(100, y);
+        app.on_drag(100, y.saturating_sub(4));
+        app.on_release();
+        assert!(app.bottom_pct.is_some_and(|p| p > 45));
+        let hits = app.hits.borrow();
+        assert!(!hits.iter().any(|(_, t)| *t == crate::app::Target::SplitHandle), "tabs have no divider");
     }
 }

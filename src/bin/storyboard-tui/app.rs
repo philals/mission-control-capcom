@@ -2,7 +2,7 @@ use crate::prs::{PrMsg, PullRequest};
 use crate::runs::{valid_repo, Batch, Run, RunMsg};
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -49,6 +49,25 @@ pub enum BottomTab {
     Runs,
 }
 
+/// A resize handle being dragged with the mouse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Drag {
+    Split,
+    Height,
+}
+
+/// Where the body and the bottom panels were last drawn, so a drag can turn a position into a size.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Geometry {
+    pub body_y: u16,
+    pub body_h: u16,
+    pub bottom_x: u16,
+    pub bottom_w: u16,
+}
+
+pub const SPLIT_RANGE: (u16, u16) = (25, 80);
+pub const HEIGHT_RANGE: (u16, u16) = (15, 80);
+
 /// What a mouse click on a rectangle does. Rectangles are recorded while drawing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
@@ -71,6 +90,8 @@ pub enum Target {
     OpenStage(usize),
     OpenSelectedRun,
     Tab(BottomTab),
+    SplitHandle,
+    HeightHandle,
     Sheet,
 }
 
@@ -242,6 +263,12 @@ pub struct App {
     pub run_sheet: bool,
     pub tab: BottomTab,
     pub extra_repos: Vec<String>,
+    /// Width of the PR panel, as a percentage of the bottom area, when both panels are side by side.
+    pub split_pct: u16,
+    /// Height of the bottom area as a percentage of the body; None lets the layout decide.
+    pub bottom_pct: Option<u16>,
+    pub geometry: Cell<Geometry>,
+    drag: Option<Drag>,
     pub opener: Box<dyn Fn(&str)>,
     feed: Option<(Receiver<PrMsg>, Sender<()>)>,
     run_feed: Option<(Receiver<RunMsg>, Sender<()>)>,
@@ -280,6 +307,10 @@ impl App {
             run_sheet: false,
             tab: BottomTab::Prs,
             extra_repos: Vec::new(),
+            split_pct: 58,
+            bottom_pct: None,
+            geometry: Cell::new(Geometry::default()),
+            drag: None,
             opener: Box::new(open_in_browser),
             feed: None,
             run_feed: None,
@@ -620,6 +651,44 @@ impl App {
         self.open_run(self.run_sel);
     }
 
+    pub fn resize_split(&mut self, delta: i16) {
+        self.split_pct = (self.split_pct as i16 + delta).clamp(SPLIT_RANGE.0 as i16, SPLIT_RANGE.1 as i16) as u16;
+    }
+
+    pub fn resize_bottom(&mut self, delta: i16) {
+        let base = self.bottom_pct.unwrap_or(match self.screen {
+            Screen::List => 45,
+            Screen::Board => 40,
+        });
+        let next = (base as i16 + delta).clamp(HEIGHT_RANGE.0 as i16, HEIGHT_RANGE.1 as i16);
+        self.bottom_pct = Some(next as u16);
+    }
+
+    pub fn reset_layout(&mut self) {
+        self.split_pct = 58;
+        self.bottom_pct = None;
+    }
+
+    pub fn on_drag(&mut self, x: u16, y: u16) {
+        let g = self.geometry.get();
+        match self.drag {
+            Some(Drag::Split) if g.bottom_w > 0 => {
+                let pct = u32::from(x.saturating_sub(g.bottom_x)) * 100 / u32::from(g.bottom_w);
+                self.split_pct = (pct as u16).clamp(SPLIT_RANGE.0, SPLIT_RANGE.1);
+            }
+            Some(Drag::Height) if g.body_h > 0 => {
+                let bottom = (i32::from(g.body_y) + i32::from(g.body_h) - i32::from(y)).max(0) as u32;
+                let pct = bottom * 100 / u32::from(g.body_h);
+                self.bottom_pct = Some((pct as u16).clamp(HEIGHT_RANGE.0, HEIGHT_RANGE.1));
+            }
+            _ => {}
+        }
+    }
+
+    pub fn on_release(&mut self) {
+        self.drag = None;
+    }
+
     fn close_overlays(&mut self) {
         self.detail = false;
         self.help = false;
@@ -829,6 +898,26 @@ impl App {
                 self.close_overlays();
                 return false;
             }
+            KeyCode::Char('>') => {
+                self.resize_split(5);
+                return false;
+            }
+            KeyCode::Char('<') => {
+                self.resize_split(-5);
+                return false;
+            }
+            KeyCode::Char('+') => {
+                self.resize_bottom(5);
+                return false;
+            }
+            KeyCode::Char('-') => {
+                self.resize_bottom(-5);
+                return false;
+            }
+            KeyCode::Char('=') => {
+                self.reset_layout();
+                return false;
+            }
             KeyCode::Tab => {
                 let next = match self.focus {
                     Focus::Main => Focus::Prs,
@@ -941,6 +1030,14 @@ impl App {
             return;
         }
         match target {
+            Some(Target::SplitHandle) => {
+                self.drag = Some(Drag::Split);
+                return;
+            }
+            Some(Target::HeightHandle) => {
+                self.drag = Some(Drag::Height);
+                return;
+            }
             Some(Target::Pr(i)) => {
                 self.set_focus(Focus::Prs);
                 self.pr_sel = i;

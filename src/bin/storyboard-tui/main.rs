@@ -86,6 +86,8 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                 }
                 Event::Mouse(mouse) => match mouse.kind {
                     MouseEventKind::Down(MouseButton::Left) => app.on_click(mouse.column, mouse.row),
+                    MouseEventKind::Drag(MouseButton::Left) => app.on_drag(mouse.column, mouse.row),
+                    MouseEventKind::Up(MouseButton::Left) => app.on_release(),
                     MouseEventKind::ScrollUp => app.on_scroll(mouse.column, mouse.row, -1),
                     MouseEventKind::ScrollDown => app.on_scroll(mouse.column, mouse.row, 1),
                     _ => {}

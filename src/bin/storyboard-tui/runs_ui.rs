@@ -136,7 +136,10 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let runs = app.visible_runs();
     let focused = app.focus == Focus::Runs;
     let name = if app.screen == Screen::List { "MANUAL RUNS" } else { "STORY MANUAL RUNS" };
-    let status = if app.runs.loading {
+    let compact = area.width < 40;
+    let status = if compact {
+        String::new()
+    } else if app.runs.loading {
         " refreshing… ".to_string()
     } else {
         app.runs.updated.as_ref().map_or(String::new(), |u| format!(" updated {u} "))
@@ -170,7 +173,11 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     }
     let body = Rect::new(inner.x, top, inner.width, (inner.y + inner.height).saturating_sub(top));
     if runs.is_empty() {
-        let message = if app.runs.disabled {
+        let message = if compact && app.runs.disabled {
+            Some("Manual runs off".to_string())
+        } else if compact && app.runs.loaded && app.runs.error.is_none() {
+            Some("No manual runs".to_string())
+        } else if app.runs.disabled {
             Some("Manual runs are off (started with --no-runs).".to_string())
         } else if app.screen == Screen::Board {
             Some("No manual runs in this story's repos in the last 3 hours.".to_string())
@@ -182,7 +189,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
             Some("Loading manual runs…".to_string())
         };
         let mut lines: Vec<Line<'static>> = message.into_iter().map(|m| Line::from(Span::styled(m, dim()))).collect();
-        if app.runs.loaded && !app.runs.disabled && app.deploy_repos().is_empty() {
+        if !compact && app.runs.loaded && !app.runs.disabled && app.deploy_repos().is_empty() {
             lines.push(Line::from(Span::styled(
                 "No repos to check yet: they come from your open PRs, story PRs and STORYBOARD_DEPLOY_REPOS.",
                 dim(),
