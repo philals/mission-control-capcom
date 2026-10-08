@@ -95,6 +95,9 @@ pub fn draw(f: &mut Frame, app: &App) {
     if app.new_story.is_some() {
         draw_new_story(f, area, app, &mut hits);
     }
+    if app.agent_ask.is_some() {
+        draw_agent_ask(f, area, app, &mut hits);
+    }
     *app.hits.borrow_mut() = hits;
 }
 
@@ -453,6 +456,50 @@ fn draw_new_story(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     hits.push((cancel, Target::NewStoryCancel));
 }
 
+const AGENT_YES: &str = "[ y Start an agent ]";
+const AGENT_NO: &str = "[ n No agent: just move it to IMPLEMENTING ]";
+
+fn draw_agent_ask(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
+    let Some(ask) = &app.agent_ask else {
+        return;
+    };
+    let w = (area.width * 70 / 100).max(56).min(area.width);
+    let h = 11.min(area.height);
+    let rect = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
+    let title = trunc(&format!(" {} {}", ask.id, ask.title), (w as usize).saturating_sub(2));
+    let lines = vec![
+        Line::raw(""),
+        Line::from(Span::styled(title, Style::new().add_modifier(Modifier::BOLD))),
+        Line::raw(""),
+        Line::from(Span::raw(" Does an agent need to implement this?")),
+        Line::from(Span::styled(" Say no for work you will do yourself, like a spike or manual testing.", Style::new().fg(theme::DIM))),
+    ];
+    let block = Block::bordered()
+        .border_type(BorderType::Double)
+        .border_style(Style::new().fg(panel::ORANGE))
+        .title(Span::styled(" Move to IMPLEMENTING ", Style::new().add_modifier(Modifier::BOLD)));
+    theme::clear(f, rect);
+    f.render_widget(Paragraph::new(lines).block(block), rect);
+    hits.push((rect, Target::Sheet));
+    let first = rect.y + 6;
+    for (i, (text, target, style)) in [
+        (AGENT_YES, Target::AgentYes, Style::new().fg(theme::GREEN).add_modifier(Modifier::BOLD)),
+        (AGENT_NO, Target::AgentNo, Style::new().fg(theme::CYAN).add_modifier(Modifier::BOLD)),
+        (CANCEL_BUTTON, Target::AgentCancel, Style::new().fg(theme::DIM)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let width = (text.chars().count() as u16).min(w.saturating_sub(4));
+        let button = Rect::new(rect.x + 2, first + i as u16, width, 1);
+        if button.y + 1 >= rect.y + rect.height {
+            break;
+        }
+        f.render_widget(Paragraph::new(Span::styled(text, style)), button);
+        hits.push((button, target));
+    }
+}
+
 const START_BUTTON: &str = "[ Enter Start ]";
 const CANCEL_BUTTON: &str = "[ Esc Cancel ]";
 
@@ -701,7 +748,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("Tab", "focus: board or list, then PRs, then manual runs".into()),
         row("o", "open the selected pull request or run in the browser".into()),
         row("n", "new story: paste a Jira key or link to start its breakdown in Herdr".into()),
-        row("p / i", "start planning / implementing the selected task in Herdr (or drag the card)".into()),
+        row("p / i", "start planning / implementing the selected task in Herdr (or drag the card); a TODO task asks whether an agent is needed".into()),
         row("c", "copy the selected pull request's link".into()),
         row("m", "mark the selected draft ready for review (asks first)".into()),
         row("d", "show or hide completed stories (list)".into()),
@@ -1490,6 +1537,8 @@ mod tests {
         let (_root, mut app) = sample();
         let fake = with_herdr(&mut app);
         drag_card(&mut app, "T3 Spike it", "IMPLEMENTING");
+        assert!(app.agent_ask.is_some());
+        app.on_key(KeyCode::Char('y'), false);
         let launches = launches_after(&mut app, &fake, 1);
         assert_eq!(launches.len(), 1);
         assert_eq!(launches[0].prompt, "/story-implement-task PROJ-1 T3");
@@ -1505,6 +1554,73 @@ mod tests {
         drag_card(&mut app, "T2 Wire UI", "IMPLEMENTING");
         assert!(launches_after(&mut app, &fake, 1).is_empty());
         assert!(app.current_notice().unwrap().contains("waits for T1"));
+    }
+
+    fn task_status(app: &App, id: &str) -> Status {
+        store::load(&app.root, "PROJ-1").unwrap().task(id).unwrap().status
+    }
+
+    #[test]
+    fn a_todo_card_dropped_on_implementing_asks_whether_an_agent_is_needed() {
+        let (_root, mut app) = sample();
+        let fake = with_herdr(&mut app);
+        drag_card(&mut app, "T3 Spike it", "IMPLEMENTING");
+        let out = render(&app, 200, 40);
+        for want in ["Move to IMPLEMENTING", "T3 Spike it", "Does an agent need to implement this?", "[ y Start an agent ]", "[ n No agent: just move it to IMPLEMENTING ]", "[ Esc Cancel ]"] {
+            assert!(out.contains(want), "missing {want:?}:\n{out}");
+        }
+        assert!(launches_after(&mut app, &fake, 1).is_empty(), "nothing starts before the answer");
+        assert_eq!(task_status(&app, "T3"), Status::Todo);
+    }
+
+    #[test]
+    fn no_agent_just_moves_the_task_to_implementing_and_opens_nothing() {
+        let (_root, mut app) = sample();
+        let fake = with_herdr(&mut app);
+        drag_card(&mut app, "T3 Spike it", "IMPLEMENTING");
+        let out = render(&app, 200, 40);
+        let (x, y) = find(&out, "[ n No agent");
+        app.on_click(x + 3, y);
+        assert!(app.agent_ask.is_none());
+        assert_eq!(task_status(&app, "T3"), Status::Implementing, "the board file changed");
+        assert!(launches_after(&mut app, &fake, 1).is_empty(), "no agent was opened");
+        let columns = app.columns();
+        assert!(columns[3].tasks.iter().any(|t| t.id == "T3"), "and the card shows in IMPLEMENTING");
+        assert!(app.current_notice().unwrap().contains("no agent started"));
+    }
+
+    #[test]
+    fn yes_starts_the_agent_and_cancel_does_nothing() {
+        let (_root, mut app) = sample();
+        let fake = with_herdr(&mut app);
+        app.col = 0;
+        app.row[0] = 0;
+        app.on_key(KeyCode::Char('i'), false);
+        assert!(app.agent_ask.is_some());
+        app.on_key(KeyCode::Esc, false);
+        assert!(app.agent_ask.is_none());
+        assert_eq!(task_status(&app, "T3"), Status::Todo);
+        app.on_key(KeyCode::Char('i'), false);
+        let out = render(&app, 200, 40);
+        let (x, y) = find(&out, "[ Esc Cancel ]");
+        app.on_click(x + 3, y);
+        assert!(app.agent_ask.is_none() && task_status(&app, "T3") == Status::Todo);
+        app.on_key(KeyCode::Char('i'), false);
+        let (x, y) = find(&render(&app, 200, 40), "[ y Start an agent ]");
+        app.on_click(x + 3, y);
+        let launches = launches_after(&mut app, &fake, 1);
+        assert_eq!(launches.len(), 1);
+        assert_eq!(launches[0].prompt, "/story-implement-task PROJ-1 T3");
+        assert_eq!(task_status(&app, "T3"), Status::Todo, "with an agent the skill moves it");
+    }
+
+    #[test]
+    fn a_planned_card_still_goes_straight_to_the_agent_without_asking() {
+        let (_root, mut app) = sample();
+        let fake = with_herdr(&mut app);
+        drag_card(&mut app, "T1 Add endpoint", "IMPLEMENTING");
+        assert!(app.agent_ask.is_none());
+        assert_eq!(launches_after(&mut app, &fake, 1).len(), 1);
     }
 
     #[test]
@@ -1689,6 +1805,9 @@ mod tests {
         assert_readable(&board, 200, 30, "board");
         board.detail = true;
         assert_readable(&board, 200, 30, "task detail");
+        board.detail = false;
+        board.start_work("T3", Status::Implementing);
+        assert_readable(&board, 200, 40, "agent question");
     }
 
     #[test]

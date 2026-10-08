@@ -89,6 +89,9 @@ pub enum Target {
     PrBadge(usize),
     ConfirmYes,
     ConfirmNo,
+    AgentYes,
+    AgentNo,
+    AgentCancel,
     PrPanel,
     /// The "updated" label in a panel title: click to refresh now.
     Refresh,
@@ -276,6 +279,13 @@ pub struct Confirm {
     pub title: String,
 }
 
+/// A TODO task about to be implemented: ask whether an agent should do it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentAsk {
+    pub id: String,
+    pub title: String,
+}
+
 const NOTICE_SECONDS: u64 = 8;
 
 pub type Readier = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
@@ -382,6 +392,7 @@ pub struct App {
     pub copier: Box<dyn Fn(&str)>,
     pub readier: Readier,
     pub confirm: Option<Confirm>,
+    pub agent_ask: Option<AgentAsk>,
     pub herdr: Option<Arc<dyn Herdr>>,
     /// The text typed or pasted into the "new story" box, while it is open.
     pub new_story: Option<String>,
@@ -438,6 +449,7 @@ impl App {
             copier: Box::new(copy_to_clipboard),
             readier: Arc::new(gh_mark_ready),
             confirm: None,
+            agent_ask: None,
             herdr: None,
             new_story: None,
             card_drag: None,
@@ -1096,16 +1108,14 @@ impl App {
     /// Start the skill that moves a task into `to`: planning from todo, implementing from planned (or
     /// straight from todo, for spikes and manual testing).
     pub fn start_work(&mut self, task_id: &str, to: Status) {
-        let Some(key) = self.keys.get(self.story).cloned() else {
-            return;
-        };
         let Some(board) = &self.board else {
             return;
         };
         let Some(task) = board.task(task_id) else {
             return;
         };
-        let (skill, tab, phase) = match (task.status, to) {
+        let (from, title) = (task.status, task.title.clone());
+        let (skill, tab, phase) = match (from, to) {
             (Status::Todo, Status::Planning) => ("story-plan-task", "plan", "plan"),
             (Status::Planned | Status::Todo, Status::Implementing) => {
                 if !rules::is_ready(board, task) {
@@ -1119,6 +1129,10 @@ impl App {
                     self.set_notice(format!("{task_id} waits for {waiting} to be done"));
                     return;
                 }
+                if from == Status::Todo {
+                    self.agent_ask = Some(AgentAsk { id: task_id.to_string(), title });
+                    return;
+                }
                 ("story-implement-task", "implement", "impl")
             }
             (from, to) if from == to => return,
@@ -1127,13 +1141,40 @@ impl App {
                 return;
             }
         };
-        let launch = Launch {
+        self.launch_skill(task_id, skill, tab, phase);
+    }
+
+    fn launch_skill(&mut self, task_id: &str, skill: &str, tab: &str, phase: &str) {
+        let Some(key) = self.keys.get(self.story).cloned() else {
+            return;
+        };
+        self.run_launch(Launch {
             workspace: key.clone(),
             tab: format!("{task_id} {tab}"),
             agent: herdr::agent_name(&[&key, task_id, phase]),
             prompt: format!("/{skill} {key} {task_id}"),
+        });
+    }
+
+    /// Answer "does an agent implement this?": yes starts the skill, no just moves the card.
+    pub fn answer_agent(&mut self, use_agent: bool) {
+        let Some(ask) = self.agent_ask.take() else {
+            return;
         };
-        self.run_launch(launch);
+        if use_agent {
+            self.launch_skill(&ask.id, "story-implement-task", "implement", "impl");
+            return;
+        }
+        let Some(key) = self.keys.get(self.story).cloned() else {
+            return;
+        };
+        match store::update(&self.root, &key, |b| rules::transition(b, &ask.id, Status::Implementing)) {
+            Ok(()) => {
+                self.reload();
+                self.set_notice(format!("{} moved to implementing, no agent started", ask.id));
+            }
+            Err(e) => self.set_notice(format!("could not move {}: {e:#}", ask.id)),
+        }
     }
 
     pub fn start_selected(&mut self, to: Status) {
@@ -1273,6 +1314,15 @@ impl App {
     pub fn on_key(&mut self, code: KeyCode, ctrl: bool) -> bool {
         if ctrl {
             return code == KeyCode::Char('c');
+        }
+        if self.agent_ask.is_some() {
+            match code {
+                KeyCode::Char('y') | KeyCode::Enter => self.answer_agent(true),
+                KeyCode::Char('n') => self.answer_agent(false),
+                KeyCode::Esc | KeyCode::Char('q') => self.agent_ask = None,
+                _ => {}
+            }
+            return false;
         }
         if self.new_story.is_some() {
             match code {
@@ -1450,6 +1500,16 @@ impl App {
 
     pub fn on_click(&mut self, x: u16, y: u16) {
         let target = self.hit(x, y);
+        if self.agent_ask.is_some() {
+            match target {
+                Some(Target::AgentYes) => self.answer_agent(true),
+                Some(Target::AgentNo) => self.answer_agent(false),
+                Some(Target::AgentCancel) => self.agent_ask = None,
+                Some(Target::Sheet) => {}
+                _ => self.agent_ask = None,
+            }
+            return;
+        }
         if self.new_story.is_some() {
             match target {
                 Some(Target::NewStoryStart) => self.submit_new_story(),
