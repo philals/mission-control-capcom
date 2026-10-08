@@ -5,8 +5,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 use ratatui::Frame;
-use storyboard::model::{Board, PrState, Status, StoryStatus, Task};
-use storyboard::rules;
+use capcom::model::{Board, PrState, Status, StoryStatus, Task};
+use capcom::rules;
 
 type Hits = Vec<(Rect, Target)>;
 
@@ -212,7 +212,7 @@ fn padded(left: Vec<Span<'static>>, right: Vec<Span<'static>>, width: u16) -> Li
 fn draw_list_header(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let dim = Style::new().fg(Color::DarkGray);
     let left = vec![
-        Span::styled("◇ storyboard", Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled("◇ capcom", Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         Span::styled("  Stories", Style::new().add_modifier(Modifier::BOLD)),
     ];
     let shown = app.visible_stories().len();
@@ -336,7 +336,7 @@ fn draw_board_header(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let mut left = vec![
         Span::styled(BACK_LABEL, Style::new().fg(Color::Cyan)),
         Span::raw("  "),
-        Span::styled("◇ storyboard", bold.fg(Color::Cyan)),
+        Span::styled("◇ capcom", bold.fg(Color::Cyan)),
     ];
     let mut right = Vec::new();
     if let Some((pos, count)) = app.story_position() {
@@ -363,7 +363,7 @@ fn draw_empty(f: &mut Frame, area: Rect, app: &App) {
     let mut lines = vec![
         Line::from(format!("No stories found in {}", app.root.display())),
         Line::from(Span::styled(
-            "Create one with: storyboard init PROJ-123 --title \"...\"",
+            "Create one with: capcom init PROJ-123 --title \"...\"",
             Style::new().fg(Color::DarkGray),
         )),
     ];
@@ -638,8 +638,8 @@ mod tests {
     use crate::prs::{Check, CheckState, PullRequest, Review};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
-    use storyboard::model::{Status, TaskType};
-    use storyboard::{ops, rules, store};
+    use capcom::model::{Status, TaskType};
+    use capcom::{ops, rules, store};
     use tempfile::TempDir;
 
     fn sample() -> (TempDir, App) {
@@ -656,7 +656,7 @@ mod tests {
                 rules::transition(b, id, Status::Planned)?;
             }
             rules::transition(b, "T4", Status::Implementing)?;
-            ops::add_pr(b, "T4", "api", "https://github.com/o/api/pull/7", storyboard::model::PrState::Draft)?;
+            ops::add_pr(b, "T4", "api", "https://github.com/o/api/pull/7", capcom::model::PrState::Draft)?;
             ops::block(b, "T4", "waiting on design")?;
             Ok(())
         })
@@ -770,8 +770,8 @@ mod tests {
             rules::transition(b, "T1", Status::Done)?;
             b.tasks[1].kind = TaskType::Spike;
             rules::transition(b, "T2", Status::Done)?;
-            rules::story_transition(b, storyboard::model::StoryStatus::InReview)?;
-            rules::story_transition(b, storyboard::model::StoryStatus::Done)
+            rules::story_transition(b, capcom::model::StoryStatus::InReview)?;
+            rules::story_transition(b, capcom::model::StoryStatus::Done)
         })
         .unwrap();
         let app = App::new(root.path().to_path_buf(), None);
@@ -941,7 +941,7 @@ mod tests {
     fn with_prs() -> (TempDir, App) {
         let (root, mut app) = two_stories();
         store::update(root.path(), "PROJ-2", |b| {
-            ops::add_pr(b, "T1", "widgets", "https://github.com/acme/widgets/pull/12", storyboard::model::PrState::Draft)
+            ops::add_pr(b, "T1", "widgets", "https://github.com/acme/widgets/pull/12", capcom::model::PrState::Draft)
         })
         .unwrap();
         app.reload();
@@ -1067,7 +1067,7 @@ mod tests {
     fn a_recorded_pr_that_github_does_not_list_still_shows_from_the_board() {
         let (root, mut app) = with_prs();
         store::update(root.path(), "PROJ-2", |b| {
-            ops::add_pr(b, "T2", "widgets", "https://github.com/acme/widgets/pull/5", storyboard::model::PrState::Merged)
+            ops::add_pr(b, "T2", "widgets", "https://github.com/acme/widgets/pull/5", capcom::model::PrState::Merged)
         })
         .unwrap();
         app.reload();

@@ -1,6 +1,6 @@
-# storyboard
+# capcom
 
-A local kanban workflow for Jira stories: a Rust tool (`storyboard`) that is the only writer of each story's `board.json`, plus four Claude Code skills that break a story down, plan and implement its tasks as draft PRs, and review the finished story. Your story data lives in a separate folder you choose, so this repo contains no project data.
+A local kanban workflow for Jira stories: a Rust tool (`capcom`) that is the only writer of each story's `board.json`, plus four Claude Code skills that break a story down, plan and implement its tasks as draft PRs, and review the finished story. Your story data lives in a separate folder you choose, so this repo contains no project data.
 
 ## The story workflow
 
@@ -24,7 +24,7 @@ Type these in Claude Code (they are also picked up when you ask for the same thi
 | 3 | `/story-implement-task PROJ-123 T1` | Asks main checkout or worktree, implements the plan, opens draft PRs through the `git-commit-push` agent. PR titles end with the task id, for example `feat: PROJ-124 add notice endpoint (T1)`. |
 | 4 | `/story-review PROJ-123` | When every task is done: checks the subtasks are complete, reviews the story's acceptance criteria and intent against what was built, and gives you feedback. |
 
-Task ids (`T1`, `T2`, ...) come from the board. `storyboard show PROJ-123` lists them. `storyboard root` prints the stories folder in use.
+Task ids (`T1`, `T2`, ...) come from the board. `capcom show PROJ-123` lists them. `capcom root` prints the stories folder in use.
 
 ### Typical run
 
@@ -32,7 +32,7 @@ Task ids (`T1`, `T2`, ...) come from the board. `storyboard show PROJ-123` lists
 2. For each task, in dependency order: `/story-plan-task PROJ-123 T1`, answer the questions, approve the plan.
 3. `/story-implement-task PROJ-123 T1`. It only starts when the task is `planned` and every dependency is `done`. Choose main repo or worktree when asked.
 4. In GitHub, review the draft PRs and mark them **ready** yourself. Nothing is marked ready or merged for you. CI fixes and review comments are handled inside the task (the `pr-looper` skill, or resume `/story-implement-task`); the task stays `implementing` throughout.
-5. Once the PRs are merged, run `storyboard refresh PROJ-123` (needs `gh` logged in). It marks the task `done` when every PR is merged.
+5. Once the PRs are merged, run `capcom refresh PROJ-123` (needs `gh` logged in). It marks the task `done` when every PR is merged.
 6. Dependent tasks unblock once their dependencies are `done`. Repeat from step 2 for the next task.
 7. When every task is `done`, run `/story-review PROJ-123`. It reviews the whole story against its acceptance criteria and intent and reports back. Accept it to mark the story `done`, or add follow-up tasks with `/story-break-down PROJ-123` to reopen it.
 
@@ -55,11 +55,11 @@ in_progress ─► in_review ─► done                          (story, via /s
 
 ## Viewing the board
 
-`storyboard-tui` is a live kanban view of your stories. It is read-only, and it reloads on its own whenever a `board.json` changes, so you can leave it open next to the agents that are updating the board. It works with the keyboard and the mouse.
+`capcom-tui` is a live kanban view of your stories. It is read-only, and it reloads on its own whenever a `board.json` changes, so you can leave it open next to the agents that are updating the board. It works with the keyboard and the mouse.
 
 ```bash
-storyboard-tui              # the story list; click or press Enter to open one
-storyboard-tui PROJ-123     # open a story's board straight away
+capcom-tui              # the story list; click or press Enter to open one
+capcom-tui PROJ-123     # open a story's board straight away
 ```
 
 **Story list.** One row per story with its key, title, story status, `done/total` tasks, a progress bar and a count per task status. Completed stories (story status `done`) are hidden by default; click `[ Show done ]` in the header or press `d` to show them, and again to hide them.
@@ -77,7 +77,7 @@ storyboard-tui PROJ-123     # open a story's board straight away
 
 **Pull requests panel.** A bottom panel lists your open pull requests with their CI stages, refreshed from GitHub in the background:
 
-- **Main screen:** *all* your open PRs from the query, including ones unrelated to any story. PRs recorded on a storyboard task are tagged `PROJ-123 · T2`.
+- **Main screen:** *all* your open PRs from the query, including ones unrelated to any story. PRs recorded on a capcom task are tagged `PROJ-123 · T2`.
 - **Inside a story:** only that story's PRs (the ones recorded on its tasks), tagged with the task id. A PR that GitHub no longer lists as open (for example a merged one) still shows from the board data.
 - **Each row:** the **title on its own full-width line** (it wraps over up to three lines rather than being cut off), then a line with the `[READY]` (green) or `[DRAFT]` (grey) badge, the repo and number, labels, review state, comment count and time since update. A PR that is only known from the board shows `[MERGED]` or `[CLOSED]` instead. Under it a CI summary such as `✓ 12  ✗ 1  ◔ 2  ● 1` (the orange filled circle is pending/queued), then every stage that is still running, queued or failed on its own line, in that order (`◔ CI / build  running 2m 05s`, `● CI / deploy  queued`, `✗ CI / unit  failed 1m 10s`). Passed and skipped stages are only counted; a long list is capped with `… +N more`. A thin line separates one PR from the next.
 - **Click and details:** clicking a PR opens it on GitHub, and clicking one of its CI stage lines opens that check. The `[ details ]` button at the right of its CI line (or Enter on the selected row) opens the full sheet, where every check that has a link has its own `[ open ]` button: draft or ready for review, every check grouped running, queued, failed, passed, with durations. `o` (or the button) opens the PR in your browser.
@@ -86,28 +86,28 @@ storyboard-tui PROJ-123     # open a story's board straight away
 
 The PR panel fetches with one `gh api graphql` call (it uses your existing `gh` login, so no token is handled by this tool). It polls about every 5 seconds while any check is running or queued and about every 30 seconds otherwise, and costs roughly one GraphQL rate-limit point per poll. Nothing from GitHub is written to disk: PR data lives in memory only. If a fetch fails, the last data stays and the error shows in the panel.
 
-The query defaults to `is:pr author:@me state:open archived:false sort:updated-desc -label:icebox`. Change it with `--pr-query "..."` or `STORYBOARD_PR_QUERY`. `--no-prs` turns the panel off (for example when `gh` is not installed). On a short terminal (under about 16 rows) the panel is hidden.
+The query defaults to `is:pr author:@me state:open archived:false sort:updated-desc -label:icebox`. Change it with `--pr-query "..."` or `CAPCOM_PR_QUERY`. `--no-prs` turns the panel off (for example when `gh` is not installed). On a short terminal (under about 16 rows) the panel is hidden.
 
 **Manual runs panel.** Next to the pull requests panel (side by side when the terminal is about 150 columns wide or more, otherwise as a second tab, `[ Pull requests · 3 ]  [ Manual runs · 2 (1 active) ]`, with a live count of active runs) is a panel of the GitHub Actions runs *you* started by hand (the "Run workflow" button, `workflow_dispatch`), whatever each repo calls its workflow. This is where a manual nonprod deploy shows up.
 
-- **Which repos:** GitHub cannot list your runs across repos, so the tool asks each repo in turn. The repos are the ones from your open PRs, the PRs recorded on your stories' tasks, and any you add with `STORYBOARD_DEPLOY_REPOS=org/a,org/b` (or `--deploy-repos`). Inside a story it shows only runs in that story's repos.
+- **Which repos:** GitHub cannot list your runs across repos, so the tool asks each repo in turn. The repos are the ones from your open PRs, the PRs recorded on your stories' tasks, and any you add with `CAPCOM_DEPLOY_REPOS=org/a,org/b` (or `--deploy-repos`). Inside a story it shows only runs in that story's repos.
 - **Each run:** a `[RUNNING]`, `[WAITING]` (needs approval), `[QUEUED]`, `[SUCCESS]`, `[FAILED]` or `[CANCELLED]` badge, the repo, the workflow name, the run's title, branch, time since it started and how long it ran. Stages that are running, waiting, queued or failed are listed one per line underneath (running first), like the CI stages on a PR. Successful runs show no stages.
 - **Click through (same as the PR panel):** click a run to open it on GitHub, click any stage line to open that stage, and click `[ details ]` (or press Enter) for the full sheet. Every stage in the sheet has its own `[ open ]` button, and `o` opens the selected run.
 - **Timeliness:** one REST call per repo (run in parallel) about every 10 seconds while any of your runs is active and about every 60 seconds otherwise, plus one call per active or failed run for its stages (finished runs are cached). A finished run (success, failed or cancelled) drops off 3 hours after it finished; anything still active always stays. `r` refreshes now.
 - **Off switch and keys:** `--no-runs` turns it off. `Tab` moves focus main, pull requests, runs; `↑↓` select; the wheel scrolls.
 
-**Sizing.** When there are no manual runs (or the panel is switched off), the runs panel shrinks to a narrow strip and the PRs get the room; it grows back as soon as there is a run, an error or a warning to show. Every panel can be resized, by mouse or keys: drag the divider between the PR and runs panels (also when the runs panel has shrunk; a size you choose is then respected even when it is empty), drag the top edge of the bottom area up or down, and on a board drag the border between two kanban columns. With the keys, `<` `>` make the PR panel narrower or wider, `+` `-` make the bottom area taller or shorter, and `,` `.` make the selected kanban column narrower or wider; `=` resets everything to automatic. **The sizes are saved** and restored the next time you start, in `~/.config/storyboard/tui.json` (or `$XDG_CONFIG_HOME/storyboard/tui.json`; set `STORYBOARD_TUI_SETTINGS` to use another file). The file holds only those numbers, lives outside any repo, and a missing or damaged file just means the defaults.
+**Sizing.** When there are no manual runs (or the panel is switched off), the runs panel shrinks to a narrow strip and the PRs get the room; it grows back as soon as there is a run, an error or a warning to show. Every panel can be resized, by mouse or keys: drag the divider between the PR and runs panels (also when the runs panel has shrunk; a size you choose is then respected even when it is empty), drag the top edge of the bottom area up or down, and on a board drag the border between two kanban columns. With the keys, `<` `>` make the PR panel narrower or wider, `+` `-` make the bottom area taller or shorter, and `,` `.` make the selected kanban column narrower or wider; `=` resets everything to automatic. **The sizes are saved** and restored the next time you start, in `~/.config/capcom/tui.json` (or `$XDG_CONFIG_HOME/capcom/tui.json`; set `CAPCOM_TUI_SETTINGS` to use another file). The file holds only those numbers, lives outside any repo, and a missing or damaged file just means the defaults.
 
-It needs `STORYBOARD_ROOT` or `--root` like the tool. While it runs, the terminal's own text selection is replaced by mouse clicks (hold Shift to select text in most terminals).
+It needs `CAPCOM_ROOT` or `--root` like the tool. While it runs, the terminal's own text selection is replaced by mouse clicks (hold Shift to select text in most terminals).
 
 ## Requirements
 
-Rust (to build the tool), `gh` authenticated (for `storyboard refresh`, PR work and the pull requests panel), the Atlassian MCP server (the skills read Jira and `story-break-down` can create subtasks), a `git-commit-push` agent that opens the PRs, and the `pr-looper` skill for CI and review rounds.
+Rust (to build the tool), `gh` authenticated (for `capcom refresh`, PR work and the pull requests panel), the Atlassian MCP server (the skills read Jira and `story-break-down` can create subtasks), a `git-commit-push` agent that opens the PRs, and the `pr-looper` skill for CI and review rounds.
 
 ## Layout
 
 ```
-<root>/<KEY>/             # <root> = your stories folder (STORYBOARD_ROOT), kept in a separate repo
+<root>/<KEY>/             # <root> = your stories folder (CAPCOM_ROOT), kept in a separate repo
   board.json               # tasks, statuses, dependencies, PRs (never edit by hand)
   story.md                 # summary, acceptance criteria, breakdown notes
   tasks/T1-<slug>.md       # one file per task: Description, Plan, Decisions, Progress
@@ -116,7 +116,7 @@ Rust (to build the tool), `gh` authenticated (for `storyboard refresh`, PR work 
 This repo:
 
 ```
-src/, tests/, Cargo.toml   # the storyboard tool, the only writer of board.json
+src/, tests/, Cargo.toml   # the capcom tool, the only writer of board.json
 skills/                    # story-break-down, story-plan-task, story-implement-task, story-review
 schemas/board.schema.json  # JSON Schema for board.json
 docs/design.md             # design spec
@@ -126,7 +126,7 @@ docs/reference.md          # command reference
 Choose where stories live and tell the tool, in your shell profile and in Claude Code's settings (`env` in `~/.claude/settings.json`) so the skills see it too:
 
 ```bash
-export STORYBOARD_ROOT=~/path/to/your/stories
+export CAPCOM_ROOT=~/path/to/your/stories
 ```
 
 From the root of this repo, symlink the skills into `~/.claude/skills/` so Claude Code can find them:
@@ -138,29 +138,29 @@ ln -s "$PWD/skills/story-implement-task" ~/.claude/skills/story-implement-task
 ln -s "$PWD/skills/story-review" ~/.claude/skills/story-review
 ```
 
-## The storyboard tool
+## The capcom tool
 
 Install (Rust required), then check it is on your `PATH`:
 
 ```bash
 cargo install --path . --root ~/.local --locked
-storyboard --help
+capcom --help
 ```
 
-Everyday commands (`storyboard-tui` is installed alongside it):
+Everyday commands (`capcom-tui` is installed alongside it):
 
 ```bash
-storyboard list                      # all stories with task counts
-storyboard show PROJ-123             # full board as JSON
-storyboard ready PROJ-123            # tasks whose dependencies are done
-storyboard status PROJ-123 T2 done   # change a task status (illegal moves are refused)
-storyboard story-status PROJ-123 in_review   # story status (refused until every task is done)
-storyboard block PROJ-123 T3 --reason "waiting on schema change"
-storyboard refresh PROJ-123          # sync PR states from GitHub
+capcom list                      # all stories with task counts
+capcom show PROJ-123             # full board as JSON
+capcom ready PROJ-123            # tasks whose dependencies are done
+capcom status PROJ-123 T2 done   # change a task status (illegal moves are refused)
+capcom story-status PROJ-123 in_review   # story status (refused until every task is done)
+capcom block PROJ-123 T3 --reason "waiting on schema change"
+capcom refresh PROJ-123          # sync PR states from GitHub
 ```
 
 All commands print JSON, and errors exit non-zero. `ready` also lists tasks already `implementing`, so check a task's own status as well. Full command reference: [`docs/reference.md`](docs/reference.md).
 
 ## What is not built yet
 
-A Herdr plugin that shows `board.json` as a kanban and launches the skills from it is planned separately. Until then, use `storyboard show` and `storyboard list`.
+A Herdr plugin that shows `board.json` as a kanban and launches the skills from it is planned separately. Until then, use `capcom show` and `capcom list`.

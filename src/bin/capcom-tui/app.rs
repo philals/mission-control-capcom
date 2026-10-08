@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use storyboard::model::{Board, PrState, Status, StoryStatus, Task};
-use storyboard::store;
+use capcom::model::{Board, PrState, Status, StoryStatus, Task};
+use capcom::store;
 
 const MAIN_COLUMNS: [Status; 5] = [
     Status::Todo,
@@ -316,7 +316,7 @@ fn gh_mark_ready(url: &str) -> Result<(), String> {
     }
     let mut cmd = Command::new("gh");
     cmd.args(["pr", "ready", url]);
-    match storyboard::refresh::run_with_timeout(cmd, std::time::Duration::from_secs(30)) {
+    match capcom::refresh::run_with_timeout(cmd, std::time::Duration::from_secs(30)) {
         Ok(Some(out)) if out.status.success() => Ok(()),
         Ok(Some(out)) => Err(String::from_utf8_lossy(&out.stderr).lines().next().unwrap_or("gh failed").to_string()),
         Ok(None) => Err("gh timed out".into()),
@@ -1417,9 +1417,9 @@ mod tests {
     use ratatui::crossterm::event::KeyCode;
     use crate::prs::{Check, CheckState, PullRequest, Review};
     use crate::runs::{Batch, Job, Run, RunState};
-    use storyboard::model::{PrState, StoryStatus};
-    use storyboard::model::TaskType::{self, Pr, Spike};
-    use storyboard::{ops, rules, store};
+    use capcom::model::{PrState, StoryStatus};
+    use capcom::model::TaskType::{self, Pr, Spike};
+    use capcom::{ops, rules, store};
     use tempfile::TempDir;
 
     fn story(root: &TempDir, key: &str, tasks: &[(&str, TaskType, &[&str])]) {

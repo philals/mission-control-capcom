@@ -3,7 +3,7 @@ use serde_json::Value;
 use tempfile::TempDir;
 
 fn sb(root: &TempDir, args: &[&str]) -> std::process::Output {
-    Command::cargo_bin("storyboard")
+    Command::cargo_bin("capcom")
         .unwrap()
         .arg("--root")
         .arg(root.path())
@@ -238,9 +238,9 @@ fn root_prints_the_resolved_stories_folder() {
 #[test]
 fn root_comes_from_the_environment_when_no_flag_is_given() {
     let root = TempDir::new().unwrap();
-    let out = Command::cargo_bin("storyboard")
+    let out = Command::cargo_bin("capcom")
         .unwrap()
-        .env("STORYBOARD_ROOT", root.path())
+        .env("CAPCOM_ROOT", root.path())
         .arg("root")
         .output()
         .unwrap();
@@ -252,16 +252,16 @@ fn root_comes_from_the_environment_when_no_flag_is_given() {
 #[test]
 fn a_missing_root_is_a_clear_error_and_nothing_is_created() {
     let cwd = TempDir::new().unwrap();
-    let out = Command::cargo_bin("storyboard")
+    let out = Command::cargo_bin("capcom")
         .unwrap()
-        .env_remove("STORYBOARD_ROOT")
+        .env_remove("CAPCOM_ROOT")
         .current_dir(cwd.path())
         .arg("list")
         .output()
         .unwrap();
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("STORYBOARD_ROOT"), "{err}");
+    assert!(err.contains("CAPCOM_ROOT"), "{err}");
     assert_eq!(std::fs::read_dir(cwd.path()).unwrap().count(), 0);
 }
 

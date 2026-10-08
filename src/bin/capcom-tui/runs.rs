@@ -7,7 +7,7 @@ use std::process::Command;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
-use storyboard::refresh::run_with_timeout;
+use capcom::refresh::run_with_timeout;
 
 const GH_TIMEOUT: Duration = Duration::from_secs(30);
 

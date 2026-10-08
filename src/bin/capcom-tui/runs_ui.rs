@@ -191,7 +191,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         let mut lines: Vec<Line<'static>> = message.into_iter().map(|m| Line::from(Span::styled(m, dim()))).collect();
         if !compact && app.runs.loaded && !app.runs.disabled && app.deploy_repos().is_empty() {
             lines.push(Line::from(Span::styled(
-                "No repos to check yet: they come from your open PRs, story PRs and STORYBOARD_DEPLOY_REPOS.",
+                "No repos to check yet: they come from your open PRs, story PRs and CAPCOM_DEPLOY_REPOS.",
                 dim(),
             )));
         }

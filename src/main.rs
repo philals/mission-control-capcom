@@ -2,14 +2,14 @@ use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use storyboard::model::{Board, PrState, Status, StoryStatus, TaskType};
-use storyboard::{ops, refresh, rules, store};
+use capcom::model::{Board, PrState, Status, StoryStatus, TaskType};
+use capcom::{ops, refresh, rules, store};
 
 #[derive(Parser)]
-#[command(name = "storyboard", about = "Local kanban boards for Jira stories", after_help = "Errors exit 1 (usage errors exit 2). All output is JSON.")]
+#[command(name = "capcom", about = "Local kanban boards for Jira stories", after_help = "Errors exit 1 (usage errors exit 2). All output is JSON.")]
 struct Cli {
-    /// Directory holding one folder per story (required: set it here or in STORYBOARD_ROOT)
-    #[arg(long, env = "STORYBOARD_ROOT", global = true)]
+    /// Directory holding one folder per story (required: set it here or in CAPCOM_ROOT)
+    #[arg(long, env = "CAPCOM_ROOT", global = true)]
     root: Option<PathBuf>,
     #[command(subcommand)]
     cmd: Cmd,
@@ -28,7 +28,7 @@ enum Cmd {
         #[arg(long)]
         jira_url: Option<String>,
     },
-    /// Print the stories folder in use (from --root or STORYBOARD_ROOT)
+    /// Print the stories folder in use (from --root or CAPCOM_ROOT)
     Root,
     /// List every story with its title and task count
     List,
@@ -218,7 +218,7 @@ fn parse_pr_state(s: &str) -> Result<PrState> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let root = cli.root.ok_or_else(|| {
-        anyhow::anyhow!("no stories folder: set STORYBOARD_ROOT or pass --root DIR")
+        anyhow::anyhow!("no stories folder: set CAPCOM_ROOT or pass --root DIR")
     })?;
     let root = root.as_path();
     match cli.cmd {

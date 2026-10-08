@@ -69,15 +69,15 @@ pub fn path_from(override_path: Option<&str>, xdg: Option<&str>, home: Option<&s
         return Some(PathBuf::from(path));
     }
     if let Some(xdg) = non_empty(xdg) {
-        return Some(Path::new(xdg).join("storyboard/tui.json"));
+        return Some(Path::new(xdg).join("capcom/tui.json"));
     }
-    non_empty(home).map(|home| Path::new(home).join(".config/storyboard/tui.json"))
+    non_empty(home).map(|home| Path::new(home).join(".config/capcom/tui.json"))
 }
 
 pub fn default_path() -> Option<PathBuf> {
     let var = |name: &str| std::env::var(name).ok();
     path_from(
-        var("STORYBOARD_TUI_SETTINGS").as_deref(),
+        var("CAPCOM_TUI_SETTINGS").as_deref(),
         var("XDG_CONFIG_HOME").as_deref(),
         var("HOME").as_deref(),
     )
@@ -144,9 +144,9 @@ mod tests {
     fn the_settings_path_follows_the_override_then_xdg_then_home() {
         let p = |o: Option<&str>, x: Option<&str>, h: Option<&str>| path_from(o, x, h).map(|p| p.to_string_lossy().to_string());
         assert_eq!(p(Some("/x/s.json"), Some("/c"), Some("/h")).as_deref(), Some("/x/s.json"));
-        assert_eq!(p(None, Some("/c"), Some("/h")).as_deref(), Some("/c/storyboard/tui.json"));
-        assert_eq!(p(None, None, Some("/h")).as_deref(), Some("/h/.config/storyboard/tui.json"));
-        assert_eq!(p(None, Some(""), Some("/h")).as_deref(), Some("/h/.config/storyboard/tui.json"));
+        assert_eq!(p(None, Some("/c"), Some("/h")).as_deref(), Some("/c/capcom/tui.json"));
+        assert_eq!(p(None, None, Some("/h")).as_deref(), Some("/h/.config/capcom/tui.json"));
+        assert_eq!(p(None, Some(""), Some("/h")).as_deref(), Some("/h/.config/capcom/tui.json"));
         assert_eq!(p(None, None, None), None);
     }
 }

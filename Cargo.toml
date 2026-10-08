@@ -1,5 +1,5 @@
 [package]
-name = "storyboard"
+name = "capcom"
 version = "0.1.0"
 edition = "2021"
 description = "Local kanban boards for Jira stories"

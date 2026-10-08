@@ -25,14 +25,14 @@ Success: for any story, you can see every task, its status, its dependencies and
 
 ## Story review (added 2026-10-05)
 
-The story has its own status on the board: `in_progress` (default), `in_review`, `done`, changed with `storyboard story-status`. `in_review` needs every task `done` or `dropped` (and at least one `done`); `done` follows `in_review`; moving back to `in_progress` reopens the story. Adding a task moves an `in_review` story back to `in_progress` and is refused on a `done` story until it is reopened.
+The story has its own status on the board: `in_progress` (default), `in_review`, `done`, changed with `capcom story-status`. `in_review` needs every task `done` or `dropped` (and at least one `done`); `done` follows `in_review`; moving back to `in_progress` reopens the story. Adding a task moves an `in_review` story back to `in_progress` and is refused on a `done` story until it is reopened.
 
 The `story-review` skill (`/story-review PROJ-123`) checks the subtasks are complete, reads the Jira story's acceptance criteria and intent, the task files and the merged PRs, reviews each criterion against the evidence, and gives feedback to the user. It writes nothing to Jira. Boards written before this change read an `in_review` task as `implementing`.
 
 ## Layout
 
 ```
-<STORYBOARD_ROOT>/PROJ-123/
+<CAPCOM_ROOT>/PROJ-123/
   board.json
   story.md                 # Jira summary, acceptance criteria, agreed breakdown notes
   tasks/
@@ -96,7 +96,7 @@ A small command-line tool, the only writer of `board.json`. Skills and the plugi
 - Validates against the schema and writes atomically.
 - Commands cover: set status, set or clear blocked, add and update PRs, set agent, add task, drop task, compute ready tasks.
 - `refresh` reads PR states from GitHub (`gh`) and marks a task `done` once every PR is merged.
-- Written in Rust, named `storyboard` (the name `board` is taken by herdr-board). Core logic (types, validation, operations) lives in a library crate shared with the plugin in Plan 2. The skills depend only on the command interface.
+- Written in Rust, named `capcom` (the name `board` is taken by herdr-board). Core logic (types, validation, operations) lives in a library crate shared with the plugin in Plan 2. The skills depend only on the command interface.
 
 ## Skills
 
@@ -161,7 +161,7 @@ None blocking Plan 1. Plan 2 must verify how a plugin pane is linked and built (
 ## Delivery
 
 **Plan 1: skills and board file** (ships first, usable immediately)
-1. Board schema and `storyboard` tool.
+1. Board schema and `capcom` tool.
 2. break-down skill, to validate the layout end to end.
 3. plan-task and implement-task.
 4. Retire the two old skills.

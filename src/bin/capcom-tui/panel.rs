@@ -7,7 +7,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 use ratatui::Frame;
-use storyboard::model::PrState;
+use capcom::model::PrState;
 
 type Hits = Vec<(Rect, Target)>;
 
@@ -500,7 +500,7 @@ pub fn draw_sheet(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         }
     }
     if let Some(tag) = &row.tag {
-        lines.push(label_row("Storyboard", tag.clone()));
+        lines.push(label_row("Task", tag.clone()));
     }
     lines.push(label_row("URL", row.url.clone()));
     if let Some(pr) = row.live {

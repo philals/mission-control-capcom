@@ -19,21 +19,21 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[derive(Parser)]
-#[command(name = "storyboard-tui", about = "Live, read-only kanban view of storyboard boards (keyboard and mouse)")]
+#[command(name = "capcom-tui", about = "Live, read-only kanban view of capcom boards (keyboard and mouse)")]
 struct Cli {
     /// Open this story's board straight away, for example PROJ-123 (default: the story list)
     key: Option<String>,
-    /// Directory holding one folder per story (required: set it here or in STORYBOARD_ROOT)
-    #[arg(long, env = "STORYBOARD_ROOT")]
+    /// Directory holding one folder per story (required: set it here or in CAPCOM_ROOT)
+    #[arg(long, env = "CAPCOM_ROOT")]
     root: Option<PathBuf>,
     /// GitHub search used for the pull request panel (@me is resolved by GitHub)
-    #[arg(long, env = "STORYBOARD_PR_QUERY", default_value = prs::DEFAULT_QUERY)]
+    #[arg(long, env = "CAPCOM_PR_QUERY", default_value = prs::DEFAULT_QUERY)]
     pr_query: String,
     /// Do not fetch pull requests from GitHub
     #[arg(long)]
     no_prs: bool,
     /// Extra repos (owner/name, comma separated) to look for your manual workflow runs in
-    #[arg(long, env = "STORYBOARD_DEPLOY_REPOS", value_delimiter = ',')]
+    #[arg(long, env = "CAPCOM_DEPLOY_REPOS", value_delimiter = ',')]
     deploy_repos: Vec<String>,
     /// Do not fetch your manual workflow runs from GitHub
     #[arg(long)]
@@ -43,7 +43,7 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let Some(root) = cli.root else {
-        bail!("no stories folder: set STORYBOARD_ROOT or pass --root DIR");
+        bail!("no stories folder: set CAPCOM_ROOT or pass --root DIR");
     };
     let mut app = App::new(root, cli.key);
     if cli.no_prs {

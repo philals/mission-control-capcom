@@ -68,7 +68,7 @@ pub fn add_task(
     }
     let story_status = board.story.status;
     if story_status == StoryStatus::Done {
-        bail!("story is done; reopen it with `storyboard story-status <KEY> in_progress` before adding tasks");
+        bail!("story is done; reopen it with `capcom story-status <KEY> in_progress` before adding tasks");
     }
     let next = board
         .tasks
