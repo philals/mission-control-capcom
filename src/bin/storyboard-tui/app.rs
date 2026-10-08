@@ -60,6 +60,7 @@ pub enum Target {
     PrevColumn,
     NextColumn,
     Pr(usize),
+    PrDetails(usize),
     PrPanel,
     OpenPr,
     Run(usize),
@@ -697,6 +698,13 @@ impl App {
         }
     }
 
+    pub fn open_pr(&self, index: usize) {
+        let url = self.pr_rows().get(index).map(|r| r.url.clone());
+        if let Some(url) = url {
+            (self.opener)(&url);
+        }
+    }
+
     pub fn open_selected_pr(&self) {
         let url = self.pr_rows().get(self.pr_sel).map(|r| r.url.clone());
         if let Some(url) = url {
@@ -900,11 +908,14 @@ impl App {
         match target {
             Some(Target::Pr(i)) => {
                 self.set_focus(Focus::Prs);
-                if self.pr_sel == i {
-                    self.pr_sheet = true;
-                } else {
-                    self.pr_sel = i;
-                }
+                self.pr_sel = i;
+                self.open_pr(i);
+                return;
+            }
+            Some(Target::PrDetails(i)) => {
+                self.set_focus(Focus::Prs);
+                self.pr_sel = i;
+                self.pr_sheet = true;
                 return;
             }
             Some(Target::Run(i)) => {
@@ -972,7 +983,7 @@ impl App {
             return;
         }
         let target = self.hit(x, y);
-        if matches!(target, Some(Target::Pr(_) | Target::PrPanel)) {
+        if matches!(target, Some(Target::Pr(_) | Target::PrDetails(_) | Target::PrPanel)) {
             self.set_focus(Focus::Prs);
             self.pr_move(delta);
             return;

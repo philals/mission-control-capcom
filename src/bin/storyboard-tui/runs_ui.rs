@@ -173,11 +173,11 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         let message = if app.runs.disabled {
             Some("Manual runs are off (started with --no-runs).".to_string())
         } else if app.screen == Screen::Board {
-            Some("No manual runs in this story's repos in the last 24 hours.".to_string())
+            Some("No manual runs in this story's repos in the last 3 hours.".to_string())
         } else if app.runs.error.is_some() {
             None
         } else if app.runs.loaded {
-            Some("No manual runs in the last 24 hours.".to_string())
+            Some("No manual runs in the last 3 hours.".to_string())
         } else {
             Some("Loading manual runs…".to_string())
         };

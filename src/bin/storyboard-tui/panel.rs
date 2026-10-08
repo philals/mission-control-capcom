@@ -12,6 +12,11 @@ use storyboard::model::PrState;
 type Hits = Vec<(Rect, Target)>;
 
 const OPEN_BUTTON: &str = "[ o Open in browser ]";
+const DETAILS_BUTTON: &str = "[ details ]";
+
+fn details_width() -> usize {
+    DETAILS_BUTTON.chars().count()
+}
 const MAX_STAGE_LINES: usize = 8;
 pub const ORANGE: Color = Color::Indexed(208);
 
@@ -230,7 +235,12 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
     first.push(Span::raw(" ".repeat(pad)));
     first.extend(right);
     let style = if selected { Style::new().bg(Color::Indexed(237)) } else { Style::new() };
-    let mut lines = vec![Line::from(first).style(style), Line::from(fit(summary, width)).style(style)];
+    let button = details_width();
+    let mut second = fit(summary, width.saturating_sub(button + 1));
+    let gap = width.saturating_sub(width_of(&second) + button);
+    second.push(Span::raw(" ".repeat(gap)));
+    second.push(Span::styled(DETAILS_BUTTON, Style::new().fg(Color::Cyan)));
+    let mut lines = vec![Line::from(first).style(style), Line::from(second).style(style)];
     lines.extend(stages.into_iter().map(|s| Line::from(fit(s, width)).style(style)));
     lines
 }
@@ -296,6 +306,10 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         let lines = row_lines(row, body.width as usize, focused && i == selected, now);
         f.render_widget(Paragraph::new(lines), rect);
         hits.push((rect, Target::Pr(i)));
+        let button = details_width() as u16;
+        if body.width > button && h >= 2 {
+            hits.push((Rect::new(body.x + body.width - button, y + 1, button, 1), Target::PrDetails(i)));
+        }
         y += heights[i] - 1;
         if i + 1 < rows.len() && y < bottom {
             let rule = "─".repeat(body.width as usize);

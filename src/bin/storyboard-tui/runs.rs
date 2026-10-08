@@ -176,8 +176,10 @@ impl<A: RunApi> Fetcher<A> {
         Fetcher { api, window, cache: Mutex::new(HashMap::new()) }
     }
 
+    /// A finished run stays for the window after it finished (its last update); an active one always stays.
     fn recent(&self, run: &Run, now: DateTime<Utc>) -> bool {
-        parse_time(&run.created_at).is_some_and(|t| now - t <= self.window)
+        let finished = parse_time(&run.updated_at).or_else(|| parse_time(&run.created_at));
+        finished.is_some_and(|t| now - t <= self.window)
     }
 
     fn fetch_repo(&self, repo: &str, now: DateTime<Utc>) -> Result<(Vec<Run>, Vec<String>)> {
@@ -500,6 +502,18 @@ mod tests {
         assert_eq!(calls, vec![98, 101], "stages for the active run and the failed one, not the success");
         assert_eq!(batch.runs[0].jobs.len(), 5);
         assert!(batch.runs[2].jobs.is_empty());
+    }
+
+    #[test]
+    fn finished_runs_drop_off_three_hours_after_they_finished_but_active_runs_stay() {
+        let fetcher = Fetcher::new(FakeApi::new(vec![("acme/widgets", Ok(RUNS))]), chrono::Duration::hours(3));
+        let repos = vec!["acme/widgets".to_string()];
+        let at = |h: u32, m: u32| Utc.with_ymd_and_hms(2026, 10, 8, h, m, 0).unwrap();
+        let ids = |now| fetcher.fetch_at(&repos, now).unwrap().runs.iter().map(|r| r.id).collect::<Vec<_>>();
+        assert_eq!(ids(at(4, 0)), vec![101, 98, 100], "98 finished 02:03 and 100 finished 01:05, both under 3h ago");
+        assert_eq!(ids(at(4, 3)), vec![101, 98, 100], "100 was created 01:00 but finished 01:05: the 3 hours count from the finish");
+        assert_eq!(ids(at(4, 30)), vec![101, 98], "100 finished 01:05, now over 3h ago");
+        assert_eq!(ids(at(5, 30)), vec![101], "98 finished 02:03, now over 3h ago; the active run never drops off");
     }
 
     #[test]

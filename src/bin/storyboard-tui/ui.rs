@@ -568,7 +568,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("?", "toggle this help".into()),
         row("q  Ctrl-C", "quit".into()),
         Line::raw(""),
-        row("Mouse", "click a story, column, card, PR, run, stage or button; wheel scrolls".into()),
+        row("Mouse", "click a story, column or card; a PR opens on GitHub, [ details ] opens its sheet; wheel scrolls".into()),
     ];
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
@@ -903,7 +903,7 @@ mod tests {
         let out = render(&app, 170, 44);
         for want in [
             "PULL REQUESTS · 3", "updated", "acme/widgets#12", "Add notices", "PROJ-2 · T1",
-            "acme/api#99", "Unrelated chore", "approved", "✎ 3", " ago", "[bug]",
+            "acme/api#99", "Unrelated chore", "approved", "✎ 3", " ago", "[bug]", "[ details ]",
             "✓ 3", "✗ 1", "◔ 2", "● 1", "◔ CI / build", "◔ CI / test", "● CI / deploy",
             "✗ CI / unit", "no checks", "[READY]", "[DRAFT]",
         ] {
@@ -1047,25 +1047,53 @@ mod tests {
     }
 
     #[test]
-    fn clicking_a_pr_row_selects_it_then_opens_the_sheet_and_the_button_opens_the_browser() {
+    fn clicking_a_pr_opens_it_in_the_browser_and_selects_it() {
         let (_root, mut app) = with_prs();
-        let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
-        let sink = log.clone();
-        app.opener = Box::new(move |url| sink.borrow_mut().push(url.to_string()));
+        let log = recorder(&mut app);
         let out = render(&app, 170, 44);
         let (x, y) = find(&out, "Unrelated chore");
         app.on_click(x, y);
+        assert_eq!(*log.borrow(), vec!["https://github.com/acme/api/pull/99".to_string()]);
         assert_eq!((app.focus, app.pr_sel, app.pr_sheet), (Focus::Prs, 1, false));
         render(&app, 170, 44);
         app.on_click(x, y);
-        assert!(app.pr_sheet);
+        assert_eq!(log.borrow().len(), 2, "every click opens it again, the sheet stays closed");
+        assert!(!app.pr_sheet);
+    }
+
+    #[test]
+    fn the_details_button_opens_the_pr_sheet_without_opening_the_browser() {
+        let (_root, mut app) = with_prs();
+        let log = recorder(&mut app);
         let out = render(&app, 170, 44);
+        assert_eq!(out.matches("[ details ]").count(), 3, "one button per pull request:\n{out}");
+        let (x, y) = find(&out, "[ details ]");
+        app.on_click(x + 2, y);
+        assert!(app.pr_sheet && app.focus == Focus::Prs);
+        assert_eq!(app.pr_sel, 0);
+        assert!(log.borrow().is_empty(), "details does not open the browser");
+        let out = render(&app, 170, 44);
+        assert!(out.contains("Ready for review"), "{out}");
         let (bx, by) = find(&out, "[ o Open in browser ]");
         app.on_click(bx + 3, by);
-        assert_eq!(*log.borrow(), vec!["https://github.com/acme/api/pull/99".to_string()]);
+        assert_eq!(*log.borrow(), vec!["https://github.com/acme/widgets/pull/12".to_string()]);
         assert!(app.pr_sheet, "opening the browser keeps the sheet");
         app.on_click(0, 0);
         assert!(!app.pr_sheet);
+    }
+
+    #[test]
+    fn the_details_button_of_a_later_pr_opens_that_prs_sheet() {
+        let (_root, mut app) = with_prs();
+        let out = render(&app, 170, 44);
+        let y_second = find(&out, "Unrelated chore").1 + 1;
+        let x = out.lines().nth(y_second as usize).unwrap().find("[ details ]").expect("button on the CI line");
+        let x = out.lines().nth(y_second as usize).unwrap()[..x].chars().count() as u16;
+        app.on_click(x + 1, y_second);
+        assert!(app.pr_sheet);
+        assert_eq!(app.pr_sel, 1);
+        let out = render(&app, 170, 44);
+        assert!(out.contains("Draft (not ready for review)"), "{out}");
     }
 
     #[test]
@@ -1273,7 +1301,7 @@ mod tests {
         assert!(out.contains("Loading manual runs"), "{out}");
         app.apply_runs(Ok(Batch::default()));
         let out = render(&app, 170, 40);
-        assert!(out.contains("No manual runs in the last 24 hours"), "{out}");
+        assert!(out.contains("No manual runs in the last 3 hours"), "{out}");
         app.apply_runs(Ok(Batch { runs: vec![], warnings: vec!["acme/api: HTTP 403".into()] }));
         let out = render(&app, 170, 40);
         assert!(out.contains("acme/api: HTTP 403"), "{out}");

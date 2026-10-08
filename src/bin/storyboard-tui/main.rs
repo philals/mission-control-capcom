@@ -57,7 +57,7 @@ fn main() -> Result<()> {
         app.runs.disabled = true;
     } else {
         let repos = Arc::new(Mutex::new(Vec::new()));
-        let source = Arc::new(runs::Fetcher::new(runs::GhApi::default(), chrono::Duration::hours(24)));
+        let source = Arc::new(runs::Fetcher::new(runs::GhApi::default(), chrono::Duration::hours(3)));
         let (rx, wake) = runs::spawn(source, repos.clone(), runs::RunCadence::default());
         app.attach_runs(rx, wake, repos);
     }
