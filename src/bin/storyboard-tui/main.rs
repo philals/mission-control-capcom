@@ -100,6 +100,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         }
         app.poll_feed();
         app.poll_runs();
+        app.poll_ready();
         if app.needs_reload() {
             app.reload();
         }

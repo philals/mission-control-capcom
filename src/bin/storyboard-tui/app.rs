@@ -82,6 +82,11 @@ pub enum Target {
     NextColumn,
     Pr(usize),
     PrDetails(usize),
+    PrCopy(usize),
+    /// The `[DRAFT]` badge of a live draft pull request.
+    PrBadge(usize),
+    ConfirmYes,
+    ConfirmNo,
     PrPanel,
     OpenPr,
     OpenCheck(usize, usize),
@@ -211,6 +216,10 @@ pub struct PrRow<'a> {
     pub board_state: Option<PrState>,
 }
 
+fn pr_id(row: &PrRow) -> String {
+    row.number.map_or(row.repo.clone(), |n| format!("{}#{n}", row.repo))
+}
+
 fn same_url(a: &str, b: &str) -> bool {
     a.trim_end_matches('/') == b.trim_end_matches('/')
 }
@@ -239,6 +248,79 @@ fn open_in_browser(url: &str) {
         std::thread::spawn(move || {
             let _ = child.wait();
         });
+    }
+}
+
+/// A pull request waiting for "mark ready for review" to be confirmed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Confirm {
+    pub url: String,
+    pub id: String,
+    pub title: String,
+}
+
+const NOTICE_SECONDS: u64 = 5;
+
+pub type Readier = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+
+fn base64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = (chunk[0] as u32) << 16 | (*chunk.get(1).unwrap_or(&0) as u32) << 8 | *chunk.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// Put text on the clipboard: the terminal's own clipboard (works over ssh) and, when present,
+/// the desktop tool.
+fn copy_to_clipboard(text: &str) {
+    use std::io::Write;
+    let mut out = std::io::stdout();
+    let _ = write!(out, "\x1b]52;c;{}\x07", base64(text.as_bytes()));
+    let _ = out.flush();
+    let tools: &[(&str, &[&str])] = &[
+        ("wl-copy", &[]),
+        ("xclip", &["-selection", "clipboard"]),
+        ("pbcopy", &[]),
+    ];
+    for (program, args) in tools {
+        let child = Command::new(program)
+            .args(*args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        if let Ok(mut child) = child {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            break;
+        }
+    }
+}
+
+fn gh_mark_ready(url: &str) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err("not a pull request link".into());
+    }
+    let mut cmd = Command::new("gh");
+    cmd.args(["pr", "ready", url]);
+    match storyboard::refresh::run_with_timeout(cmd, std::time::Duration::from_secs(30)) {
+        Ok(Some(out)) if out.status.success() => Ok(()),
+        Ok(Some(out)) => Err(String::from_utf8_lossy(&out.stderr).lines().next().unwrap_or("gh failed").to_string()),
+        Ok(None) => Err("gh timed out".into()),
+        Err(e) => Err(e.to_string()),
     }
 }
 
@@ -280,6 +362,11 @@ pub struct App {
     pub geometry: Cell<Geometry>,
     drag: Option<Drag>,
     pub opener: Box<dyn Fn(&str)>,
+    pub copier: Box<dyn Fn(&str)>,
+    pub readier: Readier,
+    pub confirm: Option<Confirm>,
+    notice: Option<(String, std::time::Instant)>,
+    ready_done: (Sender<Result<String, String>>, Receiver<Result<String, String>>),
     feed: Option<(Receiver<PrMsg>, Sender<()>)>,
     run_feed: Option<(Receiver<RunMsg>, Sender<()>)>,
     run_repos: Option<Arc<Mutex<Vec<String>>>>,
@@ -325,6 +412,11 @@ impl App {
             geometry: Cell::new(Geometry::default()),
             drag: None,
             opener: Box::new(open_in_browser),
+            copier: Box::new(copy_to_clipboard),
+            readier: Arc::new(gh_mark_ready),
+            confirm: None,
+            notice: None,
+            ready_done: std::sync::mpsc::channel(),
             feed: None,
             run_feed: None,
             run_repos: None,
@@ -884,6 +976,61 @@ impl App {
         }
     }
 
+    pub fn current_notice(&self) -> Option<&str> {
+        match &self.notice {
+            Some((text, at)) if at.elapsed().as_secs() < NOTICE_SECONDS => Some(text),
+            _ => None,
+        }
+    }
+
+    fn set_notice(&mut self, text: String) {
+        self.notice = Some((text, std::time::Instant::now()));
+    }
+
+    pub fn copy_pr(&mut self, index: usize) {
+        let Some((url, id)) = self.pr_rows().get(index).map(|r| (r.url.clone(), pr_id(r))) else {
+            return;
+        };
+        (self.copier)(&url);
+        self.set_notice(format!("copied {id}"));
+    }
+
+    /// Ask before marking a live draft ready for review.
+    pub fn ask_mark_ready(&mut self, index: usize) {
+        let confirm = self.pr_rows().get(index).and_then(|r| {
+            r.live.filter(|p| p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone() })
+        });
+        if confirm.is_some() {
+            self.confirm = confirm;
+        }
+    }
+
+    pub fn confirm_ready(&mut self) {
+        let Some(confirm) = self.confirm.take() else {
+            return;
+        };
+        self.set_notice(format!("marking {} ready…", confirm.id));
+        let readier = self.readier.clone();
+        let done = self.ready_done.0.clone();
+        let wake = self.feed.as_ref().map(|(_, w)| w.clone());
+        std::thread::spawn(move || {
+            let result = readier(&confirm.url).map(|_| confirm.id.clone()).map_err(|e| format!("{}: {e}", confirm.id));
+            let _ = done.send(result);
+            if let Some(wake) = wake {
+                let _ = wake.send(());
+            }
+        });
+    }
+
+    pub fn poll_ready(&mut self) {
+        while let Ok(result) = self.ready_done.1.try_recv() {
+            match result {
+                Ok(id) => self.set_notice(format!("{id} is ready for review")),
+                Err(e) => self.set_notice(format!("could not mark ready: {e}")),
+            }
+        }
+    }
+
     pub fn open_selected_pr(&self) {
         let url = self.pr_rows().get(self.pr_sel).map(|r| r.url.clone());
         if let Some(url) = url {
@@ -964,6 +1111,14 @@ impl App {
         if ctrl {
             return code == KeyCode::Char('c');
         }
+        if self.confirm.is_some() {
+            match code {
+                KeyCode::Char('y') | KeyCode::Enter => self.confirm_ready(),
+                KeyCode::Char('n') | KeyCode::Esc | KeyCode::Char('q') => self.confirm = None,
+                _ => {}
+            }
+            return false;
+        }
         match code {
             KeyCode::Char('q') => return true,
             KeyCode::Char('?') => {
@@ -1022,6 +1177,14 @@ impl App {
             }
             KeyCode::Char('o') if self.focus == Focus::Prs => {
                 self.open_selected_pr();
+                return false;
+            }
+            KeyCode::Char('c') if self.focus == Focus::Prs => {
+                self.copy_pr(self.pr_sel);
+                return false;
+            }
+            KeyCode::Char('m') if self.focus == Focus::Prs => {
+                self.ask_mark_ready(self.pr_sel);
                 return false;
             }
             KeyCode::Char('o') if self.focus == Focus::Runs => {
@@ -1103,6 +1266,14 @@ impl App {
 
     pub fn on_click(&mut self, x: u16, y: u16) {
         let target = self.hit(x, y);
+        if self.confirm.is_some() {
+            match target {
+                Some(Target::ConfirmYes) => self.confirm_ready(),
+                Some(Target::Sheet) => {}
+                _ => self.confirm = None,
+            }
+            return;
+        }
         if self.detail || self.help || self.pr_sheet || self.run_sheet {
             match target {
                 Some(Target::Sheet) => {}
@@ -1130,6 +1301,18 @@ impl App {
                 self.set_focus(Focus::Prs);
                 self.pr_sel = i;
                 self.open_pr(i);
+                return;
+            }
+            Some(Target::PrCopy(i)) => {
+                self.set_focus(Focus::Prs);
+                self.pr_sel = i;
+                self.copy_pr(i);
+                return;
+            }
+            Some(Target::PrBadge(i)) => {
+                self.set_focus(Focus::Prs);
+                self.pr_sel = i;
+                self.ask_mark_ready(i);
                 return;
             }
             Some(Target::PrDetails(i)) => {
@@ -1695,6 +1878,14 @@ mod tests {
         app.on_key(KeyCode::Tab, false);
         app.on_key(KeyCode::Tab, false);
         assert_eq!(app.focus, Focus::Main, "main, PRs, runs, then back to main");
+    }
+
+    #[test]
+    fn base64_matches_the_standard_encoding() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
     }
 
     #[test]

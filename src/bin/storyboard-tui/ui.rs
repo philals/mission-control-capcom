@@ -84,6 +84,9 @@ pub fn draw(f: &mut Frame, app: &App) {
     } else if app.detail && app.screen == Screen::Board {
         draw_detail(f, area, app, &mut hits);
     }
+    if app.confirm.is_some() {
+        panel::draw_confirm(f, area, app, &mut hits);
+    }
     *app.hits.borrow_mut() = hits;
 }
 
@@ -603,6 +606,8 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("[ ]", "switch story on the board".into()),
         row("Tab", "focus: board or list, then PRs, then manual runs".into()),
         row("o", "open the selected pull request or run in the browser".into()),
+        row("c", "copy the selected pull request's link".into()),
+        row("m", "mark the selected draft ready for review (asks first)".into()),
         row("d", "show or hide completed stories (list)".into()),
         row("Esc  b", "back to the list, or close a sheet".into()),
         row("r", "reload now (it also reloads by itself)".into()),
@@ -1167,6 +1172,114 @@ mod tests {
         app.pr_sheet = true;
         let out = render(&app, 150, 50);
         assert!(out.contains("Draft (not ready for review)"), "{out}");
+    }
+
+    fn copies(app: &mut App) -> std::rc::Rc<std::cell::RefCell<Vec<String>>> {
+        let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        let sink = log.clone();
+        app.copier = Box::new(move |text| sink.borrow_mut().push(text.to_string()));
+        log
+    }
+
+    fn ready_calls(app: &mut App) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let sink = log.clone();
+        app.readier = std::sync::Arc::new(move |url| {
+            sink.lock().unwrap().push(url.to_string());
+            Ok(())
+        });
+        log
+    }
+
+    #[test]
+    fn the_copy_button_copies_the_pr_link_without_opening_the_browser() {
+        let (_root, mut app) = with_prs();
+        let opened = recorder(&mut app);
+        let copied = copies(&mut app);
+        let out = render(&app, 170, 44);
+        assert_eq!(out.matches("[ copy ]").count(), 3, "one per pull request:\n{out}");
+        let (x, y) = find(&out, "[ copy ]");
+        app.on_click(x + 2, y);
+        assert_eq!(*copied.borrow(), vec!["https://github.com/acme/widgets/pull/12".to_string()]);
+        assert!(opened.borrow().is_empty());
+        assert!(render(&app, 170, 44).contains("copied acme/widgets#12"));
+    }
+
+    #[test]
+    fn the_c_key_copies_the_selected_pr() {
+        let (_root, mut app) = with_prs();
+        let copied = copies(&mut app);
+        app.focus = Focus::Prs;
+        app.pr_sel = 1;
+        app.on_key(KeyCode::Char('c'), false);
+        assert_eq!(copied.borrow().len(), 1);
+        assert!(copied.borrow()[0].contains("/pull/"));
+    }
+
+    #[test]
+    fn clicking_draft_asks_first_and_only_yes_marks_it_ready() {
+        let (_root, mut app) = with_prs();
+        let calls = ready_calls(&mut app);
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "[DRAFT]");
+        app.on_click(x + 2, y);
+        assert!(app.confirm.is_some());
+        assert!(calls.lock().unwrap().is_empty(), "nothing happens before the answer");
+        let out = render(&app, 170, 44);
+        assert!(out.contains("Mark ready for review?") && out.contains("Unrelated chore"), "{out}");
+        let (nx, ny) = find(&out, "[ n Cancel ]");
+        app.on_click(nx + 2, ny);
+        assert!(app.confirm.is_none() && calls.lock().unwrap().is_empty());
+        let (x, y) = find(&render(&app, 170, 44), "[DRAFT]");
+        app.on_click(x + 2, y);
+        let out = render(&app, 170, 44);
+        let (yx, yy) = find(&out, "[ y Mark ready ]");
+        app.on_click(yx + 2, yy);
+        assert!(app.confirm.is_none());
+        for _ in 0..100 {
+            app.poll_ready();
+            if !calls.lock().unwrap().is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(calls.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn keys_answer_the_confirmation_and_ready_prs_have_no_clickable_badge() {
+        let (_root, mut app) = with_prs();
+        let calls = ready_calls(&mut app);
+        app.focus = Focus::Prs;
+        app.pr_sel = 0;
+        app.on_key(KeyCode::Char('m'), false);
+        assert!(app.confirm.is_none(), "a ready pull request is not asked about");
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "[READY]");
+        app.on_click(x + 2, y);
+        assert!(app.confirm.is_none());
+        app.pr_sel = 1;
+        app.on_key(KeyCode::Char('m'), false);
+        assert!(app.confirm.is_some());
+        app.on_key(KeyCode::Esc, false);
+        assert!(app.confirm.is_none() && calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_failed_mark_ready_is_reported() {
+        let (_root, mut app) = with_prs();
+        app.readier = std::sync::Arc::new(|_| Err("not permitted".into()));
+        app.pr_sel = 1;
+        app.ask_mark_ready(1);
+        app.confirm_ready();
+        for _ in 0..100 {
+            app.poll_ready();
+            if app.current_notice().is_some_and(|n| n.contains("could not")) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(app.current_notice().unwrap().contains("not permitted"));
     }
 
     #[test]

@@ -13,11 +13,21 @@ type Hits = Vec<(Rect, Target)>;
 
 const OPEN_BUTTON: &str = "[ o Open in browser ]";
 const DETAILS_BUTTON: &str = "[ details ]";
+const COPY_BUTTON: &str = "[ copy ]";
+const CONFIRM_YES: &str = "[ y Mark ready ]";
+const CONFIRM_NO: &str = "[ n Cancel ]";
 pub const SHEET_STAGE_OPEN: &str = "[ open ]";
 
 fn details_width() -> usize {
     DETAILS_BUTTON.chars().count()
 }
+
+fn copy_width() -> usize {
+    COPY_BUTTON.chars().count()
+}
+
+/// Width of the `[DRAFT]` badge that marks a draft ready when clicked.
+const BADGE_CLICK_WIDTH: u16 = 7;
 const MAX_STAGE_LINES: usize = 8;
 const MAX_TITLE_LINES: usize = 3;
 const NOT_LISTED: &str = "(not in your open pull requests)";
@@ -290,10 +300,12 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
     first.push(Span::raw(" ".repeat(pad)));
     first.extend(right);
     let style = if selected { Style::new().bg(Color::Indexed(237)) } else { Style::new() };
-    let button = details_width();
+    let button = details_width() + 1 + copy_width();
     let mut second = fit(summary, width.saturating_sub(button + 1));
     let gap = width.saturating_sub(width_of(&second) + button);
     second.push(Span::raw(" ".repeat(gap)));
+    second.push(Span::styled(COPY_BUTTON, Style::new().fg(Color::Cyan)));
+    second.push(Span::raw(" "));
     second.push(Span::styled(DETAILS_BUTTON, Style::new().fg(Color::Cyan)));
     let mut lines: Vec<Line<'static>> = title_lines(row, width)
         .into_iter()
@@ -309,7 +321,9 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let rows = app.pr_rows();
     let focused = app.focus == Focus::Prs;
     let name = if app.screen == Screen::List { "PULL REQUESTS" } else { "STORY PULL REQUESTS" };
-    let status = if app.prs.loading {
+    let status = if let Some(notice) = app.current_notice() {
+        format!(" {notice} ")
+    } else if app.prs.loading {
         " refreshing… ".to_string()
     } else {
         app.prs.updated.as_ref().map_or(String::new(), |u| format!(" updated {u} "))
@@ -368,9 +382,15 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         f.render_widget(Paragraph::new(lines), rect);
         hits.push((rect, Target::Pr(i)));
         let button = details_width() as u16;
+        let copy = copy_width() as u16;
         let title_n = title_lines(row, width).len() as u16;
-        if body.width > button && h > title_n + 1 {
-            hits.push((Rect::new(body.x + body.width - button, y + title_n + 1, button, 1), Target::PrDetails(i)));
+        if body.width > button + copy + 1 && h > title_n + 1 {
+            let line = y + title_n + 1;
+            hits.push((Rect::new(body.x + body.width - button, line, button, 1), Target::PrDetails(i)));
+            hits.push((Rect::new(body.x + body.width - button - 1 - copy, line, copy, 1), Target::PrCopy(i)));
+        }
+        if row.live.is_some_and(|pr| pr.is_draft) && h > title_n {
+            hits.push((Rect::new(body.x + 2, y + title_n, BADGE_CLICK_WIDTH.min(body.width), 1), Target::PrBadge(i)));
         }
         for j in 0..stage_count(row).min(MAX_STAGE_LINES) {
             let line_y = y + title_n + 2 + j as u16;
@@ -409,6 +429,40 @@ fn check_line(check: &Check, label_width: usize, inner_width: usize, now: DateTi
     spans.push(Span::raw(" ".repeat(gap)));
     spans.push(Span::styled(SHEET_STAGE_OPEN, Style::new().fg(Color::Cyan)));
     Line::from(spans)
+}
+
+/// The "mark ready for review?" confirmation over the whole screen.
+pub fn draw_confirm(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
+    let Some(confirm) = &app.confirm else {
+        return;
+    };
+    let w = (area.width * 60 / 100).max(44).min(area.width);
+    let h = 8.min(area.height);
+    let rect = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
+    let inner = w.saturating_sub(2) as usize;
+    let mut lines = vec![
+        Line::raw(""),
+        Line::from(Span::styled(format!(" {}", confirm.id), Style::new().fg(Color::Cyan))),
+    ];
+    for t in wrap_text(&confirm.title, inner.saturating_sub(2), 2) {
+        lines.push(Line::from(Span::styled(format!(" {t}"), Style::new().add_modifier(Modifier::BOLD))));
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(" Reviewers are notified when it leaves draft.", dim())));
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(ORANGE))
+        .title(Span::styled(" Mark ready for review? ", Style::new().add_modifier(Modifier::BOLD)));
+    f.render_widget(Clear, rect);
+    f.render_widget(Paragraph::new(lines).block(block), rect);
+    let y = rect.y + rect.height.saturating_sub(2);
+    let yes = Rect::new(rect.x + 2, y, CONFIRM_YES.chars().count() as u16, 1);
+    let no = Rect::new(yes.x + yes.width + 2, y, CONFIRM_NO.chars().count() as u16, 1);
+    f.render_widget(Paragraph::new(Span::styled(CONFIRM_YES, Style::new().fg(Color::Green).add_modifier(Modifier::BOLD))), yes);
+    f.render_widget(Paragraph::new(Span::styled(CONFIRM_NO, Style::new().fg(Color::Cyan))), no);
+    hits.push((rect, Target::Sheet));
+    hits.push((yes, Target::ConfirmYes));
+    hits.push((no, Target::ConfirmNo));
 }
 
 pub fn draw_sheet(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
