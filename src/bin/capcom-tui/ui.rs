@@ -1478,6 +1478,28 @@ mod tests {
     }
 
     #[test]
+    fn a_todo_card_can_go_straight_to_implementing_and_still_waits_for_its_dependencies() {
+        let (_root, mut app) = sample();
+        let fake = with_herdr(&mut app);
+        drag_card(&mut app, "T3 Spike it", "IMPLEMENTING");
+        let launches = launches_after(&mut app, &fake, 1);
+        assert_eq!(launches.len(), 1);
+        assert_eq!(launches[0].prompt, "/story-implement-task PROJ-1 T3");
+        assert_eq!(launches[0].agent, "proj-1-t3-impl");
+        let (_root, mut app) = sample();
+        let fake = with_herdr(&mut app);
+        store::update(&app.root.clone(), "PROJ-1", |b| {
+            b.tasks.iter_mut().find(|t| t.id == "T2").unwrap().status = Status::Todo;
+            Ok(())
+        })
+        .unwrap();
+        app.reload();
+        drag_card(&mut app, "T2 Wire UI", "IMPLEMENTING");
+        assert!(launches_after(&mut app, &fake, 1).is_empty());
+        assert!(app.current_notice().unwrap().contains("waits for T1"));
+    }
+
+    #[test]
     fn a_card_whose_dependencies_are_not_done_is_not_started() {
         let (_root, mut app) = sample();
         let fake = with_herdr(&mut app);

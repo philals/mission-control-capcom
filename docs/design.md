@@ -44,7 +44,7 @@ The `story-review` skill (`/story-review PROJ-123`) checks the subtasks are comp
 
 ## Statuses
 
-`todo → planning → planned → implementing → done`, plus a `dropped` terminal state and a `blocked` flag. (Updated 2026-10-05: the per-task `in_review` status was removed. Review is a story-level activity, see Story review above.)
+`todo → planning → planned → implementing → done`, plus a `dropped` terminal state and a `blocked` flag. (Updated 2026-10-09: `todo → implementing` is allowed too, for spikes and manual testing that need no plan.) (Updated 2026-10-05: the per-task `in_review` status was removed. Review is a story-level activity, see Story review above.)
 
 | Status | Meaning | Entered by |
 |---|---|---|

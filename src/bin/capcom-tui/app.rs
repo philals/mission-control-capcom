@@ -1093,7 +1093,8 @@ impl App {
         });
     }
 
-    /// Start the skill that moves a task into `to`: planning from todo, implementing from planned.
+    /// Start the skill that moves a task into `to`: planning from todo, implementing from planned (or
+    /// straight from todo, for spikes and manual testing).
     pub fn start_work(&mut self, task_id: &str, to: Status) {
         let Some(key) = self.keys.get(self.story).cloned() else {
             return;
@@ -1106,7 +1107,7 @@ impl App {
         };
         let (skill, tab, phase) = match (task.status, to) {
             (Status::Todo, Status::Planning) => ("story-plan-task", "plan", "plan"),
-            (Status::Planned, Status::Implementing) => {
+            (Status::Planned | Status::Todo, Status::Implementing) => {
                 if !rules::is_ready(board, task) {
                     let waiting = task
                         .depends_on
@@ -1122,7 +1123,7 @@ impl App {
             }
             (from, to) if from == to => return,
             _ => {
-                self.set_notice("drop a TODO card on PLANNING to plan it, or a PLANNED card on IMPLEMENTING".into());
+                self.set_notice("drop a TODO card on PLANNING to plan it, or a TODO or PLANNED card on IMPLEMENTING".into());
                 return;
             }
         };

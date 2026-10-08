@@ -87,6 +87,7 @@ fn allowed(from: Status, to: Status) -> bool {
     matches!(
         (from, to),
         (Todo, Planning)
+            | (Todo, Implementing)
             | (Planning, Planned)
             | (Planning, Todo)
             | (Planned, Implementing)
@@ -110,7 +111,7 @@ pub fn transition(board: &mut Board, id: &str, to: Status) -> Result<()> {
     {
         let t = &board.tasks[idx];
         match to {
-            Status::Implementing if from == Status::Planned => {
+            Status::Implementing if matches!(from, Status::Planned | Status::Todo) => {
                 if let Some(b) = &t.blocked {
                     bail!("{id} is blocked: {}", b.reason);
                 }
@@ -271,6 +272,17 @@ mod tests {
         transition(&mut b, "T1", Status::Planned).unwrap();
         transition(&mut b, "T1", Status::Implementing).unwrap();
         assert_eq!(b.tasks[0].status, Status::Implementing);
+    }
+
+    #[test]
+    fn a_task_may_skip_planning_and_go_straight_from_todo_to_implementing() {
+        let mut b = board(vec![t("T1", &[]), t("T2", &["T1"]), t("T3", &[])]);
+        transition(&mut b, "T1", Status::Implementing).unwrap();
+        assert_eq!(b.tasks[0].status, Status::Implementing);
+        assert!(err(transition(&mut b, "T2", Status::Implementing)).contains("waiting on"), "dependencies still count");
+        b.tasks[2].blocked = Some(Blocked { reason: "waiting on DBA".into() });
+        assert!(err(transition(&mut b, "T3", Status::Implementing)).contains("blocked"));
+        assert_eq!(b.tasks[1].status, Status::Todo);
     }
 
     #[test]

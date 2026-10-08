@@ -47,6 +47,7 @@ Worktrees are not removed automatically. Once a task is `done` (its PRs merged),
 ```
 todo ─► planning ─► planned ─► implementing ─► done      (task: done = every PR merged)
                           dropped = cancelled, from any unfinished status
+          todo ─► implementing is also allowed (skip planning, e.g. spikes and manual testing)
 
 in_progress ─► in_review ─► done                          (story, via /story-review)
 ```
@@ -101,7 +102,7 @@ The query defaults to `is:pr author:@me state:open archived:false sort:updated-d
 **Herdr.** Started inside a Herdr pane, `capcom-tui` can launch the skills for you (outside Herdr these are off and say so):
 
 - **New story:** press `n` (or click `[ n + new story ]`) on the story list, paste a Jira key or link and press Enter. A Herdr workspace named after the key is created and `/story-break-down KEY` starts in it.
-- **Drag to start:** drag a TODO card onto PLANNING to start `/story-plan-task KEY T2`, or a PLANNED card onto IMPLEMENTING for `/story-implement-task KEY T2` (it must have its dependencies done). `p` and `i` do the same for the selected card. Each runs in a new tab of the story's workspace; the drag itself changes nothing, the skill moves the card as its first step. Dropping on any other column explains why nothing started.
+- **Drag to start:** drag a TODO card onto PLANNING to start `/story-plan-task KEY T2`, or a TODO or PLANNED card onto IMPLEMENTING for `/story-implement-task KEY T2` (it must have its dependencies done; a TODO card skips planning, handy for spikes and manual testing). `p` and `i` do the same for the selected card. Each runs in a new tab of the story's workspace; the drag itself changes nothing, the skill moves the card as its first step. Dropping on any other column explains why nothing started.
 - **No double starts:** agents are named like `proj-123-t2-plan`; if one is already running it is brought to the front instead.
 - **Where they run:** the current folder of `capcom-tui`, or `--workdir` / `CAPCOM_WORKDIR`. Nothing about Herdr is stored: workspaces are found again by their label.
 

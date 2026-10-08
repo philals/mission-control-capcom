@@ -4,7 +4,8 @@ Local kanban boards for Jira stories. One `board.json` per story at
 `$CAPCOM_ROOT/<KEY>/`. The stories folder is required: set `CAPCOM_ROOT` or pass `--root DIR`; `capcom root` prints the one in use. This tool is the only
 writer of `board.json`; skills and the Herdr plugin call it.
 
-Task statuses: `todo → planning → planned → implementing → done`, plus `dropped`.
+Task statuses: `todo → planning → planned → implementing → done`, plus `dropped`. A task may also go
+straight from `todo` to `implementing` (spikes, manual testing), under the same dependency and blocked checks.
 `blocked` is a flag with a reason. A task may enter `implementing` only when every
 dependency is `done`.
 
