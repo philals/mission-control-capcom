@@ -149,9 +149,9 @@ fn draw_tabs(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let active = runs.iter().filter(|r| r.is_active()).count();
     let prs = format!("[ Pull requests · {} ]", app.pr_rows().len());
     let runs_label = if active > 0 {
-        format!("[ Manual runs · {} ({active} active) ]", runs.len())
+        format!("[ Runs & watch · {} ({active} active) ]", runs.len())
     } else {
-        format!("[ Manual runs · {} ]", runs.len())
+        format!("[ Runs & watch · {} ]", runs.len())
     };
     let style = |tab: BottomTab| {
         if app.tab == tab {
@@ -860,8 +860,9 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("v", "start the review of the selected story in Herdr (it must have every task finished); or drag it from DOING to IN REVIEW".into()),
         row("Enter", "open a story, or open a card's detail".into()),
         row("[ ]", "switch story on the board".into()),
-        row("Tab", "focus: board or list, then PRs, then manual runs".into()),
+        row("Tab", "focus: board or list, then PRs, then runs".into()),
         row("o", "open the selected pull request or run in the browser".into()),
+        row("x", "runs panel: stop watching the selected run (watch one by pasting its link)".into()),
         row("n", "new story: paste a Jira key or link to start its breakdown in Herdr".into()),
         row("p / i", "start planning / implementing the selected task in Herdr (or drag the card); a TODO task asks whether an agent is needed".into()),
         row("x", "finish the selected IMPLEMENTING task: checks its PRs on GitHub, done only if all merged (or drag to DONE)".into()),
@@ -2530,6 +2531,17 @@ mod tests {
     }
 
     #[test]
+    fn a_watched_run_is_marked_and_the_empty_panel_says_how_to_watch_one() {
+        let (_root, mut app) = with_runs();
+        app.apply_runs(Ok(Batch { runs: vec![Run { watched: true, ..run("acme/web", 9, "Build web", RunState::Running, vec![]) }], warnings: vec![] }));
+        let out = render(&app, 170, 44);
+        assert!(out.contains("◎ WATCHING") && out.contains("RUNS & WATCH · 1"), "{out}");
+        assert_readable(&app, 170, 44, "a watched run");
+        app.apply_runs(Ok(Batch::default()));
+        assert!(render(&app, 170, 44).contains("paste a run link"));
+    }
+
+    #[test]
     fn a_pr_waiting_for_a_reviewer_gets_a_go_block_a_green_bar_and_a_tinted_row_but_others_do_not() {
         let (_root, mut app) = two_stories();
         app.apply_prs(Ok(vec![
@@ -2620,6 +2632,7 @@ mod tests {
             started_at: None,
             updated_at: "2026-10-08T03:01:00Z".into(),
             jobs,
+            watched: false,
         }
     }
 
@@ -2664,12 +2677,12 @@ mod tests {
         let (_root, app) = with_runs();
         let out = render(&app, 170, 44);
         for want in [
-            "PULL REQUESTS · 3", "MANUAL RUNS · 3", "[RUNNING]", "[SUCCESS]", "[FAILED]", "acme/widgets",
+            "PULL REQUESTS · 3", "RUNS & WATCH · 3", "[RUNNING]", "[SUCCESS]", "[FAILED]", "acme/widgets",
             "Deploy nonprod", "feat/x", "[ details ]", "Deploy to nonprod", "Release",
         ] {
             assert!(out.contains(want), "missing {want:?} in:\n{out}");
         }
-        assert!(line_of(&out, "PULL REQUESTS").contains("MANUAL RUNS"), "same row, side by side:\n{out}");
+        assert!(line_of(&out, "PULL REQUESTS").contains("RUNS & WATCH"), "same row, side by side:\n{out}");
         assert_eq!(out.matches("[ details ]").count(), 6, "a details button on each PR and each run:\n{out}");
         assert!(!out.contains("[ open ]"), "runs no longer have a separate open button:\n{out}");
         assert!(!out.contains("compile"), "passed stages are not listed:\n{out}");
@@ -2691,7 +2704,7 @@ mod tests {
     fn runs_are_separated_by_dividers() {
         let (_root, app) = with_runs();
         let out = render(&app, 170, 44);
-        let col = find(&out, "MANUAL RUNS").0 as usize;
+        let col = find(&out, "RUNS & WATCH").0 as usize;
         let first = find(&out, "Deploy to nonprod").1 as usize;
         let second = find(&out, "Earlier deploy").1 as usize;
         let between: Vec<String> = out.lines().skip(first + 1).take(second - first - 1).map(|l| l.chars().skip(col).collect()).collect();
@@ -2703,13 +2716,13 @@ mod tests {
         let (_root, mut app) = with_runs();
         let out = render(&app, 120, 44);
         assert!(out.contains("[ Pull requests · 3 ]"), "{out}");
-        assert!(out.contains("[ Manual runs · 3 (1 active) ]"), "{out}");
+        assert!(out.contains("[ Runs & watch · 3 (1 active) ]"), "{out}");
         assert!(out.contains("acme/api#99") && !out.contains("[RUNNING]"), "{out}");
-        let (x, y) = find(&out, "[ Manual runs");
+        let (x, y) = find(&out, "[ Runs & watch");
         app.on_click(x + 2, y);
         assert_eq!((app.tab, app.focus), (BottomTab::Runs, Focus::Runs));
         let out = render(&app, 120, 44);
-        assert!(out.contains("[RUNNING]") && out.contains("MANUAL RUNS · 3"), "{out}");
+        assert!(out.contains("[RUNNING]") && out.contains("RUNS & WATCH · 3"), "{out}");
         assert!(!out.contains("acme/api#99"), "{out}");
     }
 
@@ -2805,7 +2818,7 @@ mod tests {
         let (_root, mut app) = with_runs();
         app.open_story("PROJ-2");
         let out = render(&app, 170, 44);
-        assert!(out.contains("STORY MANUAL RUNS · 2"), "{out}");
+        assert!(out.contains("STORY RUNS & WATCH · 2"), "{out}");
         assert!(!out.contains("Release"), "{out}");
     }
 
@@ -2814,14 +2827,14 @@ mod tests {
         let (_root, mut app) = two_stories();
         app.focus = Focus::Runs;
         let out = render(&app, 170, 40);
-        assert!(out.contains("Loading manual runs"), "{out}");
+        assert!(out.contains("Loading runs"), "{out}");
         app.apply_runs(Ok(Batch::default()));
         let out = render(&app, 170, 40);
-        assert!(out.contains("No manual runs"), "{out}");
+        assert!(out.contains("No runs"), "{out}");
         app.apply_runs(Ok(Batch { runs: vec![], warnings: vec!["acme/api: HTTP 403".into()] }));
         let out = render(&app, 170, 40);
         assert!(out.contains("acme/api: HTTP 403"), "{out}");
-        assert!(out.contains("No manual runs in the last 3 hours"), "with room, the full message shows:\n{out}");
+        assert!(out.contains("No runs yet. Paste a GitHub Actions run link"), "with room, the full message shows:\n{out}");
         app.apply_runs(Err("gh failed: not logged in".into()));
         let out = render(&app, 170, 40);
         assert!(out.contains("gh failed: not logged in"), "{out}");
@@ -2877,7 +2890,7 @@ mod tests {
     }
 
     fn runs_x(out: &str) -> u16 {
-        find(out, "MANUAL RUNS").0
+        find(out, "RUNS & WATCH").0
     }
 
     #[test]
@@ -2887,7 +2900,7 @@ mod tests {
         app.apply_runs(Ok(Batch::default()));
         let out = render(&app, 170, 44);
         assert!(runs_x(&out) >= 170 - 36, "empty runs panel is narrow:\n{out}");
-        assert!(out.contains("No manual runs"), "{out}");
+        assert!(out.contains("No runs"), "{out}");
         app.apply_runs(Ok(runs_feed()));
         assert!(runs_x(&render(&app, 170, 44)) < 110, "runs back: wide again");
         app.apply_runs(Ok(Batch::default()));
@@ -2932,7 +2945,7 @@ mod tests {
     fn dragging_the_divider_resizes_the_two_panels() {
         let (_root, mut app) = with_runs();
         let out = render(&app, 170, 44);
-        let (tx, ty) = find(&out, "MANUAL RUNS");
+        let (tx, ty) = find(&out, "RUNS & WATCH");
         app.on_click(tx - 2, ty + 3);
         assert!(!app.run_sheet && app.focus == Focus::Main, "grabbing the divider is not a click on a run");
         app.on_drag(120, ty + 3);
@@ -2941,7 +2954,7 @@ mod tests {
         let out = render(&app, 170, 44);
         let x = runs_x(&out);
         assert!((117..=123).contains(&x), "the runs panel now starts near column 120, not {x}:\n{out}");
-        let (tx2, _) = find(&out, "MANUAL RUNS");
+        let (tx2, _) = find(&out, "RUNS & WATCH");
         app.on_click(tx2 - 2, ty + 3);
         app.on_drag(2, ty + 3);
         assert_eq!(app.split_pct, 25, "dragged to the far left it stops at the limit");
@@ -3017,7 +3030,7 @@ mod tests {
         let (_root, mut app) = with_prs();
         app.apply_runs(Ok(Batch::default()));
         let out = render(&app, 170, 44);
-        let (tx, ty) = find(&out, "MANUAL RUNS");
+        let (tx, ty) = find(&out, "RUNS & WATCH");
         assert!(tx >= 134, "starts as a narrow strip");
         app.on_click(tx - 2, ty + 3);
         app.on_drag(100, ty + 3);

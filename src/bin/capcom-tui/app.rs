@@ -2,7 +2,7 @@ use crate::finish;
 use crate::herdr::{self, Herdr, Launch, Outcome, Resume};
 use crate::pr_state;
 use crate::prs::{PrMsg, PullRequest};
-use crate::runs::{valid_repo, Batch, Run, RunMsg};
+use crate::runs::{parse_run_url, valid_repo, Batch, Run, RunMsg, RunState, Watch};
 use crate::settings::{self, Settings, COLUMNS, DEFAULT_COLUMN_WEIGHT, DEFAULT_SPLIT, MIN_COLUMN_WEIGHT};
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
@@ -359,6 +359,8 @@ pub enum AppMsg {
 }
 
 const NOTICE_SECONDS: u64 = 8;
+/// A watched run stays in the panel this long after it finishes.
+const WATCH_KEEP_MINUTES: i64 = 30;
 
 pub type Readier = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
@@ -448,6 +450,13 @@ pub struct App {
     pub run_sheet: bool,
     pub tab: BottomTab,
     pub extra_repos: Vec<String>,
+    /// Runs followed by link: kept in the settings file, shown until a while after they finish.
+    pub watches: Vec<Watch>,
+    watched_shared: Option<Arc<Mutex<Vec<(String, u64)>>>>,
+    run_states: std::collections::HashMap<(String, u64), RunState>,
+    bell: bool,
+    /// Tells you outside the terminal that a run finished (title, text).
+    pub notify: Arc<dyn Fn(&str, &str) + Send + Sync>,
     /// Width of the PR panel, as a percentage of the bottom area, when both panels are side by side.
     pub split_pct: u16,
     /// Height of the bottom area as a percentage of the body; None lets the layout decide.
@@ -520,6 +529,11 @@ impl App {
             run_sheet: false,
             tab: BottomTab::Prs,
             extra_repos: Vec::new(),
+            watches: Vec::new(),
+            watched_shared: None,
+            run_states: std::collections::HashMap::new(),
+            bell: false,
+            notify: Arc::new(|_, _| {}),
             split_pct: DEFAULT_SPLIT,
             bottom_pct: None,
             split_pinned: false,
@@ -880,10 +894,89 @@ impl App {
         self.sync_run_repos();
     }
 
-    pub fn attach_runs(&mut self, rx: Receiver<RunMsg>, wake: Sender<()>, repos: Arc<Mutex<Vec<String>>>) {
+    pub fn attach_runs(
+        &mut self,
+        rx: Receiver<RunMsg>,
+        wake: Sender<()>,
+        repos: Arc<Mutex<Vec<String>>>,
+        watched: Arc<Mutex<Vec<(String, u64)>>>,
+    ) {
         self.run_feed = Some((rx, wake));
         self.run_repos = Some(repos);
+        self.watched_shared = Some(watched);
         self.sync_run_repos();
+        self.sync_watched();
+    }
+
+    /// Give the runs poller the current watch list and have it look right away.
+    fn sync_watched(&self) {
+        let (Some(shared), Some((_, wake))) = (&self.watched_shared, &self.run_feed) else {
+            return;
+        };
+        let wanted: Vec<(String, u64)> = self.watches.iter().map(|w| (w.repo.clone(), w.id)).collect();
+        let mut current = shared.lock().expect("watch list lock");
+        if *current != wanted {
+            *current = wanted;
+            drop(current);
+            let _ = wake.send(());
+        }
+    }
+
+    /// Follow a run from now: it shows in the runs panel, and you are told when it finishes.
+    pub fn add_watch(&mut self, repo: &str, id: u64) {
+        if self.runs.disabled {
+            self.set_notice("the runs panel is off (started with --no-runs), so nothing can be watched".into());
+            return;
+        }
+        if self.watches.iter().any(|w| w.repo.eq_ignore_ascii_case(repo) && w.id == id) {
+            self.set_notice(format!("already watching {repo} run {id}"));
+            return;
+        }
+        let added_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        self.watches.push(Watch { repo: repo.to_string(), id, added_at });
+        self.save_settings();
+        self.sync_watched();
+        self.set_notice(format!("watching {repo} run {id}: you will be told when it finishes"));
+    }
+
+    pub fn remove_watch(&mut self, repo: &str, id: u64) {
+        self.watches.retain(|w| !(w.repo == repo && w.id == id));
+        self.runs.items.retain(|r| !(r.watched && r.repo == repo && r.id == id));
+        self.save_settings();
+        self.sync_watched();
+        self.run_clamp();
+    }
+
+    /// `x` in the runs panel: stop watching the selected run.
+    pub fn unwatch_selected_run(&mut self) {
+        let Some((repo, id, watched)) = self.visible_runs().get(self.run_sel).map(|r| (r.repo.clone(), r.id, r.watched)) else {
+            return;
+        };
+        if watched {
+            self.remove_watch(&repo, id);
+            self.set_notice(format!("stopped watching {repo} run {id}"));
+        } else {
+            self.set_notice("only runs you added by link can be removed: your manual runs leave on their own".into());
+        }
+    }
+
+    /// True once after a run finished: the caller rings the terminal bell.
+    pub fn take_bell(&mut self) -> bool {
+        std::mem::take(&mut self.bell)
+    }
+
+    fn run_finished(&mut self, run: &Run) {
+        let (icon, word) = match run.state {
+            RunState::Success => ("✔", "is GREEN"),
+            RunState::Failed => ("✗", "FAILED"),
+            RunState::Cancelled => ("⊘", "was cancelled"),
+            _ => ("●", "finished"),
+        };
+        let title = if run.title.is_empty() { &run.name } else { &run.title };
+        let text = format!("{icon} {} run {} {word}: {title}", run.repo, run.id);
+        self.bell = true;
+        (self.notify)(&format!("CAPCOM: run {word}"), &format!("{} · {title}", run.repo));
+        self.set_notice(text);
     }
 
     pub fn poll_runs(&mut self) {
@@ -910,6 +1003,7 @@ impl App {
         self.runs.loaded = true;
         match result {
             Ok(batch) => {
+                let batch = self.settle_watched(batch);
                 self.runs.items = batch.runs;
                 self.runs.warnings = batch.warnings;
                 self.runs.error = None;
@@ -918,6 +1012,43 @@ impl App {
             Err(e) => self.runs.error = Some(e),
         }
         self.run_clamp();
+    }
+
+    /// Drop watched runs that finished a while ago, and raise the alert for any that has just finished.
+    fn settle_watched(&mut self, mut batch: Batch) -> Batch {
+        let now = chrono::Utc::now();
+        let keep = chrono::Duration::minutes(WATCH_KEEP_MINUTES);
+        let parse = |s: &str| chrono::DateTime::parse_from_rfc3339(s).ok().map(|t| t.with_timezone(&chrono::Utc));
+        let mut expired = Vec::new();
+        batch.runs.retain(|run| {
+            if !run.watched || run.is_active() {
+                return true;
+            }
+            let added = self.watches.iter().find(|w| w.repo == run.repo && w.id == run.id).and_then(|w| parse(&w.added_at));
+            let since = parse(&run.updated_at).into_iter().chain(added).max();
+            let fresh = since.is_none_or(|t| now - t <= keep);
+            if !fresh {
+                expired.push((run.repo.clone(), run.id));
+            }
+            fresh
+        });
+        let mut finished = Vec::new();
+        for run in &batch.runs {
+            let key = (run.repo.clone(), run.id);
+            if self.run_states.get(&key).is_some_and(|before| matches!(before, RunState::Queued | RunState::Running | RunState::Waiting)) && !run.is_active() {
+                finished.push(run.clone());
+            }
+        }
+        self.run_states = batch.runs.iter().map(|r| ((r.repo.clone(), r.id), r.state)).collect();
+        for run in finished {
+            self.run_finished(&run);
+        }
+        if !expired.is_empty() {
+            self.watches.retain(|w| !expired.iter().any(|(r, id)| *r == w.repo && *id == w.id));
+            self.save_settings();
+            self.sync_watched();
+        }
+        batch
     }
 
     /// Repos to look for manual runs in: your open PRs, the PRs recorded on stories, and the extra list.
@@ -967,7 +1098,7 @@ impl App {
                 self.runs
                     .items
                     .iter()
-                    .filter(|r| repos.iter().any(|x| x.eq_ignore_ascii_case(&r.repo)))
+                    .filter(|r| r.watched || repos.iter().any(|x| x.eq_ignore_ascii_case(&r.repo)))
                     .collect()
             }
         }
@@ -1008,6 +1139,7 @@ impl App {
             split_pinned: self.split_pinned,
             columns: self.col_weights.to_vec(),
             auto_sync: self.auto_sync,
+            watched: self.watches.clone(),
         }
     }
 
@@ -1020,6 +1152,8 @@ impl App {
         self.bottom_pct = saved.bottom_pct;
         self.split_pinned = saved.split_pinned;
         self.auto_sync = saved.auto_sync;
+        self.watches = saved.watched;
+        self.sync_watched();
         for (slot, weight) in self.col_weights.iter_mut().zip(saved.columns) {
             *slot = weight;
         }
@@ -1640,6 +1774,11 @@ impl App {
     }
 
     pub fn on_paste(&mut self, text: &str) {
+        if let Some((repo, id)) = parse_run_url(text) {
+            self.new_story = None;
+            self.add_watch(&repo, id);
+            return;
+        }
         if let Some(buffer) = &mut self.new_story {
             buffer.push_str(&text.replace(['\r', '\n'], " "));
         }
@@ -1895,6 +2034,10 @@ impl App {
             }
             KeyCode::Char('o') if self.focus == Focus::Runs => {
                 self.open_selected_run();
+                return false;
+            }
+            KeyCode::Char('x') if self.focus == Focus::Runs => {
+                self.unwatch_selected_run();
                 return false;
             }
             _ => {}
@@ -2254,6 +2397,7 @@ mod tests {
                 started_at: None,
                 completed_at: None,
             }],
+            watched: false,
         }
     }
 
@@ -2703,7 +2847,7 @@ mod tests {
         let (_tx, rx) = std::sync::mpsc::channel();
         let (wake_tx, wake_rx) = std::sync::mpsc::channel();
         let shared = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-        app.attach_runs(rx, wake_tx, shared.clone());
+        app.attach_runs(rx, wake_tx, shared.clone(), Arc::new(Mutex::new(Vec::new())));
         assert_eq!(*shared.lock().unwrap(), vec!["acme/widgets"]);
         while wake_rx.try_recv().is_ok() {}
         app.apply_prs(Ok(vec![live("acme/new", 1, "x")]));
@@ -2711,6 +2855,115 @@ mod tests {
         assert!(wake_rx.try_recv().is_ok(), "a changed repo list refreshes the runs at once");
         app.apply_prs(Ok(vec![live("acme/new", 1, "x")]));
         assert!(wake_rx.try_recv().is_err(), "no change, no wake");
+    }
+
+    fn iso_ago(minutes: i64) -> String {
+        (chrono::Utc::now() - chrono::Duration::minutes(minutes)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    }
+
+    fn watched(repo: &str, id: u64, state: RunState, updated_minutes_ago: i64) -> Run {
+        Run { watched: true, updated_at: iso_ago(updated_minutes_ago), ..run(repo, id, state) }
+    }
+
+    fn watching_app(root: &TempDir) -> (App, Arc<Mutex<Vec<(String, u64)>>>, Arc<Mutex<Vec<(String, String)>>>) {
+        let mut app = App::new(root.path().to_path_buf(), None);
+        app.settings_path = Some(root.path().join("tui.json"));
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let (wake_tx, _wake_rx) = std::sync::mpsc::channel();
+        let list = Arc::new(Mutex::new(Vec::new()));
+        app.attach_runs(rx, wake_tx, Arc::new(Mutex::new(Vec::new())), list.clone());
+        let told = Arc::new(Mutex::new(Vec::new()));
+        let log = told.clone();
+        app.notify = Arc::new(move |title, body| log.lock().unwrap().push((title.to_string(), body.to_string())));
+        (app, list, told)
+    }
+
+    #[test]
+    fn pasting_a_run_link_starts_watching_it_even_with_the_new_story_box_open_and_it_is_remembered() {
+        let root = TempDir::new().unwrap();
+        let (mut app, list, _) = watching_app(&root);
+        app.new_story = Some(String::new());
+        app.on_paste("https://github.com/acme/web/actions/runs/123/job/456\n");
+        assert!(app.new_story.is_none());
+        assert_eq!(*list.lock().unwrap(), vec![("acme/web".to_string(), 123)], "the poller is given it");
+        app.on_paste("https://github.com/acme/web/actions/runs/123");
+        assert_eq!(app.watches.len(), 1, "the same run is not watched twice");
+        let mut again = App::new(root.path().to_path_buf(), None);
+        again.settings_path = Some(root.path().join("tui.json"));
+        again.load_settings();
+        assert_eq!(again.watches, app.watches, "a restart keeps what you were watching");
+    }
+
+    #[test]
+    fn a_watched_run_that_finishes_rings_and_notifies_but_one_first_seen_finished_does_not() {
+        let root = TempDir::new().unwrap();
+        let (mut app, _, told) = watching_app(&root);
+        app.add_watch("acme/web", 1);
+        app.add_watch("acme/web", 2);
+        app.apply_runs(Ok(Batch {
+            runs: vec![watched("acme/web", 1, RunState::Running, 0), watched("acme/web", 2, RunState::Success, 1)],
+            warnings: vec![],
+        }));
+        assert!(!app.take_bell() && told.lock().unwrap().is_empty(), "nothing finished while we watched");
+        app.apply_runs(Ok(Batch {
+            runs: vec![watched("acme/web", 1, RunState::Success, 0), watched("acme/web", 2, RunState::Success, 1)],
+            warnings: vec![],
+        }));
+        assert!(app.take_bell() && !app.take_bell(), "one bell");
+        let told = told.lock().unwrap();
+        assert_eq!(told.len(), 1);
+        assert!(told[0].0.contains("GREEN") && told[0].1.contains("acme/web"), "{told:?}");
+        assert!(app.notice.as_ref().unwrap().0.contains("acme/web run 1 is GREEN"), "{:?}", app.notice);
+    }
+
+    #[test]
+    fn a_failed_run_is_announced_as_failed() {
+        let root = TempDir::new().unwrap();
+        let (mut app, _, told) = watching_app(&root);
+        app.apply_runs(Ok(Batch { runs: vec![watched("acme/web", 1, RunState::Running, 0)], warnings: vec![] }));
+        app.apply_runs(Ok(Batch { runs: vec![watched("acme/web", 1, RunState::Failed, 0)], warnings: vec![] }));
+        assert!(told.lock().unwrap()[0].0.contains("FAILED"));
+    }
+
+    #[test]
+    fn a_watched_run_leaves_half_an_hour_after_it_finishes_and_a_just_added_old_run_stays_for_that_long() {
+        let root = TempDir::new().unwrap();
+        let (mut app, list, _) = watching_app(&root);
+        app.add_watch("acme/web", 1);
+        app.watches[0].added_at = iso_ago(40);
+        app.add_watch("acme/web", 2);
+        app.apply_runs(Ok(Batch {
+            runs: vec![watched("acme/web", 1, RunState::Success, 31), watched("acme/web", 2, RunState::Success, 300)],
+            warnings: vec![],
+        }));
+        let ids: Vec<u64> = app.runs.items.iter().map(|r| r.id).collect();
+        assert_eq!(ids, vec![2], "run 2 finished long ago but was only just added, so it stays for a while");
+        assert_eq!(*list.lock().unwrap(), vec![("acme/web".to_string(), 2)], "the expired one is no longer asked for");
+        let mut active = watched("acme/web", 3, RunState::Running, 600);
+        active.updated_at = iso_ago(600);
+        app.add_watch("acme/web", 3);
+        app.apply_runs(Ok(Batch { runs: vec![active], warnings: vec![] }));
+        assert_eq!(app.runs.items.len(), 1, "a run that is still going never expires");
+    }
+
+    #[test]
+    fn x_stops_watching_the_selected_run_and_refuses_for_a_manual_one() {
+        let root = TempDir::new().unwrap();
+        let (mut app, list, _) = watching_app(&root);
+        app.add_watch("acme/web", 1);
+        app.apply_runs(Ok(Batch {
+            runs: vec![watched("acme/web", 1, RunState::Running, 0), run("acme/api", 2, RunState::Running)],
+            warnings: vec![],
+        }));
+        app.focus = Focus::Runs;
+        app.run_sel = 1;
+        app.on_key(KeyCode::Char('x'), false);
+        assert_eq!(app.runs.items.len(), 2);
+        assert!(app.notice.as_ref().unwrap().0.contains("only runs you added by link"));
+        app.run_sel = 0;
+        app.on_key(KeyCode::Char('x'), false);
+        assert_eq!(app.runs.items.len(), 1);
+        assert!(app.watches.is_empty() && list.lock().unwrap().is_empty());
     }
 
     #[test]

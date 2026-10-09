@@ -1,4 +1,4 @@
-//! The manual runs panel (beside or behind the PR panel) and the run detail sheet.
+//! The runs and watch panel (beside or behind the PR panel) and the run detail sheet.
 use crate::theme;
 use crate::app::{App, Focus, Screen, Target};
 use crate::panel::{dim, fit, trunc, width_of, window_offset, ORANGE, SHEET_STAGE_OPEN};
@@ -100,6 +100,10 @@ fn run_lines(run: &Run, width: usize, selected: bool, now: DateTime<Utc>) -> Vec
         Span::styled(format!("{}  ", run.repo), Style::new().fg(theme::CYAN)),
         Span::styled(run.name.clone(), bold),
     ];
+    let mut left = left;
+    if run.watched {
+        left.push(Span::styled("  ◎ WATCHING", Style::new().fg(theme::CYAN).add_modifier(Modifier::BOLD)));
+    }
     let first = fit(left, width);
     let (_, color, word) = style_of(run.state);
     let took = run_seconds(run, now).map_or(String::new(), |s| format!(" {}", duration_text(s)));
@@ -136,7 +140,7 @@ fn run_lines(run: &Run, width: usize, selected: bool, now: DateTime<Utc>) -> Vec
 pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let runs = app.visible_runs();
     let focused = app.focus == Focus::Runs;
-    let name = if app.screen == Screen::List { "MANUAL RUNS" } else { "STORY MANUAL RUNS" };
+    let name = if app.screen == Screen::List { "RUNS & WATCH" } else { "STORY RUNS & WATCH" };
     let compact = area.width < 40;
     let status = if compact {
         String::new()
@@ -180,19 +184,19 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let body = Rect::new(inner.x, top, inner.width, (inner.y + inner.height).saturating_sub(top));
     if runs.is_empty() {
         let message = if compact && app.runs.disabled {
-            Some("Manual runs off".to_string())
+            Some("Runs & watch off".to_string())
         } else if compact && app.runs.loaded && app.runs.error.is_none() {
-            Some("No manual runs".to_string())
+            Some("No runs · paste a run link".to_string())
         } else if app.runs.disabled {
-            Some("Manual runs are off (started with --no-runs).".to_string())
+            Some("Runs are off (started with --no-runs).".to_string())
         } else if app.screen == Screen::Board {
-            Some("No manual runs in this story's repos in the last 3 hours.".to_string())
+            Some("No runs in this story's repos and nothing watched. Paste a GitHub Actions run link to watch one.".to_string())
         } else if app.runs.error.is_some() {
             None
         } else if app.runs.loaded {
-            Some("No manual runs in the last 3 hours.".to_string())
+            Some("No runs yet. Paste a GitHub Actions run link to watch it; runs you start by hand show up by themselves.".to_string())
         } else {
-            Some("Loading manual runs…".to_string())
+            Some("Loading runs…".to_string())
         };
         let mut lines: Vec<Line<'static>> = message.into_iter().map(|m| Line::from(Span::styled(m, dim()))).collect();
         if !compact && app.runs.loaded && !app.runs.disabled && app.deploy_repos().is_empty() {

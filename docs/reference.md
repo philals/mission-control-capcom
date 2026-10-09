@@ -87,8 +87,10 @@ The manual runs panel lists the GitHub Actions runs you started with the "Run wo
 kept in memory). The repos come from your open PRs, the PRs recorded on stories, and
 `--deploy-repos` / `CAPCOM_DEPLOY_REPOS` (comma separated `owner/name`). One REST call per repo
 every 10 seconds while any run is active, every 30 seconds otherwise; stages are fetched only for
-active or failed runs and cached once finished. A finished run is dropped 3 hours after it finished.
-`--no-runs` disables it.
+active or failed runs and cached once finished. A finished run is dropped 30 minutes after it finished.
+Runs can also be watched: paste a run link into capcom-tui and it is fetched by id
+(`repos/{owner}/{repo}/actions/runs/{id}`), kept in `~/.config/capcom/tui.json`, and announced (bell,
+status line, `notify-send` if present) when it finishes. `--no-runs` disables it.
 
 Panel sizes (PR/runs split, bottom height, kanban column widths) are saved when you change them, in
 `$CAPCOM_TUI_SETTINGS`, else `$XDG_CONFIG_HOME/capcom/tui.json`, else

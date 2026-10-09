@@ -838,7 +838,6 @@
 <path d="M554.0 395.0L558.2 395.0M558.2 395.0L562.4 395.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M734.6 395.0L734.6 404.0M730.4 395.0L734.6 395.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M743.0 395.0L743.0 404.0M743.0 395.0L747.2 395.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
-<path d="M940.4 395.0L944.6 395.0M944.6 395.0L948.8 395.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M948.8 395.0L953.0 395.0M953.0 395.0L957.2 395.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M957.2 395.0L961.4 395.0M961.4 395.0L965.6 395.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M965.6 395.0L969.8 395.0M969.8 395.0L974.0 395.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
@@ -1302,15 +1301,16 @@
 <text x="209.6" y="399.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">2</text>
 <text x="570.8" y="399.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">↻</text>
 <text x="587.6" y="399.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="654.8" y="399.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">16:09:29</text>
+<text x="654.8" y="399.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">17:11:32</text>
 <text x="755.6" y="399.5" fill="#f3ebd6" font-weight="700" textLength="42.0" lengthAdjust="spacing">STORY</text>
-<text x="806.0" y="399.5" fill="#f3ebd6" font-weight="700" textLength="50.4" lengthAdjust="spacing">MANUAL</text>
-<text x="864.8" y="399.5" fill="#f3ebd6" font-weight="700" textLength="33.6" lengthAdjust="spacing">RUNS</text>
-<text x="906.8" y="399.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">·</text>
-<text x="923.6" y="399.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">2</text>
+<text x="806.0" y="399.5" fill="#f3ebd6" font-weight="700" textLength="33.6" lengthAdjust="spacing">RUNS</text>
+<text x="848.0" y="399.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">&amp;</text>
+<text x="864.8" y="399.5" fill="#f3ebd6" font-weight="700" textLength="42.0" lengthAdjust="spacing">WATCH</text>
+<text x="915.2" y="399.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">·</text>
+<text x="932.0" y="399.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">3</text>
 <text x="1100.0" y="399.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">↻</text>
 <text x="1116.8" y="399.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="1184.0" y="399.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">16:09:29</text>
+<text x="1184.0" y="399.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">17:11:32</text>
 <text x="33.2" y="417.5" fill="#f3ebd6" font-weight="700" textLength="33.6" lengthAdjust="spacing">(not</text>
 <text x="75.2" y="417.5" fill="#f3ebd6" font-weight="700" textLength="16.8" lengthAdjust="spacing">in</text>
 <text x="100.4" y="417.5" fill="#f3ebd6" font-weight="700" textLength="33.6" lengthAdjust="spacing">your</text>
@@ -1394,11 +1394,12 @@
 <text x="638.0" y="525.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
 <text x="654.8" y="525.5" fill="#8cc2ff" textLength="58.8" lengthAdjust="spacing">details</text>
 <text x="722.0" y="525.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
-<text x="764.0" y="525.5" fill="#84f0a0" font-weight="700" textLength="75.6" lengthAdjust="spacing">[SUCCESS]</text>
-<text x="864.8" y="525.5" fill="#8cc2ff" textLength="67.2" lengthAdjust="spacing">acme/api</text>
-<text x="948.8" y="525.5" fill="#f3ebd6" font-weight="700" textLength="50.4" lengthAdjust="spacing">Deploy</text>
-<text x="1007.6" y="525.5" fill="#f3ebd6" font-weight="700" textLength="16.8" lengthAdjust="spacing">to</text>
-<text x="1032.8" y="525.5" fill="#f3ebd6" font-weight="700" textLength="58.8" lengthAdjust="spacing">staging</text>
+<text x="764.0" y="525.5" fill="#ffd24a" font-weight="700" textLength="75.6" lengthAdjust="spacing">[RUNNING]</text>
+<text x="864.8" y="525.5" fill="#8cc2ff" textLength="67.2" lengthAdjust="spacing">acme/web</text>
+<text x="948.8" y="525.5" fill="#f3ebd6" font-weight="700" textLength="84.0" lengthAdjust="spacing">Continuous</text>
+<text x="1041.2" y="525.5" fill="#f3ebd6" font-weight="700" textLength="92.4" lengthAdjust="spacing">Integration</text>
+<text x="1150.4" y="525.5" fill="#8cc2ff" font-weight="700" textLength="8.4" lengthAdjust="spacing">◎</text>
+<text x="1167.2" y="525.5" fill="#8cc2ff" font-weight="700" textLength="67.2" lengthAdjust="spacing">WATCHING</text>
 <text x="50.0" y="543.5" fill="#ffd24a" textLength="8.4" lengthAdjust="spacing">◔</text>
 <text x="66.8" y="543.5" fill="#f3ebd6" textLength="16.8" lengthAdjust="spacing">CI</text>
 <text x="92.0" y="543.5" fill="#f3ebd6" textLength="8.4" lengthAdjust="spacing">/</text>
@@ -1407,14 +1408,12 @@
 <text x="226.4" y="543.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">running</text>
 <text x="293.6" y="543.5" fill="#b8ae94" textLength="16.8" lengthAdjust="spacing">6m</text>
 <text x="318.8" y="543.5" fill="#b8ae94" textLength="25.2" lengthAdjust="spacing">00s</text>
-<text x="780.8" y="543.5" fill="#f3ebd6" textLength="50.4" lengthAdjust="spacing">Deploy</text>
-<text x="839.6" y="543.5" fill="#f3ebd6" textLength="16.8" lengthAdjust="spacing">to</text>
-<text x="864.8" y="543.5" fill="#f3ebd6" textLength="58.8" lengthAdjust="spacing">staging</text>
-<text x="940.4" y="543.5" fill="#8cc2ff" textLength="33.6" lengthAdjust="spacing">main</text>
-<text x="990.8" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">1</text>
-<text x="1007.6" y="543.5" fill="#b8ae94" textLength="33.6" lengthAdjust="spacing">hour</text>
-<text x="1049.6" y="543.5" fill="#b8ae94" textLength="25.2" lengthAdjust="spacing">ago</text>
-<text x="1091.6" y="543.5" fill="#84f0a0" textLength="67.2" lengthAdjust="spacing">success…</text>
+<text x="780.8" y="543.5" fill="#f3ebd6" textLength="42.0" lengthAdjust="spacing">feat:</text>
+<text x="831.2" y="543.5" fill="#f3ebd6" textLength="67.2" lengthAdjust="spacing">DEMO-101</text>
+<text x="906.8" y="543.5" fill="#f3ebd6" textLength="42.0" lengthAdjust="spacing">build</text>
+<text x="957.2" y="543.5" fill="#f3ebd6" textLength="25.2" lengthAdjust="spacing">the</text>
+<text x="990.8" y="543.5" fill="#f3ebd6" textLength="100.8" lengthAdjust="spacing">notification</text>
+<text x="1100.0" y="543.5" fill="#f3ebd6" textLength="58.8" lengthAdjust="spacing">prefer…</text>
 <text x="1167.2" y="543.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
 <text x="1184.0" y="543.5" fill="#8cc2ff" textLength="58.8" lengthAdjust="spacing">details</text>
 <text x="1251.2" y="543.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
@@ -1423,6 +1422,12 @@
 <text x="92.0" y="561.5" fill="#f3ebd6" textLength="8.4" lengthAdjust="spacing">/</text>
 <text x="108.8" y="561.5" fill="#f3ebd6" textLength="25.2" lengthAdjust="spacing">e2e</text>
 <text x="226.4" y="561.5" fill="#b8ae94" textLength="50.4" lengthAdjust="spacing">queued</text>
+<text x="780.8" y="561.5" fill="#ffd24a" textLength="8.4" lengthAdjust="spacing">◔</text>
+<text x="797.6" y="561.5" fill="#f3ebd6" textLength="33.6" lengthAdjust="spacing">unit</text>
+<text x="839.6" y="561.5" fill="#f3ebd6" textLength="42.0" lengthAdjust="spacing">tests</text>
+<text x="906.8" y="561.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">running</text>
+<text x="974.0" y="561.5" fill="#b8ae94" textLength="25.2" lengthAdjust="spacing">10m</text>
+<text x="1007.6" y="561.5" fill="#b8ae94" textLength="25.2" lengthAdjust="spacing">00s</text>
 <text x="50.0" y="579.5" fill="#ff806c" textLength="8.4" lengthAdjust="spacing">✗</text>
 <text x="66.8" y="579.5" fill="#f3ebd6" textLength="16.8" lengthAdjust="spacing">CI</text>
 <text x="92.0" y="579.5" fill="#f3ebd6" textLength="8.4" lengthAdjust="spacing">/</text>
@@ -1431,6 +1436,9 @@
 <text x="226.4" y="579.5" fill="#b8ae94" textLength="50.4" lengthAdjust="spacing">failed</text>
 <text x="285.2" y="579.5" fill="#b8ae94" textLength="16.8" lengthAdjust="spacing">2m</text>
 <text x="310.4" y="579.5" fill="#b8ae94" textLength="25.2" lengthAdjust="spacing">00s</text>
+<text x="780.8" y="579.5" fill="#ff9a3c" textLength="8.4" lengthAdjust="spacing">●</text>
+<text x="797.6" y="579.5" fill="#f3ebd6" textLength="25.2" lengthAdjust="spacing">e2e</text>
+<text x="906.8" y="579.5" fill="#b8ae94" textLength="50.4" lengthAdjust="spacing">queued</text>
 <text x="8.0" y="615.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">[</text>
 <text x="24.8" y="615.5" fill="#b8ae94" textLength="16.8" lengthAdjust="spacing">←→</text>
 <text x="50.0" y="615.5" fill="#b8ae94" textLength="50.4" lengthAdjust="spacing">column</text>
