@@ -1,4 +1,4 @@
-# capcom
+# Command reference (`capcom`)
 
 Local kanban boards for Jira stories. One `board.json` per story at
 `$CAPCOM_ROOT/<KEY>/`. The stories folder is required: set `CAPCOM_ROOT` or pass `--root DIR`; `capcom root` prints the one in use. This tool is the only

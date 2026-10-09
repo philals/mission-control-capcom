@@ -1,8 +1,8 @@
-# capcom
+# Mission Control
 
-**Mission control for story-driven work.** Break a Jira story into PR-sized tasks, plan and implement each one with [Claude Code](https://claude.com/claude-code) skills, and watch all of it (tasks, draft PRs, CI stages, manual deploys) on one live board in your terminal.
+**Mission control for story-driven work, with a single voice at the console: `capcom`.** Break a Jira story into PR-sized tasks, plan and implement each one with [Claude Code](https://claude.com/claude-code) skills, and watch all of it (tasks, draft PRs, CI stages, manual deploys) on one live board in your terminal.
 
-[![CI](https://github.com/philals/capcom/actions/workflows/ci.yml/badge.svg)](https://github.com/philals/capcom/actions/workflows/ci.yml)
+[![CI](https://github.com/philals/mission-control/actions/workflows/ci.yml/badge.svg)](https://github.com/philals/mission-control/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 <p align="center">
@@ -11,9 +11,13 @@
 
 > The picture is drawn from invented demo data. Try it yourself with no setup: `capcom-tui --demo`.
 
+## The name
+
+In NASA's Mission Control, **CAPCOM** (capsule communicator) is the one specialist who talks to the crew, so the crew hears a single voice. This project is meant to be that voice for your work: one place that tells you what is planned, what is in flight and what needs you. The project is called **Mission Control** and its commands are `capcom` and `capcom-tui`. It is not affiliated with the video-game company Capcom; the name is the NASA role.
+
 ## Read this first: it is one person's workflow
 
-capcom is built around **how its author works**, not around a general idea of project management. The author takes a Jira story, splits it into tasks that each become one or more *draft* pull requests (often in several repositories), reviews and merges them by hand, and likes to keep the real state in plain local files rather than in a tool. The statuses, the "no stacked PRs" rule, the draft-only PRs, the 1960s space-programme look and the Herdr integration all come from that mental model.
+Mission Control is built around **how its author works**, not around a general idea of project management. The author takes a Jira story, splits it into tasks that each become one or more *draft* pull requests (often in several repositories), reviews and merges them by hand, and likes to keep the real state in plain local files rather than in a tool. The statuses, the "no stacked PRs" rule, the draft-only PRs, the 1960s space-programme look and the Herdr integration all come from that mental model.
 
 If that sounds like you, great. If not, treat this as a worked example: fork it, delete what you do not need, change the statuses and skills to fit how you work. Issues and ideas are welcome, but changes that pull it away from this model may be politely declined. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -46,6 +50,7 @@ Design notes: [docs/design.md](docs/design.md). Command reference: [docs/referen
 ### 1. Look around (no setup)
 
 ```bash
+git clone https://github.com/philals/mission-control && cd mission-control
 cargo install --path . --locked      # installs `capcom` and `capcom-tui` into ~/.cargo/bin
 capcom-tui --demo                    # invented stories, PRs and runs; nothing is read or written
 ```
@@ -107,7 +112,7 @@ Everything it does, every key and every setting is in [docs/tui.md](docs/tui.md)
 
 ## Herdr
 
-If you use [Herdr](https://herdr.dev), `capcom-tui` run inside a Herdr pane can start the skills for you: paste a Jira key to start a breakdown, or drag a card onto PLANNING or IMPLEMENTING. The repo is also a Herdr plugin with an `open` action, so a key such as `prefix+y` opens the board as an overlay. Install it with `herdr plugin install philals/capcom` (it builds the binaries, so it needs Rust; read [Herdr's trust note](https://herdr.dev/docs/plugins/#trust-and-security) first, since a plugin is ordinary code), then bind a key as described in [docs/tui.md](docs/tui.md#herdr-plugin). Nothing here needs Herdr; outside it those features are simply off.
+If you use [Herdr](https://herdr.dev), `capcom-tui` run inside a Herdr pane can start the skills for you: paste a Jira key to start a breakdown, or drag a card onto PLANNING or IMPLEMENTING. The repo is also a Herdr plugin with an `open` action, so a key such as `prefix+y` opens the board as an overlay. Install it with `herdr plugin install philals/mission-control` (it builds the binaries, so it needs Rust; read [Herdr's trust note](https://herdr.dev/docs/plugins/#trust-and-security) first, since a plugin is ordinary code), then bind a key as described in [docs/tui.md](docs/tui.md#herdr-plugin). Nothing here needs Herdr; outside it those features are simply off.
 
 ## Privacy and security
 

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for looking. First, a warning that is also in the README: capcom is built around **one person's workflow** (Jira stories split into draft-PR tasks, local files as the source of truth, Claude Code skills, GitHub through `gh`, optionally Herdr). It is shared as a working example, not as a general project-management tool.
+Thanks for looking. First, a warning that is also in the README: Mission Control (the `capcom` command) is built around **one person's workflow** (Jira stories split into draft-PR tasks, local files as the source of truth, Claude Code skills, GitHub through `gh`, optionally Herdr). It is shared as a working example, not as a general project-management tool.
 
 That shapes what is likely to be accepted:
 
