@@ -39,7 +39,16 @@ One column per task status (a Dropped column appears only if something was dropp
 | PR panel | click a PR to open it on GitHub, a CI stage line to open that check, `[ details ]` for its sheet (each check there has `[ open ]`); wheel scrolls | `Tab` focus, `↑↓` select, `Enter` sheet, `o` open on GitHub, `c` copy link, `m` mark draft ready, `r` refresh (or click the `↻ updated` label) |
 | Runs panel | click a run to open it on GitHub, a stage line to open that stage, `[ details ]` for the sheet (each stage there has `[ open ]`); click a tab when narrow; wheel scrolls | `Tab` focus, `↑↓` select, `Enter` sheet, `o` open run, `r` refresh |
 | Layout | drag the divider, the top edge of the bottom area, or a kanban column border | `< >` PR panel narrower or wider, `+ -` bottom area taller or shorter, `, .` selected column narrower or wider, `=` reset |
-| Anywhere | | `r` reload, `W` slow polling when out of focus on or off, `F` / `C` auto-fix and auto-review defaults, `?` help, `q` or Ctrl-C quit |
+| Anywhere | right-click for a menu | `Ctrl-P` command palette, `r` reload, `W` slow polling when out of focus on or off, `F` / `C` auto-fix and auto-review defaults, `?` help, `q` or Ctrl-C quit |
+
+## Command palette, right-click menu and hover
+
+![the command palette](img/palette.svg)
+
+- **`Ctrl-P` opens the command palette:** one list of every action that fits where you are, each with its key. Type to narrow it (every word you type must appear in the action's name or key), `↑`/`↓` choose, `Enter` runs it, `Esc` or `Ctrl-P` again closes it, and a click runs a line. With the PR panel focused it starts with what can be done to the selected PR (open, copy the link, details, the agent, auto-fix and auto-review, mark ready); on a board it starts with the selected task (plan, implement, finish, details). After those come the things that are always there: jump to the first red PR, refresh, reload, the next panel, new story, the defaults, slow polling, sizes, the keys and quit. It does not open while a question (mark ready, a new story, an agent) is waiting for its answer.
+- **Right-click** a PR, or any part of its row, for a menu of what it can do, opened where you clicked, and select the row at the same time; right-click a task card for a menu of its actions; right-click anywhere else for the palette. This reaches the buttons of a one-line (quiet) PR too.
+- **Hover:** whatever a click would hit under the pointer lights up (a button is drawn in reverse, a row gets a faint tint), and the footer says what it does (`auto-fix: when CI fails or Copilot comments, ask this PR's agent to fix it (t)`). Moving the pointer only redraws the screen when what is under it changes.
+- **Easier to hit:** the space between two buttons on a PR's line belongs to the one before it, so a near miss still lands.
 
 ## Pull requests panel
 

@@ -1236,13 +1236,16 @@
 <text x="33.2" y="21.5" fill="#ff9a3c" font-weight="700" textLength="50.4" lengthAdjust="spacing">CAPCOM</text>
 <text x="100.4" y="21.5" fill="#ff806c" font-weight="700" textLength="8.4" lengthAdjust="spacing">●</text>
 <text x="117.2" y="21.5" fill="#ff806c" font-weight="700" textLength="42.0" lengthAdjust="spacing">NO-GO</text>
-<text x="176.0" y="21.5" fill="#f3ebd6" font-weight="700" textLength="58.8" lengthAdjust="spacing">STORIES</text>
-<text x="251.6" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
-<text x="268.4" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">n</text>
-<text x="285.2" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">+</text>
-<text x="302.0" y="21.5" fill="#8cc2ff" textLength="25.2" lengthAdjust="spacing">new</text>
-<text x="335.6" y="21.5" fill="#8cc2ff" textLength="42.0" lengthAdjust="spacing">story</text>
-<text x="386.0" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
+<text x="167.6" y="21.5" fill="#ff806c" font-weight="700" textLength="8.4" lengthAdjust="spacing">·</text>
+<text x="184.4" y="21.5" fill="#ff806c" font-weight="700" textLength="8.4" lengthAdjust="spacing">1</text>
+<text x="201.2" y="21.5" fill="#ff806c" font-weight="700" textLength="25.2" lengthAdjust="spacing">red</text>
+<text x="243.2" y="21.5" fill="#f3ebd6" font-weight="700" textLength="58.8" lengthAdjust="spacing">STORIES</text>
+<text x="318.8" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
+<text x="335.6" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">n</text>
+<text x="352.4" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">+</text>
+<text x="369.2" y="21.5" fill="#8cc2ff" textLength="25.2" lengthAdjust="spacing">new</text>
+<text x="402.8" y="21.5" fill="#8cc2ff" textLength="42.0" lengthAdjust="spacing">story</text>
+<text x="453.2" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
 <text x="1083.2" y="21.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">5</text>
 <text x="1100.0" y="21.5" fill="#b8ae94" textLength="42.0" lengthAdjust="spacing">shown</text>
 <text x="1158.8" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
@@ -1321,7 +1324,7 @@
 <text x="285.2" y="327.5" fill="#f3ebd6" font-weight="700" textLength="50.4" lengthAdjust="spacing">review</text>
 <text x="570.8" y="327.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">↻</text>
 <text x="587.6" y="327.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="654.8" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">21:01:50</text>
+<text x="654.8" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">21:14:46</text>
 <text x="755.6" y="327.5" fill="#f3ebd6" font-weight="700" textLength="33.6" lengthAdjust="spacing">RUNS</text>
 <text x="797.6" y="327.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">&amp;</text>
 <text x="814.4" y="327.5" fill="#f3ebd6" font-weight="700" textLength="42.0" lengthAdjust="spacing">WATCH</text>
@@ -1329,7 +1332,7 @@
 <text x="881.6" y="327.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">3</text>
 <text x="1100.0" y="327.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">↻</text>
 <text x="1116.8" y="327.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="1184.0" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">21:01:50</text>
+<text x="1184.0" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">21:14:46</text>
 <text x="33.2" y="345.5" fill="#f3ebd6" font-weight="700" textLength="42.0" lengthAdjust="spacing">feat:</text>
 <text x="83.6" y="345.5" fill="#f3ebd6" font-weight="700" textLength="67.2" lengthAdjust="spacing">DEMO-101</text>
 <text x="159.2" y="345.5" fill="#f3ebd6" font-weight="700" textLength="42.0" lengthAdjust="spacing">build</text>
@@ -1522,14 +1525,18 @@
 <text x="554.0" y="543.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">PRs/runs</text>
 <text x="629.6" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">]</text>
 <text x="646.4" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">[</text>
-<text x="663.2" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">?</text>
-<text x="680.0" y="543.5" fill="#b8ae94" textLength="33.6" lengthAdjust="spacing">help</text>
-<text x="722.0" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">]</text>
-<text x="738.8" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">[</text>
-<text x="755.6" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">q</text>
-<text x="772.4" y="543.5" fill="#b8ae94" textLength="33.6" lengthAdjust="spacing">quit</text>
-<text x="814.4" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">]</text>
+<text x="663.2" y="543.5" fill="#b8ae94" textLength="16.8" lengthAdjust="spacing">^P</text>
+<text x="688.4" y="543.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">palette</text>
+<text x="755.6" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">]</text>
+<text x="772.4" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">[</text>
+<text x="789.2" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">?</text>
+<text x="806.0" y="543.5" fill="#b8ae94" textLength="33.6" lengthAdjust="spacing">help</text>
+<text x="848.0" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">]</text>
+<text x="864.8" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">[</text>
+<text x="881.6" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">q</text>
+<text x="898.4" y="543.5" fill="#b8ae94" textLength="33.6" lengthAdjust="spacing">quit</text>
+<text x="940.4" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">]</text>
 <text x="1133.6" y="543.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="1200.8" y="543.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">21:01:50</text>
+<text x="1200.8" y="543.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">21:14:46</text>
 </g>
 </svg>

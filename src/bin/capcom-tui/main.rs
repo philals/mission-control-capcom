@@ -7,6 +7,7 @@ mod finish;
 mod fixstate;
 mod herdr;
 mod loading;
+mod palette;
 mod panel;
 mod pr_state;
 mod prs;
@@ -83,6 +84,13 @@ fn screenshot(path: &std::path::Path, screen: &str, size: &str) -> Result<()> {
         app.col = 3;
         app.row[3] = 0;
     }
+    if screen == "palette" {
+        app.focus = app::Focus::Prs;
+        app.open_palette();
+        if let Some(p) = app.palette.as_mut() {
+            p.move_sel(1);
+        }
+    }
     if screen == "loading" {
         app.prs.items.clear();
         app.prs.loaded = false;
@@ -100,6 +108,10 @@ fn screenshot(path: &std::path::Path, screen: &str, size: &str) -> Result<()> {
         "board" => (
             "capcom story board",
             "A kanban board of one demo story with its tasks in TODO, PLANNING, PLANNED, IMPLEMENTING and DONE columns, above panels of open pull requests with their CI stages and of manual workflow runs.",
+        ),
+        "palette" => (
+            "capcom command palette",
+            "The command palette open over the story list: a search line and every action that fits where you are, each with its key.",
         ),
         "loading" => (
             "capcom loading screen",
@@ -240,7 +252,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         }
         if event::poll(Duration::from_millis(250))? {
             let event = event::read()?;
-            // nothing on screen follows the pointer, so moving it needs no redraw
+            // moving the pointer only redraws when what is under it changes
             dirty |= !matches!(&event, Event::Mouse(m) if m.kind == MouseEventKind::Moved);
             match event {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
@@ -249,7 +261,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                     }
                 }
                 Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::Moved => dirty |= app.on_hover(mouse.column, mouse.row),
                     MouseEventKind::Down(MouseButton::Left) => app.on_click(mouse.column, mouse.row),
+                    MouseEventKind::Down(MouseButton::Right) => app.on_right_click(mouse.column, mouse.row),
                     MouseEventKind::Drag(MouseButton::Left) => app.on_drag(mouse.column, mouse.row),
                     MouseEventKind::Up(MouseButton::Left) => app.on_release(),
                     MouseEventKind::ScrollUp => app.on_scroll(mouse.column, mouse.row, -1),

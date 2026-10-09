@@ -701,8 +701,10 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         if expanded[i] && body.width > total + 1 && h > title_n + 1 + rail_n {
             let line = y + title_n + 1 + rail_n;
             let mut x = body.x + body.width - total;
-            for (which, text, _) in &list {
+            for (n, (which, text, _)) in list.iter().enumerate() {
+                // the space between two buttons belongs to the one before it, so a near miss still lands
                 let w = text.chars().count() as u16;
+                let area_w = if n + 1 < list.len() { w + 1 } else { w };
                 let target = match which {
                     Btn::AutoFix => Target::PrAuto(i),
                     Btn::AutoReview => Target::PrReview(i),
@@ -710,7 +712,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
                     Btn::Copy => Target::PrCopy(i),
                     Btn::Details => Target::PrDetails(i),
                 };
-                hits.push((Rect::new(x, line, w, 1), target));
+                hits.push((Rect::new(x, line, area_w, 1), target));
                 x += w + 1;
             }
         }
