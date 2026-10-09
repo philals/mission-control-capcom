@@ -100,6 +100,8 @@ pub enum Target {
     ToggleAutoCopilot,
     /// The go/no-go light in the header: click to select the first red PR.
     GoLight,
+    /// One line of the command palette or a right-click menu (its position among the matches).
+    PaletteItem(usize),
     /// The `[DRAFT]` badge of a live draft pull request.
     PrBadge(usize),
     ConfirmYes,
@@ -583,6 +585,11 @@ pub struct App {
     /// How long each check usually takes, for the "of ~4m" on a running one.
     pub durations: crate::durations::Durations,
     pub durations_path: Option<PathBuf>,
+    /// The command palette (Ctrl-P) or a right-click menu, while one is open.
+    pub palette: Option<crate::palette::Palette>,
+    /// Where the pointer is and what is under it, for the hover highlight and the tooltip.
+    pub hover: Option<(u16, u16)>,
+    pub hover_target: Option<Target>,
     /// Tests and screenshots pin the animation to one frame.
     pub frame_override: Option<u64>,
     notice: Option<(String, std::time::Instant)>,
@@ -668,6 +675,9 @@ impl App {
             started: std::time::Instant::now(),
             durations: crate::durations::Durations::default(),
             durations_path: None,
+            palette: None,
+            hover: None,
+            hover_target: None,
             frame_override: None,
             notice: None,
             ready_done: std::sync::mpsc::channel(),
@@ -1765,6 +1775,7 @@ impl App {
     }
 
     fn close_overlays(&mut self) {
+        self.palette = None;
         self.detail = false;
         self.help = false;
         self.pr_sheet = false;
@@ -2436,7 +2447,16 @@ impl App {
     /// Returns true when the app should quit.
     pub fn on_key(&mut self, code: KeyCode, ctrl: bool) -> bool {
         if ctrl {
-            return code == KeyCode::Char('c');
+            match code {
+                KeyCode::Char('c') => return true,
+                KeyCode::Char('p') if self.palette.is_some() => self.palette = None,
+                KeyCode::Char('p') => self.open_palette(),
+                _ => {}
+            }
+            return false;
+        }
+        if self.palette.is_some() {
+            return self.palette_key(code);
         }
         if self.agent_ask.is_some() {
             match code {
@@ -2648,6 +2668,156 @@ impl App {
         self.refresh_prs();
     }
 
+    /// Open the command palette, unless a question is waiting for an answer.
+    pub fn open_palette(&mut self) {
+        if self.agent_ask.is_some() || self.new_story.is_some() || self.confirm.is_some() {
+            return;
+        }
+        self.close_overlays();
+        self.palette = Some(crate::palette::Palette::search(crate::palette::entries_for(self)));
+    }
+
+    fn palette_key(&mut self, code: KeyCode) -> bool {
+        let Some(palette) = &mut self.palette else {
+            return false;
+        };
+        match code {
+            KeyCode::Esc => self.palette = None,
+            KeyCode::Enter => {
+                let action = palette.selected().map(|e| e.action.clone());
+                self.palette = None;
+                if let Some(action) = action {
+                    return self.run_action(action);
+                }
+            }
+            KeyCode::Up => palette.move_sel(-1),
+            KeyCode::Down => palette.move_sel(1),
+            KeyCode::Backspace if palette.searchable => palette.backspace(),
+            KeyCode::Char(c) if palette.searchable => palette.type_char(c),
+            KeyCode::Char('k') => palette.move_sel(-1),
+            KeyCode::Char('j') => palette.move_sel(1),
+            _ => {}
+        }
+        false
+    }
+
+    fn pr_index(&self, url: &str) -> Option<usize> {
+        self.pr_rows().iter().position(|r| same_url(&r.url, url))
+    }
+
+    /// Do what a palette or menu line says. True when it was Quit.
+    pub fn run_action(&mut self, action: crate::palette::Action) -> bool {
+        use crate::palette::Action;
+        let on_pr = |app: &mut App, url: &str, then: &dyn Fn(&mut App, usize)| match app.pr_index(url) {
+            Some(i) => {
+                app.set_focus(Focus::Prs);
+                app.pr_sel = i;
+                then(app, i);
+            }
+            None => app.set_notice("that pull request is no longer in the list".into()),
+        };
+        match action {
+            Action::Reload => self.reload_now(),
+            Action::RefreshGithub => self.refresh_prs(),
+            Action::NextPanel => {
+                let next = match self.focus {
+                    Focus::Main => Focus::Prs,
+                    Focus::Prs => Focus::Runs,
+                    Focus::Runs => Focus::Main,
+                };
+                self.set_focus(next);
+            }
+            Action::JumpToRed => self.jump_to_red(),
+            Action::ToggleDone => self.toggle_hide_done(),
+            Action::NewStory => self.open_new_story(),
+            Action::ToggleAutoSync => self.toggle_auto_sync(),
+            Action::ToggleDefaultAutoFix => self.toggle_autofix(),
+            Action::ToggleDefaultAutoReview => self.toggle_autocopilot(),
+            Action::ToggleSlowAway => self.toggle_slow_when_away(),
+            Action::ResetLayout => self.reset_layout(),
+            Action::BackToList => self.back(),
+            Action::SyncStory => self.sync_story_now(),
+            Action::Help => self.help = true,
+            Action::Quit => return true,
+            Action::PlanTask => self.start_selected(Status::Planning),
+            Action::ImplementTask => self.start_selected(Status::Implementing),
+            Action::FinishTask => self.finish_selected(),
+            Action::TaskDetails => self.detail = true,
+            Action::PrOpen(url) => on_pr(self, &url, &|app, i| app.open_pr(i)),
+            Action::PrCopy(url) => on_pr(self, &url, &|app, i| app.copy_pr(i)),
+            Action::PrDetails(url) => on_pr(self, &url, &|app, _| app.pr_sheet = true),
+            Action::PrAgent(url) => on_pr(self, &url, &|app, i| app.open_pr_agent(i)),
+            Action::PrAutoFix(url) => on_pr(self, &url, &|app, i| app.toggle_pr_autofix(i)),
+            Action::PrAutoReview(url) => on_pr(self, &url, &|app, i| app.toggle_pr_review(i)),
+            Action::PrReady(url) => on_pr(self, &url, &|app, i| app.ask_mark_ready(i)),
+        }
+        false
+    }
+
+    /// Right-click: a menu of what can be done to the PR, card or story under the pointer, else the palette.
+    pub fn on_right_click(&mut self, x: u16, y: u16) {
+        if self.agent_ask.is_some() || self.new_story.is_some() || self.confirm.is_some() {
+            return;
+        }
+        let target = self.hit(x, y);
+        self.close_overlays();
+        let pr = match target {
+            Some(Target::Pr(i) | Target::PrDetails(i) | Target::PrCopy(i) | Target::PrAgent(i) | Target::PrReview(i) | Target::PrAuto(i) | Target::PrBadge(i) | Target::OpenCheck(i, _)) => Some(i),
+            _ => None,
+        };
+        if let Some(i) = pr {
+            self.set_focus(Focus::Prs);
+            self.pr_sel = i;
+            let entries = self.pr_rows().get(i).map(crate::palette::pr_entries).unwrap_or_default();
+            self.palette = Some(crate::palette::Palette::menu(" Pull request ", entries, (x, y)));
+            return;
+        }
+        if let Some(Target::Card { col, row }) = target {
+            self.focus = Focus::Main;
+            self.col = col;
+            self.row[col] = row;
+            if let Some(task) = self.selected_task() {
+                let entries = crate::palette::task_entries(&task.id);
+                self.palette = Some(crate::palette::Palette::menu(" Task ", entries, (x, y)));
+                return;
+            }
+        }
+        self.open_palette();
+    }
+
+    /// The pointer moved. True when what is under it changed, so the screen needs drawing again.
+    pub fn on_hover(&mut self, x: u16, y: u16) -> bool {
+        let target = self.hit(x, y);
+        self.hover = Some((x, y));
+        let changed = target != self.hover_target;
+        self.hover_target = target;
+        changed
+    }
+
+    /// What the thing under the pointer does, for the footer.
+    pub fn tooltip(&self) -> Option<&'static str> {
+        Some(match self.hover_target? {
+            Target::PrAuto(_) => "auto-fix: when CI fails or Copilot comments, ask this PR's agent to fix it (t)",
+            Target::PrReview(_) => "auto-review: ask Copilot to review this PR, once (v)",
+            Target::PrAgent(_) => "go to the agent that made this PR (a)",
+            Target::PrCopy(_) => "copy the link of this PR (c)",
+            Target::PrDetails(_) => "every check, the state and the link (Enter)",
+            Target::PrBadge(_) => "mark this draft ready for review (m)",
+            Target::ToggleAutoFix => "auto-fix for PRs with no tick of their own (F)",
+            Target::ToggleAutoCopilot => "auto-review for PRs with no tick of their own (C)",
+            Target::GoLight => "select the first red PR",
+            Target::Refresh => "refresh from GitHub now (r)",
+            Target::NewStory => "start the breakdown of a Jira story (n)",
+            Target::ToggleDone => "show or hide completed stories (d)",
+            Target::OpenCheck(..) => "open this check on GitHub",
+            Target::OpenJob(..) => "open this stage on GitHub",
+            Target::RunDetails(_) => "every stage of the run",
+            Target::Pr(_) => "click: open it up, then open it on GitHub · right-click: more",
+            Target::Card { .. } => "click to select · drag to start work · right-click: more",
+            _ => return None,
+        })
+    }
+
     fn hit(&self, x: u16, y: u16) -> Option<Target> {
         let hits = self.hits.borrow();
         hits.iter().rev().find(|(rect, _)| contains(*rect, x, y)).map(|(_, t)| *t)
@@ -2655,6 +2825,23 @@ impl App {
 
     pub fn on_click(&mut self, x: u16, y: u16) {
         let target = self.hit(x, y);
+        if self.palette.is_some() {
+            match target {
+                Some(Target::PaletteItem(n)) => {
+                    let action = self.palette.as_ref().and_then(|p| {
+                        let visible = p.visible();
+                        visible.get(n).map(|&i| p.entries[i].action.clone())
+                    });
+                    self.palette = None;
+                    if let Some(action) = action {
+                        self.run_action(action);
+                    }
+                }
+                Some(Target::Sheet) => {}
+                _ => self.palette = None,
+            }
+            return;
+        }
         if self.agent_ask.is_some() {
             match target {
                 Some(Target::AgentYes) => self.answer_agent(true),
@@ -2832,6 +3019,12 @@ impl App {
     }
 
     pub fn on_scroll(&mut self, x: u16, y: u16, delta: i32) {
+        if self.palette.is_some() {
+            if let Some(p) = &mut self.palette {
+                p.move_sel(delta);
+            }
+            return;
+        }
         if self.detail || self.help || self.pr_sheet || self.run_sheet {
             return;
         }

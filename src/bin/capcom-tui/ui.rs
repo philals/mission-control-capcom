@@ -103,7 +103,40 @@ pub fn draw(f: &mut Frame, app: &App) {
     if app.agent_ask.is_some() {
         draw_agent_ask(f, area, app, &mut hits);
     }
+    if let Some(palette) = &app.palette {
+        crate::palette::draw(f, area, palette, &mut hits);
+    }
+    draw_hover(f, app, &hits);
     *app.hits.borrow_mut() = hits;
+}
+
+/// What the pointer is over lights up: a button is drawn in reverse, a row gets a faint tint.
+fn draw_hover(f: &mut Frame, app: &App, hits: &Hits) {
+    let Some((x, y)) = app.hover else {
+        return;
+    };
+    let Some((rect, target)) = hits.iter().rev().find(|(r, _)| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height) else {
+        return;
+    };
+    let button = matches!(
+        target,
+        Target::PrAuto(_) | Target::PrReview(_) | Target::PrAgent(_) | Target::PrCopy(_) | Target::PrDetails(_) | Target::PrBadge(_)
+            | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::GoLight | Target::Refresh | Target::NewStory | Target::ToggleDone
+            | Target::OpenCheck(..) | Target::OpenJob(..) | Target::RunDetails(_) | Target::Back | Target::PaletteItem(_)
+    );
+    let row = matches!(target, Target::Pr(_) | Target::Run(_) | Target::Story(_) | Target::Card { .. });
+    let buffer = f.buffer_mut();
+    if button {
+        buffer.set_style(*rect, Style::new().add_modifier(Modifier::REVERSED));
+    } else if row {
+        for cy in rect.y..rect.y + rect.height {
+            for cx in rect.x..rect.x + rect.width {
+                if buffer[(cx, cy)].bg == theme::BG {
+                    buffer[(cx, cy)].set_bg(theme::HOVER);
+                }
+            }
+        }
+    }
 }
 
 /// An empty (or switched off) manual runs panel shrinks to a narrow strip, unless it has an
@@ -638,10 +671,10 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     }
     let dim = Style::new().fg(theme::DIM);
     let keys: &[&str] = match app.screen {
-        Screen::List => &["←→↑↓ move", "⏎ open", "v review", "n new", "d done", "Tab PRs/runs", "? help", "q quit"],
+        Screen::List => &["←→↑↓ move", "⏎ open", "v review", "n new", "d done", "Tab PRs/runs", "^P palette", "? help", "q quit"],
         Screen::Board => &[
             "←→ column", "↑↓ card", "[ ] story", "⏎ detail", "p plan", "i implement", "x done", "R sync PRs", "Tab PRs/runs",
-            "Esc stories", "? help", "q quit",
+            "Esc stories", "^P palette", "? help", "q quit",
         ],
     };
     let mut left = Vec::new();
@@ -649,9 +682,10 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
         left.push(Span::styled(format!("[ {key} ]"), dim));
         left.push(Span::raw(" "));
     }
-    let right = match app.current_notice() {
-        Some(notice) => vec![Span::styled(notice.to_string(), Style::new().fg(panel::ORANGE).add_modifier(Modifier::BOLD))],
-        None => vec![Span::styled(format!("updated {}", app.updated), dim)],
+    let right = match (app.current_notice(), app.tooltip()) {
+        (Some(notice), _) => vec![Span::styled(notice.to_string(), Style::new().fg(panel::ORANGE).add_modifier(Modifier::BOLD))],
+        (None, Some(tip)) => vec![Span::styled(tip.to_string(), Style::new().fg(theme::CYAN))],
+        (None, None) => vec![Span::styled(format!("updated {}", app.updated), dim)],
     };
     bar(f, area, padded(left, right, area.width));
 }
@@ -909,7 +943,7 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
 }
 
 fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
-    let rect = centered(area, 60, 60);
+    let rect = centered(area, 70, 90);
     let lines = vec![
         row("↑ ↓  j k", "move between stories or cards".into()),
         row("← →  h l", "move between columns (on the story board and on a story's board)".into()),
@@ -934,10 +968,13 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("+ -", "make the bottom panels taller or shorter (or drag their top edge)".into()),
         row(", .", "make the selected kanban column narrower or wider (or drag a column border)".into()),
         row("=", "reset all panel sizes".into()),
+        row("Ctrl-P", "the command palette: type to find any action and press Enter (Esc closes it)".into()),
         row("?", "toggle this help".into()),
         row("q  Ctrl-C", "quit".into()),
         Line::raw(""),
         row("Mouse", "click a story, column or card; a PR or run opens on GitHub, [ details ] opens its sheet, [ open ] a stage; wheel scrolls".into()),
+        row("Right-click", "a menu of what a PR or a card can do".into()),
+        row("Hover", "lights up what a click would do; the footer says what it does".into()),
     ];
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
@@ -2071,6 +2108,204 @@ mod tests {
         app.frame_override = Some(1);
         assert_ne!(a, render(&app, 170, 44), "the spinner turns");
         assert_eq!(app.tick_millis(), 250, "so the screen is redrawn four times a second while it spins");
+    }
+
+    fn open_palette_with(app: &mut App, typed: &str) {
+        app.on_key(KeyCode::Char('p'), true);
+        for c in typed.chars() {
+            app.on_key(KeyCode::Char(c), false);
+        }
+    }
+
+    #[test]
+    fn ctrl_p_opens_a_palette_that_filters_as_you_type_and_runs_the_chosen_action() {
+        let (_root, mut app) = with_prs();
+        let copied = copies(&mut app);
+        app.focus = Focus::Prs;
+        app.on_key(KeyCode::Char('p'), true);
+        let out = render(&app, 170, 44);
+        for want in ["Command palette", "Open acme/widgets#12 on GitHub", "Copy the link of acme/widgets#12", "Jump to the first red PR", "↑↓ choose"] {
+            assert!(out.contains(want), "missing {want:?}:\n{out}");
+        }
+        for c in "copy link".chars() {
+            app.on_key(KeyCode::Char(c), false);
+        }
+        let out = render(&app, 170, 44);
+        assert!(out.contains("Copy the link of acme/widgets#12") && !out.contains("Quit") && !out.contains("Open acme/widgets#12"), "{out}");
+        assert!(!app.on_key(KeyCode::Enter, false));
+        assert!(app.palette.is_none(), "running an action closes it");
+        assert_eq!(*copied.borrow(), vec!["https://github.com/acme/widgets/pull/12".to_string()]);
+        assert!(!render(&app, 170, 44).contains("Command palette"));
+    }
+
+    #[test]
+    fn the_palette_closes_with_esc_or_ctrl_p_quits_when_asked_and_says_when_nothing_matches() {
+        let (_root, mut app) = with_prs();
+        app.on_key(KeyCode::Char('p'), true);
+        app.on_key(KeyCode::Esc, false);
+        assert!(app.palette.is_none());
+        app.on_key(KeyCode::Char('p'), true);
+        app.on_key(KeyCode::Char('p'), true);
+        assert!(app.palette.is_none(), "Ctrl-P again closes it");
+        open_palette_with(&mut app, "zzzz");
+        assert!(render(&app, 170, 44).contains("No matching action"));
+        app.on_key(KeyCode::Enter, false);
+        assert!(app.palette.is_none(), "Enter with nothing chosen just closes");
+        open_palette_with(&mut app, "quit");
+        assert!(app.on_key(KeyCode::Enter, false), "the Quit action quits");
+        open_palette_with(&mut app, "keys");
+        app.on_key(KeyCode::Enter, false);
+        assert!(app.help, "an action can open a sheet");
+    }
+
+    #[test]
+    fn a_question_waiting_for_an_answer_is_not_covered_by_the_palette() {
+        let (_root, mut app) = with_prs();
+        app.pr_sel = 2;
+        app.ask_mark_ready(2);
+        assert!(app.confirm.is_some());
+        app.on_key(KeyCode::Char('p'), true);
+        assert!(app.palette.is_none() && app.confirm.is_some());
+        app.on_right_click(5, 5);
+        assert!(app.palette.is_none());
+    }
+
+    #[test]
+    fn clicking_a_palette_line_runs_it_and_clicking_outside_closes_it() {
+        let (_root, mut app) = with_prs();
+        let copied = copies(&mut app);
+        app.focus = Focus::Prs;
+        app.on_key(KeyCode::Char('p'), true);
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "Copy the link of");
+        app.on_click(x + 3, y);
+        assert!(app.palette.is_none());
+        assert_eq!(copied.borrow().len(), 1);
+        app.on_key(KeyCode::Char('p'), true);
+        render(&app, 170, 44);
+        app.on_click(0, 0);
+        assert!(app.palette.is_none() && copied.borrow().len() == 1, "outside closes without running anything");
+        app.on_key(KeyCode::Char('p'), true);
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "Command palette");
+        app.on_click(x, y);
+        assert!(app.palette.is_some(), "a click on the box itself keeps it open");
+    }
+
+    #[test]
+    fn the_palette_offers_what_fits_where_you_are() {
+        let (_root, mut app) = with_prs();
+        open_palette_with(&mut app, "");
+        let out = render(&app, 170, 44);
+        assert!(!out.contains("Open acme/widgets#12"), "the main area is focused, so no PR actions:\n{out}");
+        assert!(out.contains("New story") && out.contains("completed stories"), "{out}");
+        app.on_key(KeyCode::Esc, false);
+        app.open_story("PROJ-2");
+        open_palette_with(&mut app, "");
+        let out = render(&app, 170, 44);
+        assert!(out.contains("Plan T1") && out.contains("Implement T1") && out.contains("Back to the story list") && out.contains("auto-sync"), "{out}");
+        assert!(!out.contains("New story"), "{out}");
+    }
+
+    #[test]
+    fn right_click_on_a_pr_opens_a_menu_of_what_it_can_do_where_you_clicked() {
+        let (_root, mut app) = with_prs();
+        let opened = recorder(&mut app);
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "Unrelated chore");
+        app.on_right_click(x + 3, y);
+        assert_eq!((app.focus, app.pr_sel), (Focus::Prs, 2), "the row under the pointer is selected");
+        let out = render(&app, 170, 44);
+        for want in ["Pull request", "Open acme/api#99 on GitHub", "Copy the link of acme/api#99", "Details of acme/api#99", "Mark acme/api#99 ready for review"] {
+            assert!(out.contains(want), "missing {want:?}:\n{out}");
+        }
+        assert!(!out.contains("Command palette") && !out.contains("Quit"), "a menu has no search and only PR actions:\n{out}");
+        let (mx, my) = find(&out, "Open acme/api#99 on GitHub");
+        assert!(mx.abs_diff(x) < 12 && my.abs_diff(y) < 6, "it opens by the click: menu at ({mx},{my}), click at ({x},{y})");
+        app.on_click(mx + 2, my);
+        assert_eq!(*opened.borrow(), vec!["https://github.com/acme/api/pull/99".to_string()]);
+        assert!(app.palette.is_none());
+        app.on_right_click(x + 3, y);
+        app.on_key(KeyCode::Char('j'), false);
+        app.on_key(KeyCode::Esc, false);
+        assert!(app.palette.is_none(), "Esc closes a menu");
+    }
+
+    #[test]
+    fn right_click_on_a_card_or_on_nothing_in_particular() {
+        let (_root, mut app) = with_prs();
+        app.open_story("PROJ-2");
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "T1");
+        app.on_right_click(x + 1, y);
+        let out = render(&app, 170, 44);
+        assert!(out.contains("Plan T1") && out.contains("Implement T1") && out.contains("Finish T1"), "{out}");
+        app.on_key(KeyCode::Esc, false);
+        app.on_right_click(1, 0);
+        assert!(app.palette.as_ref().is_some_and(|p| p.searchable), "elsewhere it is the palette");
+    }
+
+    #[test]
+    fn hovering_lights_up_a_button_and_says_what_it_does_in_the_footer() {
+        let (_root, mut app, _, _) = autopilot_app();
+        app.apply_prs(Ok(vec![red(1, "a")]));
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "[ ] auto-fix");
+        assert!(app.on_hover(x + 2, y), "arriving on a button changes what is under the pointer");
+        assert!(!app.on_hover(x + 3, y), "moving within it changes nothing: no redraw");
+        let mut term = Terminal::new(TestBackend::new(170, 44)).unwrap();
+        term.draw(|f| draw(f, &app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        assert!(buf[(x + 2, y)].modifier.contains(Modifier::REVERSED), "the button is drawn in reverse");
+        assert!(!buf[(x.saturating_sub(3), y)].modifier.contains(Modifier::REVERSED), "and only that button");
+        let footer = render(&app, 170, 44);
+        assert!(footer.lines().last().unwrap().contains("auto-fix: when CI fails or Copilot comments"), "{footer}");
+        assert!(app.on_hover(0, 40), "leaving it changes it back");
+        assert!(!render(&app, 170, 44).lines().last().unwrap().contains("auto-fix: when CI fails"), "the tip goes");
+        assert_readable(&app, 170, 44, "hovering a button");
+    }
+
+    #[test]
+    fn hovering_a_row_tints_it_without_touching_a_selected_or_go_row() {
+        let (_root, mut app) = with_prs();
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "Unrelated chore");
+        app.on_hover(x, y);
+        let mut term = Terminal::new(TestBackend::new(170, 44)).unwrap();
+        term.draw(|f| draw(f, &app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let tinted = (0..170).filter(|c| buf[(*c, y)].bg == theme::HOVER).count();
+        assert!(tinted > 50, "the row under the pointer is tinted: {tinted} cells");
+        assert_readable(&app, 170, 44, "hovering a row");
+    }
+
+    #[test]
+    fn the_space_between_two_buttons_belongs_to_the_one_before_it() {
+        let (_root, mut app, _, _) = autopilot_app();
+        app.apply_prs(Ok(vec![red(1, "a")]));
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "[ ] auto-fix");
+        app.on_click(x + "[ ] auto-fix".chars().count() as u16, y);
+        assert!(app.autofix_on("https://github.com/acme/api/pull/1"), "a click in the gap still ticked auto-fix, not auto-review");
+        assert!(!app.autocopilot_on("https://github.com/acme/api/pull/1"));
+    }
+
+    #[test]
+    fn the_palette_and_a_menu_are_readable_and_the_help_and_footer_mention_them() {
+        let (_root, mut app) = with_prs();
+        open_palette_with(&mut app, "");
+        assert_readable(&app, 170, 44, "palette");
+        assert_readable(&app, 80, 24, "palette on a small screen");
+        app.on_key(KeyCode::Esc, false);
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "Unrelated chore");
+        app.on_right_click(x, y);
+        assert_readable(&app, 170, 44, "menu");
+        app.on_key(KeyCode::Esc, false);
+        assert!(render(&app, 170, 44).contains("^P palette"), "the footer says how to open it");
+        app.help = true;
+        let out = render(&app, 170, 50);
+        assert!(out.contains("Ctrl-P") && out.contains("Right-click") && out.contains("Hover"), "{out}");
     }
 
     #[test]
