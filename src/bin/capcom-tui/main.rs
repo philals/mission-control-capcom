@@ -2,6 +2,7 @@ mod app;
 mod cache;
 mod demo;
 mod finish;
+mod fixstate;
 mod herdr;
 mod panel;
 mod pr_state;
@@ -159,6 +160,7 @@ fn main() -> Result<()> {
         app.start_pr_links(config, cache::Cache::default_dir().map(|d| d.join("pr-links.json")));
     }
     app.notify = Arc::new(notify_desktop);
+    app.fix_store = cache::Cache::default_dir().map(fixstate::Store::new);
     app.settings_path = settings::default_path();
     app.load_settings();
     app.extra_repos = cli.deploy_repos;

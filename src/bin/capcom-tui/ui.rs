@@ -1588,6 +1588,7 @@ mod tests {
     struct FakeHerdr {
         launches: std::sync::Mutex<Vec<crate::herdr::Launch>>,
         resumes: std::sync::Mutex<Vec<crate::herdr::Resume>>,
+        busy: std::sync::atomic::AtomicBool,
     }
 
     impl crate::herdr::Herdr for FakeHerdr {
@@ -1598,12 +1599,15 @@ mod tests {
 
         fn resume(&self, r: &crate::herdr::Resume) -> Result<crate::herdr::Outcome, String> {
             self.resumes.lock().unwrap().push(r.clone());
-            Ok(crate::herdr::Outcome::Started)
+            if self.busy.load(std::sync::atomic::Ordering::SeqCst) && r.prompt.is_some() {
+                return Ok(crate::herdr::Outcome::Busy);
+            }
+            Ok(crate::herdr::Outcome::Prompted)
         }
     }
 
     fn with_herdr(app: &mut App) -> std::sync::Arc<FakeHerdr> {
-        let fake = std::sync::Arc::new(FakeHerdr { launches: std::sync::Mutex::new(Vec::new()), resumes: std::sync::Mutex::new(Vec::new()) });
+        let fake = std::sync::Arc::new(FakeHerdr { launches: std::sync::Mutex::new(Vec::new()), resumes: std::sync::Mutex::new(Vec::new()), busy: std::sync::atomic::AtomicBool::new(false) });
         app.herdr = Some(fake.clone());
         fake
     }
@@ -1693,6 +1697,207 @@ mod tests {
         assert_eq!(resumes[0].session, Some(("s-99".to_string(), "/w/api/tree".to_string())));
         assert_eq!(resumes[0].workspace, "", "no story, so the tab opens where you are");
         assert_eq!(resumes[0].tab, "acme/api#99 agent");
+    }
+
+    fn mine(number: u64, head: &str) -> PullRequest {
+        let mut pr = green(number, "Add thing", Review::Required, true);
+        pr.feedback.mine = true;
+        pr.feedback.head = head.into();
+        pr
+    }
+
+    fn red(number: u64, head: &str) -> PullRequest {
+        let mut pr = mine(number, head);
+        pr.checks[0].state = CheckState::Failed;
+        pr
+    }
+
+    fn with_open_comment(mut pr: PullRequest, id: &str) -> PullRequest {
+        pr.feedback.copilot = crate::prs::CopilotState::Reviewed;
+        pr.feedback.threads.push(crate::prs::Thread { id: id.into(), resolved: false, outdated: false, by_copilot: true });
+        pr
+    }
+
+    fn autopilot_app() -> (TempDir, App, std::sync::Arc<FakeHerdr>, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        let (root, mut app) = two_stories();
+        let fake = with_herdr(&mut app);
+        app.fix_store = Some(crate::fixstate::Store::new(root.path().join("cache")));
+        let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = asked.clone();
+        app.copilot_requester = std::sync::Arc::new(move |url| {
+            log.lock().unwrap().push(url.to_string());
+            Ok(())
+        });
+        (root, app, fake, asked)
+    }
+
+    fn settle(app: &mut App) {
+        for _ in 0..8 {
+            std::thread::sleep(std::time::Duration::from_millis(15));
+            app.poll_ready();
+        }
+    }
+
+    #[test]
+    fn with_the_tick_box_off_nothing_is_asked_and_with_it_on_a_red_pr_gets_one_ask_per_state() {
+        let (_root, mut app, fake, _) = autopilot_app();
+        app.apply_prs(Ok(vec![red(1, "sha1")]));
+        settle(&mut app);
+        assert!(fake.resumes.lock().unwrap().is_empty(), "off by default");
+        app.autofix = true;
+        app.apply_prs(Ok(vec![red(1, "sha1")]));
+        settle(&mut app);
+        {
+            let asks = fake.resumes.lock().unwrap();
+            assert_eq!(asks.len(), 1);
+            let prompt = asks[0].prompt.clone().unwrap();
+            assert!(prompt.starts_with("/pr-address https://github.com/acme/api/pull/1"), "{prompt}");
+            assert!(prompt.contains("automatic round 1 of 5") && prompt.contains("1 failing check"), "{prompt}");
+            assert!(!asks[0].focus, "an automatic ask leaves your screen alone");
+            assert_eq!(asks[0].fresh_repo.as_deref(), Some("api"), "a fresh agent is the fallback");
+        }
+        assert!(render(&app, 170, 44).contains("fix round 1/5 sent"), "the row says what was asked");
+        app.apply_prs(Ok(vec![red(1, "sha1")]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 1, "nothing changed on the PR, so no second ask");
+        app.apply_prs(Ok(vec![red(1, "sha2")]));
+        settle(&mut app);
+        let asks = fake.resumes.lock().unwrap();
+        assert_eq!(asks.len(), 2, "a new commit that is still red is another round");
+        assert!(asks[1].prompt.clone().unwrap().contains("round 2 of 5"));
+    }
+
+    #[test]
+    fn a_pr_that_goes_green_starts_again_from_round_one_next_time() {
+        let (_root, mut app, fake, _) = autopilot_app();
+        app.autofix = true;
+        app.apply_prs(Ok(vec![red(1, "sha1")]));
+        settle(&mut app);
+        app.apply_prs(Ok(vec![mine(1, "sha2")]));
+        settle(&mut app);
+        app.apply_prs(Ok(vec![red(1, "sha3")]));
+        settle(&mut app);
+        let asks = fake.resumes.lock().unwrap();
+        assert_eq!(asks.len(), 2);
+        assert!(asks[1].prompt.clone().unwrap().contains("round 1 of 5"), "{:?}", asks[1].prompt);
+    }
+
+    #[test]
+    fn a_busy_agent_is_left_alone_and_asked_on_a_later_look() {
+        let (_root, mut app, fake, _) = autopilot_app();
+        app.autofix = true;
+        fake.busy.store(true, std::sync::atomic::Ordering::SeqCst);
+        app.apply_prs(Ok(vec![red(1, "sha1")]));
+        settle(&mut app);
+        assert!(render(&app, 170, 44).contains("fix round") == false, "nothing was delivered");
+        fake.busy.store(false, std::sync::atomic::Ordering::SeqCst);
+        app.apply_prs(Ok(vec![red(1, "sha1")]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 2, "tried while busy, delivered once it was free");
+        assert!(render(&app, 170, 44).contains("fix round 1/5"));
+    }
+
+    #[test]
+    fn only_real_failures_on_settled_checks_and_finished_copilot_reviews_count_and_only_on_your_own_prs() {
+        let (_root, mut app, fake, _) = autopilot_app();
+        app.autofix = true;
+        let mut cancelled = red(1, "a");
+        cancelled.feedback.cancelled = vec![cancelled.checks[0].name.clone()];
+        let mut running = red(2, "b");
+        running.checks.push(Check { name: "slow".into(), workflow: None, state: CheckState::Running, started_at: None, completed_at: None, url: None });
+        let mut pending = with_open_comment(mine(3, "c"), "T1");
+        pending.feedback.copilot = crate::prs::CopilotState::Requested;
+        let mut someone_elses = red(4, "d");
+        someone_elses.feedback.mine = false;
+        app.apply_prs(Ok(vec![cancelled, running, pending, someone_elses]));
+        settle(&mut app);
+        assert!(fake.resumes.lock().unwrap().is_empty(), "{:?}", fake.resumes.lock().unwrap());
+        app.apply_prs(Ok(vec![with_open_comment(mine(5, "e"), "T9")]));
+        settle(&mut app);
+        let asks = fake.resumes.lock().unwrap();
+        assert_eq!(asks.len(), 1, "an open Copilot comment on a green PR is enough");
+        assert!(asks[0].prompt.clone().unwrap().contains("1 unresolved Copilot comment"));
+    }
+
+    #[test]
+    fn after_five_rounds_it_stops_and_tells_you() {
+        let (_root, mut app, fake, _) = autopilot_app();
+        app.autofix = true;
+        let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = told.clone();
+        app.notify = std::sync::Arc::new(move |title, _| log.lock().unwrap().push(title.to_string()));
+        for i in 1..=7 {
+            app.apply_prs(Ok(vec![red(1, &format!("sha{i}"))]));
+            settle(&mut app);
+        }
+        assert_eq!(fake.resumes.lock().unwrap().len(), 5);
+        assert_eq!(*told.lock().unwrap(), vec!["CAPCOM: giving up on a PR".to_string()], "said once");
+    }
+
+    #[test]
+    fn copilot_is_requested_once_on_your_own_unreviewed_prs_when_that_box_is_ticked_even_across_a_restart() {
+        let (root, mut app, _, asked) = autopilot_app();
+        let mut reviewed = mine(2, "b");
+        reviewed.feedback.copilot = crate::prs::CopilotState::Reviewed;
+        let mut other = mine(3, "c");
+        other.feedback.mine = false;
+        app.apply_prs(Ok(vec![mine(1, "a"), reviewed.clone(), other.clone()]));
+        settle(&mut app);
+        assert!(asked.lock().unwrap().is_empty(), "off by default");
+        app.autocopilot = true;
+        app.apply_prs(Ok(vec![mine(1, "a"), reviewed.clone(), other.clone()]));
+        settle(&mut app);
+        assert_eq!(*asked.lock().unwrap(), vec!["https://github.com/acme/api/pull/1".to_string()]);
+        app.apply_prs(Ok(vec![mine(1, "a")]));
+        settle(&mut app);
+        assert_eq!(asked.lock().unwrap().len(), 1, "not again");
+        let (_r2, mut restarted, _, asked2) = autopilot_app();
+        restarted.fix_store = Some(crate::fixstate::Store::new(root.path().join("cache")));
+        restarted.autocopilot = true;
+        restarted.apply_prs(Ok(vec![mine(1, "a")]));
+        settle(&mut restarted);
+        assert!(asked2.lock().unwrap().is_empty(), "a restarted copy remembers");
+    }
+
+    #[test]
+    fn the_f_key_and_the_fix_button_ask_now_even_with_the_tick_box_off_and_bring_the_agent_forward() {
+        let (_root, mut app, fake, _) = autopilot_app();
+        app.apply_prs(Ok(vec![with_open_comment(red(1, "sha1"), "T1")]));
+        let out = render(&app, 170, 44);
+        assert!(out.contains("[ fix ]"), "{out}");
+        let (x, y) = find(&out, "[ fix ]");
+        app.on_click(x + 2, y);
+        settle(&mut app);
+        {
+            let asks = fake.resumes.lock().unwrap();
+            assert_eq!(asks.len(), 1);
+            assert!(asks[0].focus && asks[0].prompt.clone().unwrap().contains("asked by hand"), "{:?}", asks[0]);
+        }
+        app.focus = Focus::Prs;
+        app.on_key(KeyCode::Char('f'), false);
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 2, "pressing it again asks again");
+        app.apply_prs(Ok(vec![mine(2, "x")]));
+        assert!(!render(&app, 170, 44).contains("[ fix ]"), "a PR with nothing to fix has no button");
+    }
+
+    #[test]
+    fn the_tick_boxes_show_their_state_toggle_by_click_and_by_key_and_are_remembered() {
+        let (root, mut app, _, _) = autopilot_app();
+        app.settings_path = Some(root.path().join("tui.json"));
+        app.apply_prs(Ok(vec![mine(1, "a")]));
+        let out = render(&app, 170, 44);
+        assert!(out.contains("[ ] auto-fix red CI and Copilot comments (F)") && out.contains("[ ] auto-request Copilot (C)"), "{out}");
+        let (x, y) = find(&out, "auto-fix red CI");
+        app.on_click(x, y);
+        assert!(app.autofix && render(&app, 170, 44).contains("[x] auto-fix"));
+        app.on_key(KeyCode::Char('C'), false);
+        assert!(app.autocopilot);
+        let mut again = App::new(root.path().to_path_buf(), None);
+        again.settings_path = app.settings_path.clone();
+        again.load_settings();
+        assert!(again.autofix && again.autocopilot);
+        assert_readable(&app, 170, 44, "tick boxes on");
     }
 
     #[test]

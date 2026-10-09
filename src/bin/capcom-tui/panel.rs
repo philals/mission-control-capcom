@@ -16,12 +16,21 @@ const OPEN_BUTTON: &str = "[ o Open in browser ]";
 const DETAILS_BUTTON: &str = "[ details ]";
 const COPY_BUTTON: &str = "[ copy ]";
 const AGENT_BUTTON: &str = "[ agent ]";
+const FIX_BUTTON: &str = "[ fix ]";
 const CONFIRM_YES: &str = "[ y Mark ready ]";
 const CONFIRM_NO: &str = "[ n Cancel ]";
 pub const SHEET_STAGE_OPEN: &str = "[ open ]";
 
 fn details_width() -> usize {
     DETAILS_BUTTON.chars().count()
+}
+
+fn fix_width(row: &PrRow) -> usize {
+    if row.can_fix {
+        FIX_BUTTON.chars().count() + 1
+    } else {
+        0
+    }
 }
 
 fn agent_width(row: &PrRow) -> usize {
@@ -321,6 +330,9 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
             }
             right.push(Span::styled(relative(&pr.updated_at, now), dim()));
             summary.extend(summary_line(pr));
+            if let Some(fix) = &row.fix {
+                summary.push(Span::styled(format!("  {fix}"), Style::new().fg(theme::CYAN)));
+            }
             let open = pr.open_checks();
             let label_width = open
                 .iter()
@@ -365,10 +377,14 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
         (false, true) => Style::new().bg(theme::GO_ROW),
         _ => Style::new(),
     };
-    let button = details_width() + 1 + copy_width() + agent_width(row);
+    let button = details_width() + 1 + copy_width() + agent_width(row) + fix_width(row);
     let mut second = fit(summary, width.saturating_sub(button + 1));
     let gap = width.saturating_sub(width_of(&second) + button);
     second.push(Span::raw(" ".repeat(gap)));
+    if row.can_fix {
+        second.push(Span::styled(FIX_BUTTON, Style::new().fg(theme::CYAN)));
+        second.push(Span::raw(" "));
+    }
     if row.has_agent {
         second.push(Span::styled(AGENT_BUTTON, Style::new().fg(theme::CYAN)));
         second.push(Span::raw(" "));
@@ -426,6 +442,9 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     if inner.height == 0 || inner.width == 0 {
         return;
     }
+    if area.width > 8 && area.height >= 6 {
+        draw_toggles(f, Rect::new(area.x + 2, area.y + area.height - 1, area.width - 4, 1), app, hits);
+    }
     let mut top = inner.y;
     if let Some(err) = &app.prs.error {
         let line = Line::from(Span::styled(trunc(&format!("! {err}"), inner.width as usize), Style::new().fg(theme::RED)));
@@ -470,10 +489,14 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         let copy = copy_width() as u16;
         let title_n = title_lines(row, width).len() as u16;
         let agent = agent_width(row) as u16;
-        if body.width > button + copy + agent + 1 && h > title_n + 1 {
+        let fix = fix_width(row) as u16;
+        if body.width > button + copy + agent + fix + 1 && h > title_n + 1 {
             let line = y + title_n + 1;
             if agent > 0 {
                 hits.push((Rect::new(body.x + body.width - button - 1 - copy - agent, line, agent - 1, 1), Target::PrAgent(i)));
+            }
+            if fix > 0 {
+                hits.push((Rect::new(body.x + body.width - button - 1 - copy - agent - fix, line, fix - 1, 1), Target::PrFix(i)));
             }
             hits.push((Rect::new(body.x + body.width - button, line, button, 1), Target::PrDetails(i)));
             hits.push((Rect::new(body.x + body.width - button - 1 - copy, line, copy, 1), Target::PrCopy(i)));
@@ -494,6 +517,29 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
             y += 1;
         }
     }
+}
+
+/// The tick boxes, drawn on the panel's bottom border so they cost no room.
+fn draw_toggles(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
+    let boxes = [
+        (app.autofix, "auto-fix red CI and Copilot comments (F)", Target::ToggleAutoFix),
+        (app.autocopilot, "auto-request Copilot (C)", Target::ToggleAutoCopilot),
+    ];
+    let mut spans: Vec<Span<'static>> = vec![Span::raw(" ")];
+    let mut x = area.x + 1;
+    for (on, label, target) in boxes {
+        let text = format!("{} {label}", if on { "[x]" } else { "[ ]" });
+        let width = text.chars().count() as u16;
+        if x + width > area.x + area.width {
+            break;
+        }
+        let style = if on { Style::new().fg(theme::GREEN).add_modifier(Modifier::BOLD) } else { dim() };
+        spans.push(Span::styled(text, style));
+        spans.push(Span::raw("   "));
+        hits.push((Rect::new(x, area.y, width, 1), target));
+        x += width + 3;
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)).style(Style::new().bg(theme::BG)), area);
 }
 
 fn label_row(label: &str, value: String) -> Line<'static> {

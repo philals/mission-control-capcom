@@ -28,7 +28,7 @@ If that sounds like you, great. If not, treat this as a worked example: fork it,
 | Part | What it does |
 |---|---|
 | **`capcom`** (command) | The only writer of each story's `board.json`: tasks, statuses, dependencies, PRs. Refuses illegal moves. Everything it prints is JSON. |
-| **Four Claude Code skills** | `/story-break-down`, `/story-plan-task`, `/story-implement-task`, `/story-review`. They talk to you, Jira and `git`/`gh`, and change the board only through `capcom`. |
+| **Five Claude Code skills** | `/story-break-down`, `/story-plan-task`, `/story-implement-task`, `/story-review` and `/pr-address` (works on any PR). They talk to you, Jira and `git`/`gh`, and change the board only through `capcom`. |
 | **`capcom-tui`** | A live terminal board (keyboard and mouse): your stories, your open PRs with their CI stages, and the GitHub Actions runs you started by hand. It can start the skills for you and finish tasks when their PRs merge. |
 | **Herdr plugin** (optional) | Opens `capcom-tui` from a keyboard shortcut in [Herdr](https://herdr.dev), and lets the board launch agents in Herdr panes. |
 
@@ -67,7 +67,7 @@ mkdir -p ~/stories
 export CAPCOM_ROOT=~/stories         # also add this to your shell profile and to `env` in ~/.claude/settings.json
 
 # make the skills visible to Claude Code
-for s in story-break-down story-plan-task story-implement-task story-review; do
+for s in story-break-down story-plan-task story-implement-task story-review pr-address; do
   ln -s "$PWD/skills/$s" ~/.claude/skills/$s
 done
 ```
@@ -94,6 +94,7 @@ A typical run, in order: break the story down and approve the table; plan each t
 - **Stories and boards:** a kanban of your stories (TO DO, DOING, IN REVIEW) and a kanban per story with a card for each task (ready to implement, waits on dependencies, blocked, PRs merged). Drag a finished story from DOING to IN REVIEW and it opens a Herdr tab running `/story-review`.
 - **Your PRs, with CI:** every open PR from a GitHub search you control, `[DRAFT]` or `[READY]`, with the CI stages that are running, queued or failed listed one per line. A PR that is all green and only waiting for a reviewer is lit up with a green `GO · ◉ AWAITING REVIEW` block, a green bar and a tinted row, and counted in the panel title. Click to open, copy the link, or mark a draft ready (it asks first).
 - **Back to the agent:** a PR made through a task has an `[ agent ]` button that focuses the Claude Code session that made it in Herdr, or resumes it (`claude --resume`) if the tab was closed. PRs you made outside the workflow work too: Claude Code records which session made each PR, and capcom reads that.
+- **Copilot and fixing:** each PR shows Copilot's state (`reviewing`, `✎ 3 to fix`, `✔ reviewed`) and notifies you when its review lands. `[ fix ]` asks the agent that made the PR to merge the default branch in, fix failing CI and address (then resolve) the review comments, using the `/pr-address` skill. Two tick boxes can do that automatically for red CI and Copilot's comments (up to 5 rounds a PR, only when something has changed) and request Copilot's review on your new PRs.
 - **Runs and watch:** the "Run workflow" runs you started, such as a nonprod deploy, plus any GitHub Actions run you paste a link to. Each shows its stages and a link, finished runs leave after 30 minutes, and you get a bell, a status line and (with `notify-send`) a desktop notification when one finishes.
 - **Finishing tasks:** drag an IMPLEMENTING card to DONE (or press `x`) and capcom checks its PRs on GitHub, and only finishes the task if every one is merged.
 - **Resizable and remembered:** drag any divider; sizes are saved.
@@ -139,7 +140,7 @@ capcom-tui --screenshot docs/img/list.svg  --screen list  --size 150x30
 ```
 src/                      the capcom command and its library (board model, rules, store, refresh)
 src/bin/capcom-tui/       the terminal board (app state, drawing, GitHub polling, Herdr, cache, demo data)
-skills/                   the four Claude Code skills
+skills/                   the five Claude Code skills
 schemas/board.schema.json JSON Schema for board.json
 herdr-plugin.toml         the Herdr plugin manifest (scripts/open.sh is its action)
 docs/                     design notes, command reference, TUI guide, README pictures
