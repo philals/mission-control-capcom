@@ -162,6 +162,22 @@ enum Cmd {
         #[arg(long)]
         skill: String,
     },
+    /// Record the Claude Code session working on a task, so it can be resumed from the board
+    SetSession {
+        /// Jira story key
+        key: String,
+        /// Task id, for example T2
+        id: String,
+        /// Skill the session is running
+        #[arg(long)]
+        skill: String,
+        /// Claude Code session id (Claude Code sets CLAUDE_CODE_SESSION_ID in its shell)
+        #[arg(long, env = "CLAUDE_CODE_SESSION_ID")]
+        session: String,
+        /// Directory the session was started in (default: read from its transcript, else the current directory)
+        #[arg(long)]
+        cwd: Option<String>,
+    },
     /// Clear a task's agent record
     ClearAgent {
         /// Jira story key
@@ -307,6 +323,15 @@ fn main() -> Result<()> {
         Cmd::SetAgent { key, id, pane, skill } => mutate(root, &key, |b, _| {
             let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
             ops::set_agent(b, &id, &pane, &skill, &now)?;
+            task_json(b, &id)
+        }),
+        Cmd::SetSession { key, id, skill, session, cwd } => mutate(root, &key, |b, _| {
+            let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            let cwd = match cwd.or_else(|| capcom::session::start_dir(&session)) {
+                Some(c) => c,
+                None => std::env::current_dir()?.to_string_lossy().to_string(),
+            };
+            ops::add_session(b, &id, &session, &skill, &cwd, &now)?;
             task_json(b, &id)
         }),
         Cmd::ClearAgent { key, id } => mutate(root, &key, |b, _| {

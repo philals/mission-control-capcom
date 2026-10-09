@@ -155,6 +155,8 @@ pub struct Task {
     pub jira_subtask: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<Agent>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sessions: Vec<Session>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -176,6 +178,17 @@ pub struct Pr {
 pub struct Agent {
     pub pane: String,
     pub skill: String,
+    pub started_at: String,
+}
+
+/// A Claude Code conversation that worked on a task, kept so it can be resumed later.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Session {
+    pub id: String,
+    pub skill: String,
+    /// The directory the conversation ran in: `claude --resume` only finds it from there.
+    pub cwd: String,
     pub started_at: String,
 }
 
@@ -219,6 +232,7 @@ impl Task {
             prs: Vec::new(),
             jira_subtask: None,
             agent: None,
+            sessions: Vec::new(),
         }
     }
 }

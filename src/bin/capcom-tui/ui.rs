@@ -1585,6 +1585,7 @@ mod tests {
 
     struct FakeHerdr {
         launches: std::sync::Mutex<Vec<crate::herdr::Launch>>,
+        resumes: std::sync::Mutex<Vec<crate::herdr::Resume>>,
     }
 
     impl crate::herdr::Herdr for FakeHerdr {
@@ -1592,10 +1593,15 @@ mod tests {
             self.launches.lock().unwrap().push(l.clone());
             Ok(crate::herdr::Outcome::Started)
         }
+
+        fn resume(&self, r: &crate::herdr::Resume) -> Result<crate::herdr::Outcome, String> {
+            self.resumes.lock().unwrap().push(r.clone());
+            Ok(crate::herdr::Outcome::Started)
+        }
     }
 
     fn with_herdr(app: &mut App) -> std::sync::Arc<FakeHerdr> {
-        let fake = std::sync::Arc::new(FakeHerdr { launches: std::sync::Mutex::new(Vec::new()) });
+        let fake = std::sync::Arc::new(FakeHerdr { launches: std::sync::Mutex::new(Vec::new()), resumes: std::sync::Mutex::new(Vec::new()) });
         app.herdr = Some(fake.clone());
         fake
     }
@@ -1610,6 +1616,71 @@ mod tests {
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
         fake.launches.lock().unwrap().clone()
+    }
+
+    fn resumes_after(app: &mut App, fake: &FakeHerdr) -> Vec<crate::herdr::Resume> {
+        for _ in 0..200 {
+            app.poll_ready();
+            if !fake.resumes.lock().unwrap().is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        fake.resumes.lock().unwrap().clone()
+    }
+
+    #[test]
+    fn only_prs_recorded_on_a_task_get_an_agent_button_and_it_resumes_the_latest_implementing_session() {
+        let (root, mut app) = with_prs();
+        store::update(root.path(), "PROJ-2", |b| {
+            ops::add_session(b, "T1", "plan-1", "story-plan-task", "/w/plan", "t1")?;
+            ops::add_session(b, "T1", "impl-1", "story-implement-task", "/w/api", "t2")?;
+            ops::add_session(b, "T1", "impl-2", "story-implement-task", "/w/api", "t3")?;
+            ops::add_session(b, "T1", "plan-2", "story-plan-task", "/w/plan", "t4")
+        })
+        .unwrap();
+        app.reload();
+        let fake = with_herdr(&mut app);
+        let out = render(&app, 170, 44);
+        assert_eq!(out.matches("[ agent ]").count(), 1, "the two PRs on no task have none:\n{out}");
+        let (x, y) = find(&out, "[ agent ]");
+        app.on_click(x + 2, y);
+        let resumes = resumes_after(&mut app, &fake);
+        assert_eq!(resumes.len(), 1);
+        assert_eq!(resumes[0].session, Some(("impl-2".to_string(), "/w/api".to_string())));
+        assert_eq!(resumes[0].workspace, "PROJ-2");
+        assert_eq!(resumes[0].tab, "T1 resume");
+        assert!(resumes[0].known_agents.contains(&"proj-2-t1-impl".to_string()), "{:?}", resumes[0].known_agents);
+        assert!(fake.launches.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_a_key_goes_back_to_the_selected_prs_agent_and_a_task_with_no_session_still_tries_running_agents() {
+        let (_root, mut app) = with_prs();
+        let fake = with_herdr(&mut app);
+        let rows = app.pr_rows();
+        let recorded = rows.iter().position(|r| r.owner.is_some()).unwrap();
+        drop(rows);
+        app.focus = Focus::Prs;
+        app.pr_sel = recorded;
+        assert!(!app.on_key(KeyCode::Char('a'), false));
+        let resumes = resumes_after(&mut app, &fake);
+        assert_eq!(resumes.len(), 1);
+        assert_eq!(resumes[0].session, None);
+    }
+
+    #[test]
+    fn a_pr_on_no_task_says_so_instead_of_starting_anything() {
+        let (_root, mut app) = with_prs();
+        let fake = with_herdr(&mut app);
+        let rows = app.pr_rows();
+        let unrecorded = rows.iter().position(|r| r.owner.is_none()).unwrap();
+        drop(rows);
+        app.focus = Focus::Prs;
+        app.pr_sel = unrecorded;
+        app.on_key(KeyCode::Char('a'), false);
+        assert!(render(&app, 170, 44).contains("not recorded on any task"));
+        assert!(fake.resumes.lock().unwrap().is_empty());
     }
 
     fn drag_card(app: &mut App, card: &str, column: &str) {

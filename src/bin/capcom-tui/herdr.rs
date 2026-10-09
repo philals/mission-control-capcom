@@ -16,6 +16,21 @@ pub struct Launch {
     pub prompt: String,
 }
 
+/// Bring back the agent that made a pull request: focus it if it is running, else resume its
+/// recorded Claude Code session in a new tab.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Resume {
+    pub workspace: String,
+    pub label: String,
+    pub tab: String,
+    /// Name for the resumed agent.
+    pub agent: String,
+    /// Names of agents the TUI may have started for this task, tried in order.
+    pub known_agents: Vec<String>,
+    /// `(session id, directory it was started in)`, when one is recorded.
+    pub session: Option<(String, String)>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
     Started,
@@ -25,6 +40,7 @@ pub enum Outcome {
 
 pub trait Herdr: Send + Sync {
     fn launch(&self, launch: &Launch) -> Result<Outcome, String>;
+    fn resume(&self, resume: &Resume) -> Result<Outcome, String>;
 }
 
 const SHORT_NAME_WORDS: usize = 3;
@@ -135,6 +151,16 @@ impl Cli {
         .and_then(|(id, label)| id.map(|id| (id, label))))
     }
 
+    /// The pane of a running agent whose Claude Code session is `session`, by what Herdr reports.
+    fn pane_of_session(&self, session: &str) -> Result<Option<String>, String> {
+        let list = self.call(&["agent", "list"])?;
+        Ok(list["result"]["agents"].as_array().and_then(|all| {
+            all.iter()
+                .find(|a| a["agent_session"]["value"] == session)
+                .and_then(|a| a["pane_id"].as_str().map(str::to_string))
+        }))
+    }
+
     fn agent_running(&self, name: &str) -> Result<bool, String> {
         let list = self.call(&["agent", "list"])?;
         Ok(list["result"]["agents"].as_array().is_some_and(|all| all.iter().any(|a| a["name"] == name)))
@@ -142,8 +168,8 @@ impl Cli {
 
     /// The pane to start the agent in: the root pane of a new workspace, or of a new tab in the
     /// story's workspace.
-    fn new_pane(&self, l: &Launch) -> Result<String, String> {
-        let cwd = self.cwd.to_string_lossy().to_string();
+    fn new_pane(&self, l: &Launch, cwd: Option<&str>) -> Result<String, String> {
+        let cwd = cwd.map_or_else(|| self.cwd.to_string_lossy().to_string(), str::to_string);
         let pane = |v: &Value| v["result"]["root_pane"]["pane_id"].as_str().map(str::to_string);
         match self.find_workspace(&l.workspace)? {
             Some((id, label)) => {
@@ -170,9 +196,38 @@ impl Herdr for Cli {
             self.call(&["agent", "focus", &l.agent])?;
             return Ok(Outcome::Focused);
         }
-        let pane = self.new_pane(l)?;
+        let pane = self.new_pane(l, None)?;
         self.call(&["agent", "start", &l.agent, "--kind", "claude", "--pane", &pane])?;
         self.call(&["agent", "prompt", &l.agent, &l.prompt])?;
+        Ok(Outcome::Started)
+    }
+
+    fn resume(&self, r: &Resume) -> Result<Outcome, String> {
+        self.resume_in_herdr(r)
+    }
+}
+
+impl Cli {
+    fn resume_in_herdr(&self, r: &Resume) -> Result<Outcome, String> {
+        if let Some((id, _)) = &r.session {
+            if let Some(pane) = self.pane_of_session(id)? {
+                self.call(&["agent", "focus", &pane])?;
+                return Ok(Outcome::Focused);
+            }
+        }
+        for name in r.known_agents.iter().chain(std::iter::once(&r.agent)) {
+            if self.agent_running(name)? {
+                self.call(&["agent", "focus", name])?;
+                return Ok(Outcome::Focused);
+            }
+        }
+        let Some((id, cwd)) = &r.session else {
+            return Err("no session is recorded for this task yet".into());
+        };
+        let launch = Launch { workspace: r.workspace.clone(), label: r.label.clone(), tab: r.tab.clone(), agent: r.agent.clone(), prompt: String::new() };
+        let dir = std::path::Path::new(cwd).is_dir().then_some(cwd.as_str());
+        let pane = self.new_pane(&launch, dir)?;
+        self.call(&["agent", "start", &r.agent, "--kind", "claude", "--pane", &pane, "--", "--resume", id])?;
         Ok(Outcome::Started)
     }
 }
@@ -299,6 +354,51 @@ mod tests {
         assert!(calls.contains(&"tab rename w9:t1 T2 plan".to_string()), "{calls:?}");
         assert!(calls.contains(&"agent start proj-123-t2-plan --kind claude --pane w9:p1".to_string()), "{calls:?}");
         assert_eq!(calls.last().unwrap(), "agent prompt proj-123-t2-plan /story-plan-task PROJ-123 T2");
+    }
+
+    fn resume() -> Resume {
+        Resume {
+            workspace: "PROJ-123".into(),
+            label: "PROJ-123 - Notification preferences".into(),
+            tab: "T2 resume".into(),
+            agent: "proj-123-t2-resume".into(),
+            known_agents: vec!["proj-123-t2-impl".into()],
+            session: Some(("abc-123".into(), "/work/api".into())),
+        }
+    }
+
+    #[test]
+    fn the_agent_running_a_recorded_session_is_focused_by_its_pane() {
+        let (cli, calls) = cli(json!([]), json!([{"pane_id": "w5:p1", "agent_session": {"value": "abc-123"}}]));
+        assert_eq!(cli.resume(&resume()), Ok(Outcome::Focused));
+        assert!(calls.lock().unwrap().contains(&"agent focus w5:p1".to_string()));
+    }
+
+    #[test]
+    fn a_running_agent_started_by_the_board_is_focused_by_name() {
+        let (cli, calls) = cli(json!([]), json!([{"name": "proj-123-t2-impl", "pane_id": "w5:p1"}]));
+        assert_eq!(cli.resume(&resume()), Ok(Outcome::Focused));
+        assert!(calls.lock().unwrap().contains(&"agent focus proj-123-t2-impl".to_string()));
+    }
+
+    #[test]
+    fn a_closed_session_is_resumed_in_a_new_tab_of_the_story_workspace() {
+        let (cli, calls) = cli(json!([{"label": "PROJ-123 - Notification preferences", "workspace_id": "w3"}]), json!([]));
+        let dir = std::env::temp_dir().to_string_lossy().to_string();
+        let mut r = resume();
+        r.session = Some(("abc-123".into(), dir.clone()));
+        assert_eq!(cli.resume(&r), Ok(Outcome::Started));
+        let calls = calls.lock().unwrap();
+        assert!(calls.contains(&format!("tab create --workspace w3 --label T2 resume --cwd {dir} --no-focus")), "{calls:?}");
+        assert!(calls.contains(&"agent start proj-123-t2-resume --kind claude --pane w3:p2 -- --resume abc-123".to_string()), "{calls:?}");
+    }
+
+    #[test]
+    fn with_nothing_running_and_no_session_the_user_is_told() {
+        let (cli, _) = cli(json!([]), json!([]));
+        let mut r = resume();
+        r.session = None;
+        assert!(cli.resume(&r).unwrap_err().contains("no session"));
     }
 
     #[test]

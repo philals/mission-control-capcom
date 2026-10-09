@@ -1,4 +1,4 @@
-use crate::model::{Agent, Blocked, Board, Pr, PrState, StoryStatus, Task, TaskType};
+use crate::model::{Agent, Blocked, Board, Pr, PrState, Session, StoryStatus, Task, TaskType};
 use crate::{rules, store};
 use anyhow::{bail, Context, Result};
 use std::path::Path;
@@ -167,6 +167,19 @@ pub fn set_agent(board: &mut Board, id: &str, pane: &str, skill: &str, started_a
     Ok(())
 }
 
+/// Remember a Claude Code session that worked on a task. Recording the same session and skill again
+/// updates it, so a resumed run does not pile up entries. Allowed on any task, even a finished one.
+pub fn add_session(board: &mut Board, id: &str, session: &str, skill: &str, cwd: &str, at: &str) -> Result<()> {
+    anyhow::ensure!(!session.is_empty(), "the session id is empty");
+    let sessions = &mut task_mut(board, id)?.sessions;
+    let entry = Session { id: session.to_string(), skill: skill.to_string(), cwd: cwd.to_string(), started_at: at.to_string() };
+    match sessions.iter_mut().find(|s| s.id == session && s.skill == skill) {
+        Some(existing) => existing.cwd = entry.cwd,
+        None => sessions.push(entry),
+    }
+    Ok(())
+}
+
 pub fn clear_agent(board: &mut Board, id: &str) -> Result<()> {
     task_mut(board, id)?.agent = None;
     Ok(())
@@ -314,6 +327,20 @@ mod tests {
         assert_eq!(board.tasks[0].blocked.as_ref().unwrap().reason, "needs schema change");
         unblock(&mut board, "T1").unwrap();
         assert!(board.tasks[0].blocked.is_none());
+    }
+
+    #[test]
+    fn a_session_is_recorded_once_per_skill_and_survives_finishing() {
+        let (root, mut board) = fresh();
+        add_task(&dir(&root), &mut board, "One", TaskType::Pr, vec![], vec![]).unwrap();
+        add_session(&mut board, "T1", "abc", "story-implement-task", "/w/one", "t1").unwrap();
+        add_session(&mut board, "T1", "abc", "story-implement-task", "/w/two", "t2").unwrap();
+        add_session(&mut board, "T1", "abc", "story-plan-task", "/w/one", "t3").unwrap();
+        let sessions = &board.tasks[0].sessions;
+        assert_eq!(sessions.len(), 2);
+        assert_eq!((sessions[0].cwd.as_str(), sessions[0].started_at.as_str()), ("/w/two", "t1"));
+        assert!(add_session(&mut board, "T1", "", "s", "/w", "t").is_err());
+        assert!(add_session(&mut board, "T9", "abc", "s", "/w", "t").is_err());
     }
 
     #[test]

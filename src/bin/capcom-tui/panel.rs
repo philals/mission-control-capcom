@@ -15,12 +15,21 @@ type Hits = Vec<(Rect, Target)>;
 const OPEN_BUTTON: &str = "[ o Open in browser ]";
 const DETAILS_BUTTON: &str = "[ details ]";
 const COPY_BUTTON: &str = "[ copy ]";
+const AGENT_BUTTON: &str = "[ agent ]";
 const CONFIRM_YES: &str = "[ y Mark ready ]";
 const CONFIRM_NO: &str = "[ n Cancel ]";
 pub const SHEET_STAGE_OPEN: &str = "[ open ]";
 
 fn details_width() -> usize {
     DETAILS_BUTTON.chars().count()
+}
+
+fn agent_width(row: &PrRow) -> usize {
+    if row.owner.is_some() {
+        AGENT_BUTTON.chars().count() + 1
+    } else {
+        0
+    }
 }
 
 fn copy_width() -> usize {
@@ -321,10 +330,14 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
     first.push(Span::raw(" ".repeat(pad)));
     first.extend(right);
     let style = if selected { Style::new().bg(theme::SELECT) } else { Style::new() };
-    let button = details_width() + 1 + copy_width();
+    let button = details_width() + 1 + copy_width() + agent_width(row);
     let mut second = fit(summary, width.saturating_sub(button + 1));
     let gap = width.saturating_sub(width_of(&second) + button);
     second.push(Span::raw(" ".repeat(gap)));
+    if row.owner.is_some() {
+        second.push(Span::styled(AGENT_BUTTON, Style::new().fg(theme::CYAN)));
+        second.push(Span::raw(" "));
+    }
     second.push(Span::styled(COPY_BUTTON, Style::new().fg(theme::CYAN)));
     second.push(Span::raw(" "));
     second.push(Span::styled(DETAILS_BUTTON, Style::new().fg(theme::CYAN)));
@@ -421,8 +434,12 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         let button = details_width() as u16;
         let copy = copy_width() as u16;
         let title_n = title_lines(row, width).len() as u16;
-        if body.width > button + copy + 1 && h > title_n + 1 {
+        let agent = agent_width(row) as u16;
+        if body.width > button + copy + agent + 1 && h > title_n + 1 {
             let line = y + title_n + 1;
+            if agent > 0 {
+                hits.push((Rect::new(body.x + body.width - button - 1 - copy - agent, line, agent - 1, 1), Target::PrAgent(i)));
+            }
             hits.push((Rect::new(body.x + body.width - button, line, button, 1), Target::PrDetails(i)));
             hits.push((Rect::new(body.x + body.width - button - 1 - copy, line, copy, 1), Target::PrCopy(i)));
         }

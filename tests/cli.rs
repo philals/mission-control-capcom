@@ -48,6 +48,9 @@ fn full_task_lifecycle() {
     fails(&root, &["status", "PROJ-1", "T1", "in_review"]);
     ok(&root, &["set-pr", "PROJ-1", "T1", "--url", "https://github.com/o/api/pull/1", "--state", "merged"]);
     ok(&root, &["status", "PROJ-1", "T1", "done"]);
+    let with_session = ok(&root, &["set-session", "PROJ-1", "T1", "--skill", "story-implement-task", "--session", "abc-123", "--cwd", "/work/api"]);
+    assert_eq!(with_session["sessions"][0]["id"], "abc-123");
+    assert_eq!(with_session["sessions"][0]["cwd"], "/work/api");
     assert_eq!(ok(&root, &["ready", "PROJ-1"])["ready"], serde_json::json!(["T2"]));
 
     let board = ok(&root, &["show", "PROJ-1"]);

@@ -42,6 +42,7 @@ Valid task statuses: `todo`, `planning`, `planned`, `implementing`, `done`, `dro
     capcom set-pr <KEY> <ID> --url U --state draft|ready|merged|closed
     capcom set-agent <KEY> <ID> --pane P --skill S
     capcom clear-agent <KEY> <ID>
+    capcom set-session <KEY> <ID> --skill S [--session ID] [--cwd DIR]   # Claude Code session, kept for resuming; ID defaults to $CLAUDE_CODE_SESSION_ID
     capcom set-subtask <KEY> <ID> <JIRA-KEY>
     capcom refresh <KEY>                     # reads PR states with gh, marks tasks done once every PR is merged
 

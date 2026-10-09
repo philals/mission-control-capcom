@@ -50,6 +50,20 @@
             "skill": { "type": "string", "minLength": 1 },
             "startedAt": { "type": "string", "minLength": 1 }
           }
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "skill", "cwd", "startedAt"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "skill": { "type": "string", "minLength": 1 },
+              "cwd": { "type": "string", "minLength": 1 },
+              "startedAt": { "type": "string", "minLength": 1 }
+            }
+          }
         }
       }
     },

@@ -1,5 +1,5 @@
 use crate::finish;
-use crate::herdr::{self, Herdr, Launch, Outcome};
+use crate::herdr::{self, Herdr, Launch, Outcome, Resume};
 use crate::pr_state;
 use crate::prs::{PrMsg, PullRequest};
 use crate::runs::{valid_repo, Batch, Run, RunMsg};
@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use capcom::model::{Board, PrState, Status, StoryStatus, Task};
+use capcom::model::{Board, PrState, Session, Status, StoryStatus, Task};
 use capcom::refresh::{self, GhLookup, Lookups, PrLookup};
 use capcom::rules;
 use capcom::store;
@@ -90,6 +90,8 @@ pub enum Target {
     Pr(usize),
     PrDetails(usize),
     PrCopy(usize),
+    /// The `[ agent ]` button: back to the agent session that made the PR.
+    PrAgent(usize),
     /// The `[DRAFT]` badge of a live draft pull request.
     PrBadge(usize),
     ConfirmYes,
@@ -133,6 +135,8 @@ pub struct StorySummary {
     pub counts: [usize; 6],
     /// (pull request url, task id) for every PR recorded on the story's tasks.
     pub prs: Vec<(String, String)>,
+    /// (task id, Claude Code session) for every session recorded on the story's tasks.
+    pub sessions: Vec<(String, Session)>,
     pub error: Option<String>,
 }
 
@@ -157,6 +161,7 @@ fn summarize(root: &Path, key: &str) -> StorySummary {
                     .iter()
                     .flat_map(|t| t.prs.iter().map(|p| (p.url.clone(), t.id.clone())))
                     .collect(),
+                sessions: board.tasks.iter().flat_map(|t| t.sessions.iter().map(|s| (t.id.clone(), s.clone()))).collect(),
                 error: None,
             }
         }
@@ -168,6 +173,7 @@ fn summarize(root: &Path, key: &str) -> StorySummary {
             done: 0,
             counts: [0; 6],
             prs: Vec::new(),
+            sessions: Vec::new(),
             error: Some(format!("{e:#}")),
         },
     }
@@ -229,6 +235,8 @@ pub struct PrRow<'a> {
     pub title: String,
     pub tag: Option<String>,
     pub board_state: Option<PrState>,
+    /// The story key and task id this PR is recorded on.
+    pub owner: Option<(String, String)>,
 }
 
 fn pr_id(row: &PrRow) -> String {
@@ -1147,6 +1155,54 @@ impl App {
         }
     }
 
+    /// The story key and task id a PR is recorded on.
+    pub fn pr_owner(&self, url: &str) -> Option<(String, String)> {
+        self.stories.iter().find_map(|story| {
+            story.prs.iter().find(|(u, _)| same_url(u, url)).map(|(_, task)| (story.key.clone(), task.clone()))
+        })
+    }
+
+    /// The session to resume for a task: the latest implementing one, else the latest of any skill.
+    fn session_for(&self, key: &str, task: &str) -> Option<&Session> {
+        let story = self.stories.iter().find(|s| s.key == key)?;
+        let mine = || story.sessions.iter().filter(|(t, _)| t == task).map(|(_, s)| s);
+        mine().filter(|s| s.skill == "story-implement-task").last().or_else(|| mine().last())
+    }
+
+    /// Go back to the agent that made a PR: focus it if it is still running in Herdr, otherwise
+    /// resume its recorded Claude Code session in a new tab.
+    pub fn open_pr_agent(&mut self, index: usize) {
+        let Some(owner) = self.pr_rows().get(index).map(|r| r.owner.clone()) else {
+            return;
+        };
+        let Some((key, task)) = owner else {
+            self.set_notice("this PR is not recorded on any task, so there is no agent to go back to".into());
+            return;
+        };
+        let Some(herdr) = self.herdr.clone() else {
+            self.set_notice("not running inside Herdr, so the agent cannot be brought back".into());
+            return;
+        };
+        let resume = Resume {
+            workspace: key.clone(),
+            label: self.workspace_label(&key),
+            tab: format!("{task} resume"),
+            agent: herdr::agent_name(&[&key, &task, "resume"]),
+            known_agents: ["impl", "cleanup", "plan"].iter().map(|phase| herdr::agent_name(&[&key, &task, phase])).collect(),
+            session: self.session_for(&key, &task).map(|s| (s.id.clone(), s.cwd.clone())),
+        };
+        self.set_notice(format!("looking for the agent that made {task}…"));
+        let done = self.launch_done.0.clone();
+        std::thread::spawn(move || {
+            let text = match herdr.resume(&resume) {
+                Ok(Outcome::Started) => format!("resumed the session for {task} in Herdr workspace {}", resume.workspace),
+                Ok(Outcome::Focused) => format!("the agent for {task} is running: brought to the front"),
+                Err(e) => format!("{task}: {e}"),
+            };
+            let _ = done.send(AppMsg::Notice(text));
+        });
+    }
+
     pub fn pr_tag(&self, url: &str) -> Option<String> {
         self.stories.iter().find_map(|story| {
             story
@@ -1173,6 +1229,7 @@ impl App {
                         title: p.title.clone(),
                         tag: self.pr_tag(&p.url),
                         board_state: None,
+                        owner: self.pr_owner(&p.url),
                     })
                     .collect();
                 // PRs that are green and only waiting for a reviewer come first (the order is otherwise kept)
@@ -1201,6 +1258,7 @@ impl App {
                             title: live.map_or_else(String::new, |p| p.title.clone()),
                             tag: Some(task.id.clone()),
                             board_state: Some(pr.state),
+                            owner: self.pr_owner(&pr.url),
                         });
                     }
                 }
@@ -1764,6 +1822,10 @@ impl App {
                 self.copy_pr(self.pr_sel);
                 return false;
             }
+            KeyCode::Char('a') if self.focus == Focus::Prs => {
+                self.open_pr_agent(self.pr_sel);
+                return false;
+            }
             KeyCode::Char('m') if self.focus == Focus::Prs => {
                 self.ask_mark_ready(self.pr_sel);
                 return false;
@@ -1920,6 +1982,12 @@ impl App {
                 self.copy_pr(i);
                 return;
             }
+            Some(Target::PrAgent(i)) => {
+                self.set_focus(Focus::Prs);
+                self.pr_sel = i;
+                self.open_pr_agent(i);
+                return;
+            }
             Some(Target::PrBadge(i)) => {
                 self.set_focus(Focus::Prs);
                 self.pr_sel = i;
@@ -2001,7 +2069,7 @@ impl App {
             return;
         }
         let target = self.hit(x, y);
-        if matches!(target, Some(Target::Pr(_) | Target::PrDetails(_) | Target::PrPanel | Target::OpenCheck(..))) {
+        if matches!(target, Some(Target::Pr(_) | Target::PrDetails(_) | Target::PrAgent(_) | Target::PrPanel | Target::OpenCheck(..))) {
             self.set_focus(Focus::Prs);
             self.pr_move(delta);
             return;
