@@ -254,7 +254,7 @@ fn parse_check(ctx: &Value) -> Option<Check> {
 }
 
 fn parse_feedback(node: &Value) -> Feedback {
-    let nodes = |pointer: &str| node.pointer(pointer).and_then(Value::as_array).cloned().unwrap_or_default();
+    let nodes = |pointer: &str| node.pointer(pointer).and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
     let requested = nodes("/reviewRequests/nodes").iter().any(|n| text(n, "/requestedReviewer/login").is_some_and(|l| is_copilot(&l)));
     let reviewed_at = nodes("/latestReviews/nodes")
         .iter()

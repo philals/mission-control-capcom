@@ -8,9 +8,7 @@ use crate::settings::{self, Settings, COLUMNS, DEFAULT_COLUMN_WEIGHT, DEFAULT_SP
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
 use std::cell::{Cell, RefCell};
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{Receiver, Sender};
@@ -187,16 +185,34 @@ fn summarize(root: &Path, key: &str) -> StorySummary {
     }
 }
 
+/// What identifies each board file on disk, without reading it: cheap enough to check often.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Signature(Vec<(String, u64)>);
+pub struct Signature(Vec<(String, FileStamp)>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileStamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    inode: u64,
+}
+
+fn stamp(meta: &std::fs::Metadata) -> FileStamp {
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(meta);
+    #[cfg(not(unix))]
+    let inode = 0;
+    FileStamp { len: meta.len(), modified: meta.modified().ok(), inode }
+}
 
 pub fn signature(root: &Path) -> Signature {
     let mut entries = Vec::new();
     for key in store::list_keys(root).unwrap_or_default() {
-        let bytes = std::fs::read(root.join(&key).join("board.json")).unwrap_or_default();
-        let mut hasher = DefaultHasher::new();
-        bytes.hash(&mut hasher);
-        entries.push((key, hasher.finish()));
+        let stamp = std::fs::metadata(root.join(&key).join("board.json")).map(|m| stamp(&m)).unwrap_or(FileStamp {
+            len: 0,
+            modified: None,
+            inode: 0,
+        });
+        entries.push((key, stamp));
     }
     Signature(entries)
 }
@@ -916,19 +932,22 @@ impl App {
         self.feed = Some((rx, wake));
     }
 
-    pub fn poll_feed(&mut self) {
+    /// True when anything arrived, so the screen needs drawing again.
+    pub fn poll_feed(&mut self) -> bool {
         let mut messages = Vec::new();
         if let Some((rx, _)) = &self.feed {
             while let Ok(msg) = rx.try_recv() {
                 messages.push(msg);
             }
         }
+        let any = !messages.is_empty();
         for msg in messages {
             match msg {
                 PrMsg::Started => self.apply_started(),
                 PrMsg::Result(result) => self.apply_prs(result),
             }
         }
+        any
     }
 
     fn refresh_prs(&self) {
@@ -1298,19 +1317,21 @@ impl App {
         self.set_notice(text);
     }
 
-    pub fn poll_runs(&mut self) {
+    pub fn poll_runs(&mut self) -> bool {
         let mut messages = Vec::new();
         if let Some((rx, _)) = &self.run_feed {
             while let Ok(msg) = rx.try_recv() {
                 messages.push(msg);
             }
         }
+        let any = !messages.is_empty();
         for msg in messages {
             match msg {
                 RunMsg::Started => self.apply_run_started(),
                 RunMsg::Result(result) => self.apply_runs(result),
             }
         }
+        any
     }
 
     pub fn apply_run_started(&mut self) {
@@ -2158,11 +2179,12 @@ impl App {
         self.card_drag.as_ref().and_then(|d| d.over).filter(|c| Some(*c) != self.card_drag.as_ref().map(|d| d.col))
     }
 
-    pub fn poll_ready(&mut self) {
+    pub fn poll_ready(&mut self) -> bool {
         let mut msgs = Vec::new();
         while let Ok(msg) = self.launch_done.1.try_recv() {
             msgs.push(msg);
         }
+        let mut changed = !msgs.is_empty();
         for msg in msgs {
             match msg {
                 AppMsg::Notice(text) => self.set_notice(text),
@@ -2185,16 +2207,19 @@ impl App {
                 checked.push(results);
             }
         }
+        changed |= !checked.is_empty();
         for results in checked {
             self.apply_checked(results);
         }
         self.watch_pr_states();
         while let Ok(result) = self.ready_done.1.try_recv() {
+            changed = true;
             match result {
                 Ok(id) => self.set_notice(format!("{id} is ready for review")),
                 Err(e) => self.set_notice(format!("could not mark ready: {e}")),
             }
         }
+        changed
     }
 
     pub fn open_selected_pr(&self) {
@@ -2880,6 +2905,35 @@ mod tests {
         assert_eq!(app.selected_task().unwrap().id, "T2");
         assert_eq!(app.col, 1);
         assert_eq!(ids(&app, Status::Todo), vec!["T1"]);
+    }
+
+    #[test]
+    fn the_board_signature_changes_on_a_rewrite_of_the_same_size_without_reading_the_file() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        let before = signature(root.path());
+        assert_eq!(before, signature(root.path()), "untouched files keep the same signature");
+        let path = root.path().join("PROJ-1/board.json");
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(root.path().join("PROJ-1/tmp"), text.replace("One", "Ona")).unwrap();
+        std::fs::rename(root.path().join("PROJ-1/tmp"), &path).unwrap();
+        assert_ne!(before, signature(root.path()));
+    }
+
+    #[test]
+    fn polling_says_whether_anything_arrived_so_the_screen_is_drawn_only_when_needed() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        let mut app = new(&root);
+        assert!(!app.poll_feed() && !app.poll_runs() && !app.poll_ready(), "an idle board has nothing to draw");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (wake, _wake_rx) = std::sync::mpsc::channel();
+        app.attach_feed(rx, wake);
+        tx.send(PrMsg::Started).unwrap();
+        assert!(app.poll_feed());
+        assert!(!app.poll_feed(), "the message was taken");
+        app.launch_done.0.send(AppMsg::Notice("hi".into())).unwrap();
+        assert!(app.poll_ready());
     }
 
     #[test]
