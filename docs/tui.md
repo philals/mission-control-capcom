@@ -102,7 +102,7 @@ Every open `capcom-tui` (a terminal and the Herdr plugin, say) shares one cache 
 The repo is also a Herdr plugin (`herdr-plugin.toml`) with one action, `capcom.open`: it opens the TUI as an overlay, or focuses the copy already open in the current workspace.
 
 ```
-herdr plugin install philals/mission-control        # from GitHub: builds and installs capcom and capcom-tui (needs Rust)
+herdr plugin install philals/mission-control-capcom        # from GitHub: builds and installs capcom and capcom-tui (needs Rust)
 
 # or, from a checkout of this repo:
 cargo install --path . --locked            # puts capcom-tui on your PATH

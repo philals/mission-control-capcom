@@ -1,8 +1,8 @@
-# Mission Control
+# Mission Control / CAPCOM
 
 **Mission control for story-driven work, with a single voice at the console: `capcom`.** Break a Jira story into PR-sized tasks, plan and implement each one with [Claude Code](https://claude.com/claude-code) skills, and watch all of it (tasks, draft PRs, CI stages, manual deploys) on one live board in your terminal.
 
-[![CI](https://github.com/philals/mission-control/actions/workflows/ci.yml/badge.svg)](https://github.com/philals/mission-control/actions/workflows/ci.yml)
+[![CI](https://github.com/philals/mission-control-capcom/actions/workflows/ci.yml/badge.svg)](https://github.com/philals/mission-control-capcom/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 <p align="center">
@@ -50,7 +50,7 @@ Design notes: [docs/design.md](docs/design.md). Command reference: [docs/referen
 ### 1. Look around (no setup)
 
 ```bash
-git clone https://github.com/philals/mission-control && cd mission-control
+git clone https://github.com/philals/mission-control-capcom && cd mission-control-capcom
 cargo install --path . --locked      # installs `capcom` and `capcom-tui` into ~/.cargo/bin
 capcom-tui --demo                    # invented stories, PRs and runs; nothing is read or written
 ```
