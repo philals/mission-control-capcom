@@ -535,6 +535,8 @@ pub struct App {
     /// Per-PR choices (PR url to on or off) that override the default.
     pub autofix_prs: HashMap<String, bool>,
     pub autocopilot: bool,
+    /// Whether anyone is looking at this pane; the feeds poll slowly when not.
+    pub attention: Arc<crate::attention::Attention>,
     /// Per-PR choices for asking Copilot to review, overriding `autocopilot`.
     pub autocopilot_prs: HashMap<String, bool>,
     pub fix_store: Option<FixStore>,
@@ -621,6 +623,7 @@ impl App {
             autofix_prs: HashMap::new(),
             autocopilot: false,
             autocopilot_prs: HashMap::new(),
+            attention: crate::attention::Attention::new(),
             fix_store: None,
             copilot_requester: Arc::new(gh_request_copilot),
             fix_seen: HashMap::new(),
@@ -1226,6 +1229,26 @@ impl App {
         self.set_notice(format!("auto-fix by default {}", if self.autofix { format!("on: PRs without a tick of their own get the agent asked to fix red CI and Copilot's comments, up to {MAX_FIX_ROUNDS} rounds") } else { "off".into() }));
     }
 
+    /// The terminal window (or Herdr pane) gained or lost focus. Coming back into view refreshes at once.
+    pub fn on_focus(&mut self, gained: bool) {
+        let was_away = self.attention.away();
+        self.attention.set_terminal(gained);
+        if was_away && !self.attention.away() {
+            self.refresh_prs();
+        }
+    }
+
+    pub fn toggle_slow_when_away(&mut self) {
+        let on = !self.attention.slow_when_away();
+        self.attention.set_slow_when_away(on);
+        self.save_settings();
+        self.set_notice(if on {
+            "slow polling when this pane is not in focus: on (GitHub is asked far less often while you are elsewhere)".to_string()
+        } else {
+            "slow polling when away: off (GitHub is asked at the normal pace even when this pane is not in focus)".to_string()
+        });
+    }
+
     pub fn toggle_autocopilot(&mut self) {
         self.autocopilot = !self.autocopilot;
         self.save_settings();
@@ -1484,6 +1507,7 @@ impl App {
             autofix_prs: self.autofix_prs.iter().map(|(u, on)| (u.clone(), *on)).collect(),
             autocopilot: self.autocopilot,
             autocopilot_prs: self.autocopilot_prs.iter().map(|(u, on)| (u.clone(), *on)).collect(),
+            slow_when_away: self.attention.slow_when_away(),
         }
     }
 
@@ -1501,6 +1525,7 @@ impl App {
         self.autofix_prs = saved.autofix_prs.into_iter().collect();
         self.autocopilot = saved.autocopilot;
         self.autocopilot_prs = saved.autocopilot_prs.into_iter().collect();
+        self.attention.set_slow_when_away(saved.slow_when_away);
         self.sync_watched();
         for (slot, weight) in self.col_weights.iter_mut().zip(saved.columns) {
             *slot = weight;
@@ -2409,6 +2434,10 @@ impl App {
                 self.toggle_autocopilot();
                 return false;
             }
+            KeyCode::Char('W') => {
+                self.toggle_slow_when_away();
+                return false;
+            }
             KeyCode::Char('t') if self.focus == Focus::Prs => {
                 self.toggle_pr_autofix(self.pr_sel);
                 return false;
@@ -2906,6 +2935,47 @@ mod tests {
         assert_eq!(app.selected_task().unwrap().id, "T2");
         assert_eq!(app.col, 1);
         assert_eq!(ids(&app, Status::Todo), vec!["T1"]);
+    }
+
+    #[test]
+    fn losing_focus_slows_polling_and_coming_back_wakes_the_feeds_at_once() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        let mut app = new(&root);
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let (wake, woken) = std::sync::mpsc::channel();
+        app.attach_feed(rx, wake);
+        assert!(!app.attention.away());
+        app.on_focus(false);
+        assert!(app.attention.away());
+        assert!(woken.try_recv().is_err(), "leaving asks for nothing");
+        app.on_focus(true);
+        assert!(!app.attention.away());
+        assert!(woken.try_recv().is_ok(), "coming back refreshes now");
+        app.on_focus(true);
+        assert!(woken.try_recv().is_err(), "staying in focus does not");
+    }
+
+    #[test]
+    fn the_slow_polling_switch_is_remembered_and_old_settings_files_leave_it_on() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        let mut app = new(&root);
+        let file = root.path().join("tui.json");
+        app.settings_path = Some(file.clone());
+        app.on_focus(false);
+        assert!(app.attention.away());
+        app.toggle_slow_when_away();
+        assert!(!app.attention.slow_when_away() && !app.attention.away(), "off means the normal pace even when away");
+        let mut again = new(&root);
+        again.settings_path = Some(file.clone());
+        again.load_settings();
+        assert!(!again.attention.slow_when_away(), "remembered");
+        std::fs::write(&file, "{\"split_pct\": 50}").unwrap();
+        let mut old = new(&root);
+        old.settings_path = Some(file);
+        old.load_settings();
+        assert!(old.attention.slow_when_away(), "a settings file from before has it on");
     }
 
     #[test]

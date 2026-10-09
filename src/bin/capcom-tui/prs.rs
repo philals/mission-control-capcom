@@ -657,7 +657,17 @@ pub enum PrMsg {
 }
 
 /// Fetch in a background thread. Send on the returned sender to refresh right away.
+#[cfg(test)]
 pub fn spawn(source: Arc<dyn PrSource>, cadence: Cadence) -> (Receiver<PrMsg>, Sender<()>) {
+    spawn_with(source, cadence, crate::attention::Attention::new())
+}
+
+/// Like `spawn`, and polls more slowly while `attention` says nobody is looking.
+pub fn spawn_with(
+    source: Arc<dyn PrSource>,
+    cadence: Cadence,
+    attention: Arc<crate::attention::Attention>,
+) -> (Receiver<PrMsg>, Sender<()>) {
     let (tx, rx) = mpsc::channel();
     let (wake_tx, wake_rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -671,6 +681,7 @@ pub fn spawn(source: Arc<dyn PrSource>, cadence: Cadence) -> (Receiver<PrMsg>, S
             Some(rate) => throttle(cadence.next(&result), &rate, Utc::now()),
             None => cadence.next(&result),
         };
+        let wait = attention.wait(wait);
         if tx.send(PrMsg::Result(result)).is_err() {
             break;
         }

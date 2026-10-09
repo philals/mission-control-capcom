@@ -1,4 +1,5 @@
 mod app;
+mod attention;
 mod cache;
 mod demo;
 mod finish;
@@ -18,7 +19,7 @@ use anyhow::{bail, Result};
 use app::App;
 use clap::Parser;
 use ratatui::crossterm::event::{
-    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyEventKind, KeyModifiers, MouseButton,
+    self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste, EnableFocusChange, EnableMouseCapture, Event, KeyEventKind, KeyModifiers, MouseButton,
     MouseEventKind,
 };
 use ratatui::crossterm::execute;
@@ -140,6 +141,7 @@ fn main() -> Result<()> {
         bail!("no stories folder: set CAPCOM_ROOT or pass --root DIR");
     };
     let mut app = App::new(root, cli.key);
+    let mut wakes = Vec::new();
     if cli.no_prs {
         app.prs.disabled = true;
     } else {
@@ -149,7 +151,8 @@ fn main() -> Result<()> {
             Some(cache) => Arc::new(prs::SharedSource::new(live, cache, &cli.pr_query, cadence)),
             None => live,
         };
-        let (rx, wake) = prs::spawn(source, cadence);
+        let (rx, wake) = prs::spawn_with(source, cadence, app.attention.clone());
+        wakes.push(wake.clone());
         app.attach_feed(rx, wake);
     }
     if herdr::inside_herdr() {
@@ -179,22 +182,26 @@ fn main() -> Result<()> {
             Some(cache) => Arc::new(runs::SharedSource { inner: live, cache, cadence }),
             None => live,
         };
-        let (rx, wake) = runs::spawn(source, repos.clone(), watched.clone(), cadence);
+        let (rx, wake) = runs::spawn_with(source, repos.clone(), watched.clone(), cadence, app.attention.clone());
+        wakes.push(wake.clone());
         app.attach_runs(rx, wake, repos, watched);
+    }
+    if herdr::inside_herdr() {
+        herdr::watch_focus(app.attention.clone(), wakes);
     }
     run_terminal(&mut app)
 }
 
 fn run_terminal(app: &mut App) -> Result<()> {
     let mut terminal = ratatui::init();
-    execute!(std::io::stdout(), EnableMouseCapture, EnableBracketedPaste, SetTitle(herdr::PANE_TITLE))?;
+    execute!(std::io::stdout(), EnableMouseCapture, EnableBracketedPaste, EnableFocusChange, SetTitle(herdr::PANE_TITLE))?;
     let previous_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(std::io::stdout(), DisableMouseCapture, DisableBracketedPaste);
+        let _ = execute!(std::io::stdout(), DisableMouseCapture, DisableBracketedPaste, DisableFocusChange);
         previous_hook(info);
     }));
     let result = run(&mut terminal, app);
-    let _ = execute!(std::io::stdout(), DisableMouseCapture, DisableBracketedPaste);
+    let _ = execute!(std::io::stdout(), DisableMouseCapture, DisableBracketedPaste, DisableFocusChange);
     ratatui::restore();
     result
 }
@@ -229,6 +236,8 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                     _ => {}
                 },
                 Event::Paste(text) => app.on_paste(&text),
+                Event::FocusGained => app.on_focus(true),
+                Event::FocusLost => app.on_focus(false),
                 _ => {}
             }
         }

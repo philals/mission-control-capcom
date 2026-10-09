@@ -504,11 +504,23 @@ pub enum RunMsg {
 
 /// Fetch in a background thread, always for the repos currently in the shared list.
 /// Send on the returned sender to refresh right away (for example when the list changes).
+#[cfg(test)]
 pub fn spawn(
     source: Arc<dyn RunSource>,
     repos: Arc<Mutex<Vec<String>>>,
     watched: Arc<Mutex<Vec<(String, u64)>>>,
     cadence: RunCadence,
+) -> (Receiver<RunMsg>, Sender<()>) {
+    spawn_with(source, repos, watched, cadence, crate::attention::Attention::new())
+}
+
+/// Like `spawn`, and polls more slowly while `attention` says nobody is looking.
+pub fn spawn_with(
+    source: Arc<dyn RunSource>,
+    repos: Arc<Mutex<Vec<String>>>,
+    watched: Arc<Mutex<Vec<(String, u64)>>>,
+    cadence: RunCadence,
+    attention: Arc<crate::attention::Attention>,
 ) -> (Receiver<RunMsg>, Sender<()>) {
     let (tx, rx) = mpsc::channel();
     let (wake_tx, wake_rx) = mpsc::channel();
@@ -533,7 +545,7 @@ pub fn spawn(
                 source.fetch_watched(&followed, forced).map_err(|e| format!("{e:#}"))
             };
             let result = merge(manual, watching);
-            let wait = cadence.next(&result);
+            let wait = attention.wait(cadence.next(&result));
             if tx.send(RunMsg::Result(result)).is_err() {
                 break;
             }
