@@ -1172,6 +1172,7 @@ mod tests {
             started_at: None,
             completed_at: None,
             url: (name != "docs").then(|| format!("https://github.com/acme/widgets/actions/runs/1/job/{name}")),
+            external: false,
         }
     }
 
@@ -1768,6 +1769,22 @@ mod tests {
     }
 
     #[test]
+    fn red_checks_are_fixed_even_while_another_service_leaves_a_status_pending() {
+        let (_root, mut app, fake, _) = autopilot_app();
+        app.autofix = true;
+        let mut pr = red(1, "sha1");
+        pr.checks.push(Check { name: "UI Tests".into(), workflow: None, state: CheckState::Queued, started_at: None, completed_at: None, url: None, external: true });
+        app.apply_prs(Ok(vec![pr]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 1, "a person-gated status is not CI still running");
+        let mut running = red(2, "sha1");
+        running.checks.push(Check { name: "slow".into(), workflow: None, state: CheckState::Queued, started_at: None, completed_at: None, url: None, external: false });
+        app.apply_prs(Ok(vec![running]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 1, "a queued Actions check still means wait");
+    }
+
+    #[test]
     fn a_pr_that_goes_green_starts_again_from_round_one_next_time() {
         let (_root, mut app, fake, _) = autopilot_app();
         app.autofix = true;
@@ -1804,7 +1821,7 @@ mod tests {
         let mut cancelled = red(1, "a");
         cancelled.feedback.cancelled = vec![cancelled.checks[0].name.clone()];
         let mut running = red(2, "b");
-        running.checks.push(Check { name: "slow".into(), workflow: None, state: CheckState::Running, started_at: None, completed_at: None, url: None });
+        running.checks.push(Check { name: "slow".into(), workflow: None, state: CheckState::Running, started_at: None, completed_at: None, url: None, external: false });
         let mut pending = with_open_comment(mine(3, "c"), "T1");
         pending.feedback.copilot = crate::prs::CopilotState::Requested;
         let mut someone_elses = red(4, "d");

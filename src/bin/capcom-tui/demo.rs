@@ -97,6 +97,7 @@ fn check(workflow: &str, name: &str, state: CheckState, minutes_ago: i64, minute
         started_at: if state == CheckState::Queued { None } else { started },
         completed_at: finished.then(|| ago(minutes_ago - minutes_taken)),
         url: Some("https://github.com/acme/web/actions/runs/1/job/1".into()),
+        external: false,
     }
 }
 

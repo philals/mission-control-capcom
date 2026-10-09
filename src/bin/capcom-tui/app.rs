@@ -2781,6 +2781,7 @@ mod tests {
                 started_at: None,
                 completed_at: None,
                 url: None,
+                external: false,
             }],
         }
     }
@@ -3367,7 +3368,7 @@ mod tests {
             let mut pr = live("acme/api", n, "Add thing");
             pr.is_draft = draft;
             pr.review = review;
-            pr.checks = vec![Check { name: "build".into(), workflow: Some("CI".into()), state: CheckState::Passed, started_at: None, completed_at: None, url: None }];
+            pr.checks = vec![Check { name: "build".into(), workflow: Some("CI".into()), state: CheckState::Passed, started_at: None, completed_at: None, url: None, external: false }];
             pr
         };
         app.apply_prs(Ok(vec![green(1, Review::Required, false)]));

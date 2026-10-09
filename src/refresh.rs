@@ -58,7 +58,11 @@ impl PrLookup for GhLookup {
             bail!("not an https PR url: {url}");
         }
         let mut cmd = Command::new("gh");
-        cmd.args(["pr", "view", url, "--json", "state,isDraft"]);
+        match rest_path(url) {
+            // the REST API has its own budget, so these checks never spend the GraphQL one
+            Some(path) => cmd.args(["api", &path, "--jq", REST_STATE_JQ]),
+            None => cmd.args(["pr", "view", url, "--json", "state,isDraft"]),
+        };
         let Some(out) = run_with_timeout(cmd, GH_TIMEOUT).context("running gh")? else {
             bail!("gh timed out after {}s for {url}", GH_TIMEOUT.as_secs());
         };
@@ -67,6 +71,19 @@ impl PrLookup for GhLookup {
         }
         parse_gh(&String::from_utf8_lossy(&out.stdout))
     }
+}
+
+const REST_STATE_JQ: &str =
+    r#"{state:(if .merged then "MERGED" elif .state=="open" then "OPEN" else "CLOSED" end),isDraft:(.draft // false)}"#;
+
+/// `repos/OWNER/NAME/pulls/N` for a github.com pull request link, else None.
+pub fn rest_path(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://github.com/")?;
+    let mut parts = rest.trim_end_matches('/').split('/');
+    let (owner, repo, kind, number) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
+    let name_ok = |s: &str| !matches!(s, "" | "." | "..") && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    (kind == "pull" && name_ok(owner) && name_ok(repo) && !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()))
+        .then(|| format!("repos/{owner}/{repo}/pulls/{number}"))
 }
 
 pub fn parse_gh(json: &str) -> Result<PrState> {
@@ -307,6 +324,24 @@ mod tests {
         fast.arg("hi");
         let out = run_with_timeout(fast, Duration::from_secs(5)).unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hi");
+    }
+
+    #[test]
+    fn a_pull_request_link_becomes_a_rest_path_and_anything_odd_does_not() {
+        assert_eq!(rest_path("https://github.com/acme/api/pull/12").as_deref(), Some("repos/acme/api/pulls/12"));
+        assert_eq!(rest_path("https://github.com/acme/api/pull/12/").as_deref(), Some("repos/acme/api/pulls/12"));
+        assert_eq!(rest_path("https://github.com/acme/.github/pull/3").as_deref(), Some("repos/acme/.github/pulls/3"));
+        for bad in [
+            "https://github.com/acme/api/issues/12",
+            "https://github.com/acme/api/pull/x",
+            "https://github.com/acme/ap i/pull/1",
+            "https://example.com/acme/api/pull/1",
+            "https://github.com/../api/pull/1",
+            "https://github.com/acme/../pull/1",
+            "--help",
+        ] {
+            assert_eq!(rest_path(bad), None, "{bad}");
+        }
     }
 
     #[test]
