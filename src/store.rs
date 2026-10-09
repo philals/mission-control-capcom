@@ -31,12 +31,22 @@ pub fn board_path(root: &Path, key: &str) -> Result<PathBuf> {
     Ok(story_dir(root, key)?.join("board.json"))
 }
 
+/// The board schema, compiled once: compiling it costs milliseconds and tens of megabytes, and every
+/// board load (the TUI loads each story on every change) needs it.
+fn validator() -> Result<&'static jsonschema::Validator> {
+    static VALIDATOR: std::sync::OnceLock<std::result::Result<jsonschema::Validator, String>> = std::sync::OnceLock::new();
+    VALIDATOR
+        .get_or_init(|| {
+            let schema: serde_json::Value =
+                serde_json::from_str(SCHEMA).map_err(|e| format!("embedded schema is not valid JSON: {e}"))?;
+            jsonschema::options().with_draft(jsonschema::Draft::Draft7).build(&schema).map_err(|e| format!("embedded schema is invalid: {e}"))
+        })
+        .as_ref()
+        .map_err(|e| anyhow::anyhow!("{e}"))
+}
+
 pub fn validate_value(value: &serde_json::Value) -> Result<()> {
-    let schema: serde_json::Value =
-        serde_json::from_str(SCHEMA).context("embedded schema is not valid JSON")?;
-    let validator = jsonschema::validator_for(&schema)
-        .map_err(|e| anyhow::anyhow!("embedded schema is invalid: {e}"))?;
-    let errors: Vec<String> = validator
+    let errors: Vec<String> = validator()?
         .iter_errors(value)
         .map(|e| format!("{} (at {})", e, e.instance_path))
         .collect();
@@ -141,6 +151,53 @@ pub fn list_keys(root: &Path) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sample_board() -> serde_json::Value {
+        serde_json::json!({
+            "schemaVersion": 1,
+            "story": {"key": "PROJ-1", "title": "t", "status": "in_progress"},
+            "tasks": [{
+                "id": "T1", "title": "one", "type": "pr", "status": "todo", "dependsOn": [], "file": "tasks/T1.md",
+                "repos": ["api"], "prs": [{"repo": "api", "url": "https://github.com/acme/api/pull/1", "state": "draft"}],
+                "blocked": null, "sessions": [{"id": "s", "skill": "k", "cwd": "/w", "startedAt": "t"}]
+            }, {
+                "id": "T2", "title": "two", "type": "spike", "status": "planned", "dependsOn": ["T1"], "file": "tasks/T2.md",
+                "repos": [], "prs": []
+            }]
+        })
+    }
+
+    /// The schema is compiled as draft 7 (the 2020-12 meta-schema costs about 50 MB), so check that every
+    /// kind of constraint it uses still rejects what it should, `$ref`s into `$defs` included.
+    #[test]
+    fn the_compiled_schema_accepts_a_good_board_and_rejects_each_kind_of_mistake() {
+        assert!(validate_value(&sample_board()).is_ok());
+        let breaks: Vec<(&str, Box<dyn Fn(&mut serde_json::Value)>)> = vec![
+            ("const", Box::new(|b| b["schemaVersion"] = 2.into())),
+            ("required", Box::new(|b| { b.as_object_mut().unwrap().remove("tasks"); })),
+            ("root additionalProperties", Box::new(|b| b["extra"] = 1.into())),
+            ("story enum", Box::new(|b| b["story"]["status"] = "open".into())),
+            ("task enum", Box::new(|b| b["tasks"][0]["status"] = "in_review".into())),
+            ("task additionalProperties", Box::new(|b| b["tasks"][0]["extra"] = 1.into())),
+            ("task id pattern through a $ref", Box::new(|b| b["tasks"][0]["id"] = "X1".into())),
+            ("dependsOn pattern through a $ref", Box::new(|b| b["tasks"][1]["dependsOn"] = serde_json::json!(["one"]))),
+            ("uniqueItems", Box::new(|b| b["tasks"][1]["dependsOn"] = serde_json::json!(["T1", "T1"]))),
+            ("pr enum through a $ref", Box::new(|b| b["tasks"][0]["prs"][0]["state"] = "open".into())),
+            ("pr required through a $ref", Box::new(|b| { b["tasks"][0]["prs"][0].as_object_mut().unwrap().remove("url"); })),
+            ("minLength", Box::new(|b| b["tasks"][0]["title"] = "".into())),
+            ("type", Box::new(|b| b["tasks"][0]["repos"] = "api".into())),
+            ("blocked needs a reason", Box::new(|b| b["tasks"][0]["blocked"] = serde_json::json!({}))),
+            ("session fields", Box::new(|b| { b["tasks"][0]["sessions"][0].as_object_mut().unwrap().remove("cwd"); })),
+        ];
+        for (what, change) in breaks {
+            let mut board = sample_board();
+            change(&mut board);
+            assert!(validate_value(&board).is_err(), "{what} was accepted");
+        }
+        let mut blocked = sample_board();
+        blocked["tasks"][0]["blocked"] = serde_json::json!({"reason": "waiting"});
+        assert!(validate_value(&blocked).is_ok());
+    }
     use crate::model::Board;
     use tempfile::TempDir;
 
