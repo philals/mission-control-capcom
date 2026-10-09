@@ -13,7 +13,7 @@ use capcom::refresh::run_with_timeout;
 pub const DEFAULT_QUERY: &str =
     "is:pr author:@me state:open archived:false sort:updated-desc -label:icebox";
 
-const GRAPHQL: &str = r#"query($q: String!) { search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { number title url isDraft updatedAt reviewDecision comments { totalCount } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { workflow { name } } } } ... on StatusContext { context state targetUrl } } } } } } } }"#;
+const GRAPHQL: &str = r#"query($q: String!) { search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { number title url isDraft viewerDidAuthor headRefOid updatedAt reviewDecision comments { totalCount } reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on Bot { login } } } } latestReviews(first: 20) { nodes { author { login } state submittedAt } } reviewThreads(first: 50) { nodes { id isResolved isOutdated comments(first: 1) { nodes { author { login } } } } } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { workflow { name } } } } ... on StatusContext { context state targetUrl } } } } } } } }"#;
 
 const GH_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -85,6 +85,68 @@ pub struct PullRequest {
     pub comments: u64,
     pub updated_at: String,
     pub checks: Vec<Check>,
+    /// What GitHub knows about reviews and comments, and who wrote the PR.
+    pub feedback: Feedback,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CopilotState {
+    /// Copilot has not been asked to review (or its review was dismissed).
+    #[default]
+    None,
+    /// A review is requested and has not arrived yet.
+    Requested,
+    Reviewed,
+}
+
+/// One conversation on the PR's diff.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Thread {
+    pub id: String,
+    pub resolved: bool,
+    pub outdated: bool,
+    pub by_copilot: bool,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Feedback {
+    /// You wrote this PR (capcom only ever acts on those).
+    pub mine: bool,
+    pub head: String,
+    pub copilot: CopilotState,
+    pub copilot_reviewed_at: Option<String>,
+    pub threads: Vec<Thread>,
+    /// Checks that were cancelled or superseded rather than failed: they say nothing about the code.
+    pub cancelled: Vec<String>,
+}
+
+pub fn is_copilot(login: &str) -> bool {
+    login.to_ascii_lowercase().contains("copilot")
+}
+
+impl PullRequest {
+    /// Unresolved conversations started by Copilot.
+    pub fn copilot_open(&self) -> Vec<&Thread> {
+        self.feedback.threads.iter().filter(|t| t.by_copilot && !t.resolved).collect()
+    }
+
+    /// Unresolved conversations from anyone.
+    pub fn open_threads(&self) -> usize {
+        self.feedback.threads.iter().filter(|t| !t.resolved).count()
+    }
+
+    /// Checks that really failed, not ones that were cancelled.
+    pub fn real_failures(&self) -> Vec<&Check> {
+        self.checks
+            .iter()
+            .filter(|c| c.state == CheckState::Failed && !self.feedback.cancelled.contains(&c.name))
+            .collect()
+    }
+
+    /// No check is still running or queued.
+    pub fn settled(&self) -> bool {
+        self.checks.iter().all(|c| !matches!(c.state, CheckState::Running | CheckState::Queued))
+    }
 }
 
 impl PullRequest {
@@ -196,6 +258,51 @@ fn parse_check(ctx: &Value) -> Option<Check> {
     }
 }
 
+fn parse_feedback(node: &Value) -> Feedback {
+    let nodes = |pointer: &str| node.pointer(pointer).and_then(Value::as_array).cloned().unwrap_or_default();
+    let requested = nodes("/reviewRequests/nodes").iter().any(|n| text(n, "/requestedReviewer/login").is_some_and(|l| is_copilot(&l)));
+    let reviewed_at = nodes("/latestReviews/nodes")
+        .iter()
+        .filter(|n| text(n, "/author/login").is_some_and(|l| is_copilot(&l)))
+        .filter_map(|n| text(n, "/submittedAt"))
+        .max();
+    let threads = nodes("/reviewThreads/nodes")
+        .iter()
+        .filter_map(|t| {
+            Some(Thread {
+                id: text(t, "/id")?,
+                resolved: t.get("isResolved").and_then(Value::as_bool).unwrap_or(false),
+                outdated: t.get("isOutdated").and_then(Value::as_bool).unwrap_or(false),
+                by_copilot: text(t, "/comments/nodes/0/author/login").is_some_and(|l| is_copilot(&l)),
+            })
+        })
+        .collect();
+    let cancelled = node
+        .pointer("/statusCheckRollup/contexts/nodes")
+        .and_then(Value::as_array)
+        .map(|c| {
+            c.iter()
+                .filter(|n| matches!(text(n, "/conclusion").as_deref(), Some("CANCELLED" | "STALE")))
+                .filter_map(|n| text(n, "/name"))
+                .collect()
+        })
+        .unwrap_or_default();
+    Feedback {
+        mine: node.get("viewerDidAuthor").and_then(Value::as_bool).unwrap_or(false),
+        head: text(node, "/headRefOid").unwrap_or_default(),
+        copilot: if requested {
+            CopilotState::Requested
+        } else if reviewed_at.is_some() {
+            CopilotState::Reviewed
+        } else {
+            CopilotState::None
+        },
+        copilot_reviewed_at: reviewed_at,
+        threads,
+        cancelled,
+    }
+}
+
 fn parse_pr(node: &Value) -> Option<PullRequest> {
     let number = node.get("number")?.as_u64()?;
     let labels = node
@@ -224,6 +331,7 @@ fn parse_pr(node: &Value) -> Option<PullRequest> {
         comments: node.pointer("/comments/totalCount").and_then(Value::as_u64).unwrap_or(0),
         updated_at: text(node, "/updatedAt").unwrap_or_default(),
         checks,
+        feedback: parse_feedback(node),
     })
 }
 
@@ -536,6 +644,7 @@ mod tests {
     fn green_pr(review: Review) -> PullRequest {
         let check = |state| Check { name: "x".into(), workflow: None, state, started_at: None, completed_at: None, url: None };
         PullRequest {
+            feedback: Default::default(),
             repo: "acme/api".into(),
             number: 1,
             title: "t".into(),
@@ -581,6 +690,34 @@ mod tests {
         assert_eq!(check_state("COMPLETED", "ACTION_REQUIRED"), CheckState::Failed);
         assert_eq!(check_state("COMPLETED", "NEUTRAL"), CheckState::Skipped);
         assert_eq!(check_state("COMPLETED", "SKIPPED"), CheckState::Skipped);
+    }
+
+    #[test]
+    fn parse_reads_who_wrote_the_pr_copilots_review_and_the_open_threads() {
+        let json = r#"{"data":{"search":{"nodes":[{"number":7,"title":"t","url":"https://github.com/acme/api/pull/7",
+          "isDraft":false,"viewerDidAuthor":true,"headRefOid":"abc123","updatedAt":"2026-10-09T01:00:00Z","reviewDecision":null,
+          "comments":{"totalCount":0},"repository":{"nameWithOwner":"acme/api"},"labels":{"nodes":[]},
+          "reviewRequests":{"nodes":[]},
+          "latestReviews":{"nodes":[{"author":{"login":"copilot-pull-request-reviewer"},"state":"COMMENTED","submittedAt":"2026-10-09T02:46:40Z"},
+                                    {"author":{"login":"sam"},"state":"APPROVED","submittedAt":"2026-10-09T03:20:05Z"}]},
+          "reviewThreads":{"nodes":[
+            {"id":"T1","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"login":"copilot-pull-request-reviewer"}}]}},
+            {"id":"T2","isResolved":true,"isOutdated":true,"comments":{"nodes":[{"author":{"login":"copilot-pull-request-reviewer"}}]}},
+            {"id":"T3","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"login":"sam"}}]}}]},
+          "statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[
+            {"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"CANCELLED"},
+            {"__typename":"CheckRun","name":"test","status":"COMPLETED","conclusion":"FAILURE"}]}}}]}}}"#;
+        let pr = parse(json).unwrap().remove(0);
+        assert!(pr.feedback.mine);
+        assert_eq!(pr.feedback.head, "abc123");
+        assert_eq!(pr.feedback.copilot, CopilotState::Reviewed);
+        assert_eq!(pr.feedback.copilot_reviewed_at.as_deref(), Some("2026-10-09T02:46:40Z"));
+        assert_eq!(pr.copilot_open().iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["T1"]);
+        assert_eq!(pr.open_threads(), 2, "Copilot's and the person's");
+        assert_eq!(pr.real_failures().iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), vec!["test"], "a cancelled check is not a failure");
+        assert!(pr.settled());
+        let requested = json.replace(r#""reviewRequests":{"nodes":[]}"#, r#""reviewRequests":{"nodes":[{"requestedReviewer":{"__typename":"Bot","login":"copilot-pull-request-reviewer"}}]}"#);
+        assert_eq!(parse(&requested).unwrap()[0].feedback.copilot, CopilotState::Requested);
     }
 
     #[test]

@@ -1186,6 +1186,7 @@ mod tests {
             check("types", CheckState::Passed),
         ];
         let pr = |repo: &str, number: u64, title: &str, checks: Vec<Check>| PullRequest {
+            feedback: Default::default(),
             repo: repo.into(),
             number,
             title: title.into(),
@@ -2492,6 +2493,7 @@ mod tests {
 
     fn pr_with(number: u64, title: &str, review: Review, draft: bool, last: CheckState) -> PullRequest {
         PullRequest {
+            feedback: Default::default(),
             repo: "acme/api".into(),
             number,
             title: title.into(),

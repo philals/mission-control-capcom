@@ -103,6 +103,7 @@ fn check(workflow: &str, name: &str, state: CheckState, minutes_ago: i64, minute
 fn pull_requests() -> Vec<PullRequest> {
     vec![
         PullRequest {
+            feedback: Default::default(),
             repo: "acme/web".into(),
             number: 212,
             title: "feat: DEMO-101 build the notification preferences screen (T2)".into(),
@@ -121,6 +122,7 @@ fn pull_requests() -> Vec<PullRequest> {
             ],
         },
         PullRequest {
+            feedback: Default::default(),
             repo: "acme/worker".into(),
             number: 41,
             title: "feat: DEMO-102 add the audit log export job (T1)".into(),
@@ -137,6 +139,7 @@ fn pull_requests() -> Vec<PullRequest> {
             ],
         },
         PullRequest {
+            feedback: Default::default(),
             repo: "acme/web".into(),
             number: 215,
             title: "docs: explain the notification digest settings".into(),
@@ -154,6 +157,7 @@ fn pull_requests() -> Vec<PullRequest> {
             ],
         },
         PullRequest {
+            feedback: Default::default(),
             repo: "acme/api".into(),
             number: 198,
             title: "fix: retry token refresh when the identity provider is slow".into(),

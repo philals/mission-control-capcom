@@ -457,6 +457,8 @@ pub struct App {
     bell: bool,
     /// PRs that were green and waiting for a reviewer at the last look (None until the first look).
     awaiting: Option<std::collections::HashSet<String>>,
+    /// When Copilot last reviewed each PR, as of the last look (None until the first look).
+    copilot_seen: Option<std::collections::HashMap<String, Option<String>>>,
     /// Tells you outside the terminal that a run finished (title, text).
     pub notify: Arc<dyn Fn(&str, &str) + Send + Sync>,
     /// Width of the PR panel, as a percentage of the bottom area, when both panels are side by side.
@@ -536,6 +538,7 @@ impl App {
             run_states: std::collections::HashMap::new(),
             bell: false,
             awaiting: None,
+            copilot_seen: None,
             notify: Arc::new(|_, _| {}),
             split_pct: DEFAULT_SPLIT,
             bottom_pct: None,
@@ -888,6 +891,7 @@ impl App {
         match result {
             Ok(items) => {
                 self.alert_awaiting_review(&items);
+                self.alert_copilot_reviews(&items);
                 self.prs.items = items;
                 self.prs.error = None;
                 self.prs.updated = Some(now());
@@ -918,6 +922,27 @@ impl App {
             self.set_notice(format!("◉ {}#{} is green and waiting for a reviewer{more}", pr.repo, pr.number));
         }
         self.awaiting = Some(now);
+    }
+
+    /// Tell the user when Copilot's review of one of their PRs arrives. A PR first seen already
+    /// reviewed, and everything on the first look, stays quiet.
+    fn alert_copilot_reviews(&mut self, items: &[PullRequest]) {
+        let now: std::collections::HashMap<String, Option<String>> =
+            items.iter().map(|p| (p.url.clone(), p.feedback.copilot_reviewed_at.clone())).collect();
+        if let Some(before) = self.copilot_seen.take() {
+            for pr in items.iter().filter(|p| p.feedback.mine) {
+                let Some(at) = &pr.feedback.copilot_reviewed_at else {
+                    continue;
+                };
+                if before.get(&pr.url).is_some_and(|was| was.as_ref() != Some(at)) {
+                    let open = pr.copilot_open().len();
+                    let what = if open == 0 { "no comments to address".to_string() } else { format!("{open} comment{} to address", if open == 1 { "" } else { "s" }) };
+                    (self.notify)("CAPCOM: Copilot finished reviewing", &format!("{}#{} · {what}", pr.repo, pr.number));
+                    self.set_notice(format!("Copilot reviewed {}#{}: {what}", pr.repo, pr.number));
+                }
+            }
+        }
+        self.copilot_seen = Some(now);
     }
 
     pub fn attach_runs(
@@ -2377,6 +2402,7 @@ mod tests {
 
     fn live(repo: &str, number: u64, title: &str) -> PullRequest {
         PullRequest {
+            feedback: Default::default(),
             repo: repo.into(),
             number,
             title: title.into(),
@@ -2971,6 +2997,40 @@ mod tests {
         app.apply_prs(Ok(vec![green(1, Review::Required, false), failing]));
         app.apply_prs(Ok(vec![green(1, Review::Required, false), green(2, Review::Required, false)]));
         assert_eq!(told.lock().unwrap().len(), 2, "green again after a failure is news again");
+    }
+
+    #[test]
+    fn copilots_review_arriving_is_announced_once_with_what_is_left_to_address() {
+        use crate::prs::{CopilotState, Thread};
+        let root = TempDir::new().unwrap();
+        let (mut app, _, told) = watching_app(&root);
+        let mut pr = live("acme/api", 5, "Add thing");
+        pr.feedback.mine = true;
+        pr.feedback.copilot = CopilotState::Requested;
+        app.apply_prs(Ok(vec![pr.clone()]));
+        pr.feedback.copilot = CopilotState::Reviewed;
+        pr.feedback.copilot_reviewed_at = Some("2026-10-09T02:00:00Z".into());
+        pr.feedback.threads = vec![
+            Thread { id: "a".into(), resolved: false, outdated: false, by_copilot: true },
+            Thread { id: "b".into(), resolved: true, outdated: false, by_copilot: true },
+            Thread { id: "c".into(), resolved: false, outdated: false, by_copilot: false },
+        ];
+        app.apply_prs(Ok(vec![pr.clone()]));
+        {
+            let told = told.lock().unwrap();
+            assert_eq!(told.len(), 1, "{told:?}");
+            assert!(told[0].0.contains("Copilot finished") && told[0].1.contains("1 comment to address"), "{told:?}");
+        }
+        app.apply_prs(Ok(vec![pr.clone()]));
+        assert_eq!(told.lock().unwrap().len(), 1, "not again on the next poll");
+        pr.feedback.copilot_reviewed_at = Some("2026-10-09T03:00:00Z".into());
+        app.apply_prs(Ok(vec![pr]));
+        assert_eq!(told.lock().unwrap().len(), 2, "a second review is announced too");
+        let mut old = live("acme/api", 6, "Old");
+        old.feedback.mine = true;
+        old.feedback.copilot_reviewed_at = Some("2026-10-01T00:00:00Z".into());
+        app.apply_prs(Ok(vec![old]));
+        assert_eq!(told.lock().unwrap().len(), 2, "a PR first seen already reviewed is not news");
     }
 
     #[test]
