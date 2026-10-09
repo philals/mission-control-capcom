@@ -340,10 +340,8 @@ mod tests {
 
     #[test]
     fn a_connection_that_cannot_be_made_also_falls_back() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        drop(listener);
-        assert!(Client::for_test(&base, Some("t")).send("GET", "user", None).is_none());
+        // a port nothing listens on; a port bound and dropped here could be handed to another test's server
+        assert!(Client::for_test("http://127.0.0.1:1", Some("t")).send("GET", "user", None).is_none());
     }
 
     #[test]
