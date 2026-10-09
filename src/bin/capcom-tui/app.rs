@@ -96,6 +96,8 @@ pub enum Target {
     PrAgent(usize),
     /// The `[ fix ]` button: ask the agent to address this PR now.
     PrFix(usize),
+    /// The `[x] auto-fix` tick box on one PR.
+    PrAuto(usize),
     ToggleAutoFix,
     ToggleAutoCopilot,
     /// The `[DRAFT]` badge of a live draft pull request.
@@ -245,6 +247,8 @@ pub struct PrRow<'a> {
     pub owner: Option<(String, String)>,
     /// Whether `[ agent ]` has anywhere to go: a task, or a session that made this PR.
     pub has_agent: bool,
+    /// Whether auto-fix is on for this PR (None for a PR that is not yours).
+    pub auto: Option<bool>,
     /// There is something an agent could fix on this PR.
     pub can_fix: bool,
     /// What capcom has asked the agent so far, such as `⟳ fix round 2/5 sent 3m ago`.
@@ -510,7 +514,10 @@ pub struct App {
     pub confirm: Option<Confirm>,
     pub agent_ask: Option<AgentAsk>,
     /// Tick boxes: ask the agent to fix red CI and Copilot's comments by itself, and ask Copilot to review new PRs.
+    /// The default for PRs with no tick of their own.
     pub autofix: bool,
+    /// Per-PR choices (PR url to on or off) that override the default.
+    pub autofix_prs: HashMap<String, bool>,
     pub autocopilot: bool,
     pub fix_store: Option<FixStore>,
     pub copilot_requester: Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>,
@@ -593,6 +600,7 @@ impl App {
             confirm: None,
             agent_ask: None,
             autofix: false,
+            autofix_prs: HashMap::new(),
             autocopilot: false,
             fix_store: None,
             copilot_requester: Arc::new(gh_request_copilot),
@@ -941,6 +949,11 @@ impl App {
                 self.alert_awaiting_review(&items);
                 self.alert_copilot_reviews(&items);
                 self.autopilot(&items);
+                let before = self.autofix_prs.len();
+                self.autofix_prs.retain(|url, _| items.iter().any(|p| p.url == *url));
+                if self.autofix_prs.len() != before {
+                    self.save_settings();
+                }
                 self.prs.items = items;
                 self.prs.error = None;
                 self.prs.updated = Some(now());
@@ -1049,7 +1062,7 @@ impl App {
                     }
                 });
             }
-            if !self.autofix {
+            if !self.autofix_on(&pr.url) {
                 continue;
             }
             match Self::fix_needed(pr) {
@@ -1152,10 +1165,32 @@ impl App {
         self.dispatch_fix(&pr, fingerprint, why, true);
     }
 
+    /// Whether the agent is asked to fix this PR by itself: its own tick, else the default.
+    pub fn autofix_on(&self, url: &str) -> bool {
+        self.autofix_prs.get(url).copied().unwrap_or(self.autofix)
+    }
+
+    /// The tick box on one PR: switches auto-fix for that PR only, and looks at it straight away.
+    pub fn toggle_pr_autofix(&mut self, index: usize) {
+        let Some((url, mine, name)) = self.pr_rows().get(index).map(|r| (r.url.clone(), r.auto.is_some(), pr_id(r))) else {
+            return;
+        };
+        if !mine {
+            self.set_notice("you did not write this PR, so capcom leaves it alone".into());
+            return;
+        }
+        let on = !self.autofix_on(&url);
+        self.autofix_prs.insert(url, on);
+        self.save_settings();
+        self.set_notice(format!("auto-fix {} for {name}", if on { format!("on: the agent is asked to fix it, up to {MAX_FIX_ROUNDS} rounds") } else { "off".into() }));
+        let items = self.prs.items.clone();
+        self.autopilot(&items);
+    }
+
     pub fn toggle_autofix(&mut self) {
         self.autofix = !self.autofix;
         self.save_settings();
-        self.set_notice(format!("auto-fix {}", if self.autofix { format!("on: the agent is asked to fix red CI and Copilot's comments, up to {MAX_FIX_ROUNDS} rounds a PR") } else { "off".into() }));
+        self.set_notice(format!("auto-fix by default {}", if self.autofix { format!("on: PRs without a tick of their own get the agent asked to fix red CI and Copilot's comments, up to {MAX_FIX_ROUNDS} rounds") } else { "off".into() }));
     }
 
     pub fn toggle_autocopilot(&mut self) {
@@ -1411,6 +1446,7 @@ impl App {
             auto_sync: self.auto_sync,
             watched: self.watches.clone(),
             autofix: self.autofix,
+            autofix_prs: self.autofix_prs.iter().map(|(u, on)| (u.clone(), *on)).collect(),
             autocopilot: self.autocopilot,
         }
     }
@@ -1426,6 +1462,7 @@ impl App {
         self.auto_sync = saved.auto_sync;
         self.watches = saved.watched;
         self.autofix = saved.autofix;
+        self.autofix_prs = saved.autofix_prs.into_iter().collect();
         self.autocopilot = saved.autocopilot;
         self.sync_watched();
         for (slot, weight) in self.col_weights.iter_mut().zip(saved.columns) {
@@ -1711,6 +1748,7 @@ impl App {
                         board_state: None,
                         owner: self.pr_owner(&p.url),
                         has_agent: self.pr_owner(&p.url).is_some() || self.pr_link(&p.url).is_some(),
+                        auto: p.feedback.mine.then(|| self.autofix_on(&p.url)),
                         can_fix: p.feedback.mine && (Self::fix_needed(p).is_some() || p.open_threads() > 0),
                         fix: self.fix_label(&p.url),
                     })
@@ -1743,6 +1781,7 @@ impl App {
                             board_state: Some(pr.state),
                             owner: self.pr_owner(&pr.url),
                             has_agent: true,
+                            auto: live.filter(|p| p.feedback.mine).map(|p| self.autofix_on(&p.url)),
                             can_fix: live.is_some_and(|p| p.feedback.mine && (Self::fix_needed(p).is_some() || p.open_threads() > 0)),
                             fix: self.fix_label(&pr.url),
                         });
@@ -2329,6 +2368,10 @@ impl App {
                 self.toggle_autocopilot();
                 return false;
             }
+            KeyCode::Char('t') if self.focus == Focus::Prs => {
+                self.toggle_pr_autofix(self.pr_sel);
+                return false;
+            }
             KeyCode::Char('f') if self.focus == Focus::Prs => {
                 self.fix_pr(self.pr_sel);
                 return false;
@@ -2497,6 +2540,12 @@ impl App {
                 self.copy_pr(i);
                 return;
             }
+            Some(Target::PrAuto(i)) => {
+                self.set_focus(Focus::Prs);
+                self.pr_sel = i;
+                self.toggle_pr_autofix(i);
+                return;
+            }
             Some(Target::PrFix(i)) => {
                 self.set_focus(Focus::Prs);
                 self.pr_sel = i;
@@ -2598,7 +2647,7 @@ impl App {
             return;
         }
         let target = self.hit(x, y);
-        if matches!(target, Some(Target::Pr(_) | Target::PrDetails(_) | Target::PrAgent(_) | Target::PrFix(_) | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::PrPanel | Target::OpenCheck(..))) {
+        if matches!(target, Some(Target::Pr(_) | Target::PrDetails(_) | Target::PrAgent(_) | Target::PrFix(_) | Target::PrAuto(_) | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::PrPanel | Target::OpenCheck(..))) {
             self.set_focus(Focus::Prs);
             self.pr_move(delta);
             return;

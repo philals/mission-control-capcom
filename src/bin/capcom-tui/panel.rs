@@ -25,6 +25,22 @@ fn details_width() -> usize {
     DETAILS_BUTTON.chars().count()
 }
 
+fn auto_text(on: bool) -> &'static str {
+    if on {
+        "[x] auto-fix"
+    } else {
+        "[ ] auto-fix"
+    }
+}
+
+fn auto_width(row: &PrRow) -> usize {
+    if row.auto.is_some() {
+        auto_text(true).chars().count() + 1
+    } else {
+        0
+    }
+}
+
 fn fix_width(row: &PrRow) -> usize {
     if row.can_fix {
         FIX_BUTTON.chars().count() + 1
@@ -377,10 +393,15 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
         (false, true) => Style::new().bg(theme::GO_ROW),
         _ => Style::new(),
     };
-    let button = details_width() + 1 + copy_width() + agent_width(row) + fix_width(row);
+    let button = details_width() + 1 + copy_width() + agent_width(row) + fix_width(row) + auto_width(row);
     let mut second = fit(summary, width.saturating_sub(button + 1));
     let gap = width.saturating_sub(width_of(&second) + button);
     second.push(Span::raw(" ".repeat(gap)));
+    if let Some(on) = row.auto {
+        let style = if on { Style::new().fg(theme::GREEN).add_modifier(Modifier::BOLD) } else { Style::new().fg(theme::CYAN) };
+        second.push(Span::styled(auto_text(on), style));
+        second.push(Span::raw(" "));
+    }
     if row.can_fix {
         second.push(Span::styled(FIX_BUTTON, Style::new().fg(theme::CYAN)));
         second.push(Span::raw(" "));
@@ -490,13 +511,17 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         let title_n = title_lines(row, width).len() as u16;
         let agent = agent_width(row) as u16;
         let fix = fix_width(row) as u16;
-        if body.width > button + copy + agent + fix + 1 && h > title_n + 1 {
+        let auto = auto_width(row) as u16;
+        if body.width > button + copy + agent + fix + auto + 1 && h > title_n + 1 {
             let line = y + title_n + 1;
             if agent > 0 {
                 hits.push((Rect::new(body.x + body.width - button - 1 - copy - agent, line, agent - 1, 1), Target::PrAgent(i)));
             }
             if fix > 0 {
                 hits.push((Rect::new(body.x + body.width - button - 1 - copy - agent - fix, line, fix - 1, 1), Target::PrFix(i)));
+            }
+            if auto > 0 {
+                hits.push((Rect::new(body.x + body.width - button - 1 - copy - agent - fix - auto, line, auto - 1, 1), Target::PrAuto(i)));
             }
             hits.push((Rect::new(body.x + body.width - button, line, button, 1), Target::PrDetails(i)));
             hits.push((Rect::new(body.x + body.width - button - 1 - copy, line, copy, 1), Target::PrCopy(i)));
@@ -522,7 +547,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
 /// The tick boxes, drawn on the panel's bottom border so they cost no room.
 fn draw_toggles(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let boxes = [
-        (app.autofix, "auto-fix red CI and Copilot comments (F)", Target::ToggleAutoFix),
+        (app.autofix, "auto-fix PRs by default (F)", Target::ToggleAutoFix),
         (app.autocopilot, "auto-request Copilot (C)", Target::ToggleAutoCopilot),
     ];
     let mut spans: Vec<Span<'static>> = vec![Span::raw(" ")];

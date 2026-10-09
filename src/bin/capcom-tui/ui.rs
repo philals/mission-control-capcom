@@ -1882,15 +1882,62 @@ mod tests {
     }
 
     #[test]
+    fn auto_fix_is_ticked_per_pr_and_a_pr_s_own_tick_beats_the_default() {
+        let (root, mut app, fake, _) = autopilot_app();
+        app.settings_path = Some(root.path().join("tui.json"));
+        let mut other = red(2, "b");
+        other.url = "https://github.com/acme/api/pull/2".into();
+        let mut theirs = red(3, "c");
+        theirs.feedback.mine = false;
+        app.apply_prs(Ok(vec![red(1, "a"), other.clone(), theirs.clone()]));
+        let out = render(&app, 170, 44);
+        assert_eq!(out.matches("[ ] auto-fix").count(), 3, "one per PR of yours, plus the default at the bottom:\n{out}");
+        let (x, y) = find(&out, "[ ] auto-fix");
+        app.on_click(x + 2, y);
+        settle(&mut app);
+        {
+            let asks = fake.resumes.lock().unwrap();
+            assert_eq!(asks.len(), 1, "ticking a red PR asks straight away, for that PR only");
+        }
+        assert!(app.autofix_prs.values().filter(|on| **on).count() == 1 && !app.autofix);
+        app.apply_prs(Ok(vec![red(1, "a2"), other.clone(), theirs.clone()]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 2, "the ticked PR keeps being looked after; the other is left alone");
+        app.autofix = true;
+        let second = app.pr_rows().iter().position(|r| r.url.ends_with("/pull/2")).unwrap();
+        app.toggle_pr_autofix(second);
+        app.apply_prs(Ok(vec![red(1, "a2"), other.clone(), theirs]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 2, "default on, but PR 2 has been switched off by its own tick and PR 3 is not yours");
+        let mut again = App::new(root.path().to_path_buf(), None);
+        again.settings_path = app.settings_path.clone();
+        again.load_settings();
+        assert_eq!(again.autofix_prs.get("https://github.com/acme/api/pull/2"), Some(&false), "remembered");
+        app.apply_prs(Ok(vec![]));
+        assert!(app.autofix_prs.is_empty(), "choices for PRs that are gone are tidied away");
+    }
+
+    #[test]
+    fn the_t_key_toggles_auto_fix_on_the_selected_pr() {
+        let (_root, mut app, _, _) = autopilot_app();
+        app.apply_prs(Ok(vec![mine(1, "a")]));
+        app.focus = Focus::Prs;
+        app.on_key(KeyCode::Char('t'), false);
+        assert!(app.autofix_on("https://github.com/acme/api/pull/1"));
+        app.on_key(KeyCode::Char('t'), false);
+        assert!(!app.autofix_on("https://github.com/acme/api/pull/1"));
+    }
+
+    #[test]
     fn the_tick_boxes_show_their_state_toggle_by_click_and_by_key_and_are_remembered() {
         let (root, mut app, _, _) = autopilot_app();
         app.settings_path = Some(root.path().join("tui.json"));
         app.apply_prs(Ok(vec![mine(1, "a")]));
         let out = render(&app, 170, 44);
-        assert!(out.contains("[ ] auto-fix red CI and Copilot comments (F)") && out.contains("[ ] auto-request Copilot (C)"), "{out}");
-        let (x, y) = find(&out, "auto-fix red CI");
+        assert!(out.contains("[ ] auto-fix PRs by default (F)") && out.contains("[ ] auto-request Copilot (C)"), "{out}");
+        let (x, y) = find(&out, "auto-fix PRs by default");
         app.on_click(x, y);
-        assert!(app.autofix && render(&app, 170, 44).contains("[x] auto-fix"));
+        assert!(app.autofix && render(&app, 170, 44).contains("[x] auto-fix PRs by default"));
         app.on_key(KeyCode::Char('C'), false);
         assert!(app.autocopilot);
         let mut again = App::new(root.path().to_path_buf(), None);
