@@ -6,14 +6,22 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use capcom::refresh::run_with_timeout;
 
 pub const DEFAULT_QUERY: &str =
     "is:pr author:@me state:open archived:false sort:updated-desc -label:icebox";
 
-const GRAPHQL: &str = r#"query($q: String!) { search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { number title url isDraft viewerDidAuthor headRefOid updatedAt reviewDecision comments { totalCount } reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on Bot { login } } } } latestReviews(first: 20) { nodes { author { login } state submittedAt } } reviewThreads(first: 50) { nodes { id isResolved isOutdated comments(first: 1) { nodes { author { login } } } } } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { workflow { name } } } } ... on StatusContext { context state targetUrl } } } } } } } }"#;
+/// The PR list. `reviewThreads` is left out on purpose: GitHub charges for the largest result a
+/// connection could return, so 50 threads each with a comment, on up to 50 PRs, cost about 28 points a poll.
+const GRAPHQL: &str = r#"query($q: String!) { rateLimit { cost remaining resetAt } search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { id number title url isDraft viewerDidAuthor headRefOid updatedAt reviewDecision comments { totalCount } reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on Bot { login } } } } latestReviews(first: 20) { nodes { author { login } state submittedAt } } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { workflow { name } } } } ... on StatusContext { context state targetUrl } } } } } } } }"#;
+
+/// The conversations, asked only for the few PRs Copilot has reviewed.
+const THREADS_GRAPHQL: &str = r#"query($ids: [ID!]!) { rateLimit { cost remaining resetAt } nodes(ids: $ids) { ... on PullRequest { id reviewThreads(first: 50) { nodes { id isResolved isOutdated comments(first: 1) { nodes { author { login } } } } } } } }"#;
+
+/// At most this many PRs get their conversations looked up in one poll.
+const MAX_THREAD_LOOKUPS: usize = 20;
 
 const GH_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -53,6 +61,10 @@ pub struct Check {
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub url: Option<String>,
+    /// A commit status reported by another service (Chromatic, Jenkins), not a GitHub Actions check.
+    /// It can sit "pending" for as long as it takes someone to act, so it never means CI is still busy.
+    #[serde(default)]
+    pub external: bool,
 }
 
 impl Check {
@@ -138,9 +150,15 @@ impl PullRequest {
             .collect()
     }
 
-    /// No check is still running or queued.
+    /// No GitHub Actions check is still running or queued. A status that another service leaves
+    /// pending (such as a visual review waiting for someone to accept it) does not count.
     pub fn settled(&self) -> bool {
-        self.checks.iter().all(|c| !matches!(c.state, CheckState::Running | CheckState::Queued))
+        !self.is_busy()
+    }
+
+    /// Worth polling quickly: an Actions check is running or queued.
+    pub fn is_busy(&self) -> bool {
+        self.checks.iter().any(|c| !c.external && matches!(c.state, CheckState::Running | CheckState::Queued))
     }
 }
 
@@ -157,10 +175,6 @@ impl PullRequest {
             }
         }
         c
-    }
-
-    pub fn is_active(&self) -> bool {
-        self.checks.iter().any(|c| matches!(c.state, CheckState::Running | CheckState::Queued))
     }
 
     /// A PR that is out of draft with every check passed (skipped ones do not count against it), and
@@ -240,6 +254,7 @@ fn parse_check(ctx: &Value) -> Option<Check> {
             started_at: text(ctx, "/startedAt"),
             completed_at: text(ctx, "/completedAt"),
             url: text(ctx, "/detailsUrl"),
+            external: false,
         }),
         "StatusContext" => Some(Check {
             name: text(ctx, "/context")?,
@@ -248,9 +263,25 @@ fn parse_check(ctx: &Value) -> Option<Check> {
             started_at: None,
             completed_at: None,
             url: text(ctx, "/targetUrl"),
+            external: true,
         }),
         _ => None,
     }
+}
+
+fn parse_threads(node: &Value) -> Vec<Thread> {
+    let nodes = node.pointer("/reviewThreads/nodes").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+    nodes
+        .iter()
+        .filter_map(|t| {
+            Some(Thread {
+                id: text(t, "/id")?,
+                resolved: t.get("isResolved").and_then(Value::as_bool).unwrap_or(false),
+                outdated: t.get("isOutdated").and_then(Value::as_bool).unwrap_or(false),
+                by_copilot: text(t, "/comments/nodes/0/author/login").is_some_and(|l| is_copilot(&l)),
+            })
+        })
+        .collect()
 }
 
 fn parse_feedback(node: &Value) -> Feedback {
@@ -261,17 +292,7 @@ fn parse_feedback(node: &Value) -> Feedback {
         .filter(|n| text(n, "/author/login").is_some_and(|l| is_copilot(&l)))
         .filter_map(|n| text(n, "/submittedAt"))
         .max();
-    let threads = nodes("/reviewThreads/nodes")
-        .iter()
-        .filter_map(|t| {
-            Some(Thread {
-                id: text(t, "/id")?,
-                resolved: t.get("isResolved").and_then(Value::as_bool).unwrap_or(false),
-                outdated: t.get("isOutdated").and_then(Value::as_bool).unwrap_or(false),
-                by_copilot: text(t, "/comments/nodes/0/author/login").is_some_and(|l| is_copilot(&l)),
-            })
-        })
-        .collect();
+    let threads = parse_threads(node);
     let cancelled = node
         .pointer("/statusCheckRollup/contexts/nodes")
         .and_then(Value::as_array)
@@ -330,14 +351,84 @@ fn parse_pr(node: &Value) -> Option<PullRequest> {
     })
 }
 
-pub fn parse(json: &str) -> Result<Vec<PullRequest>> {
+/// What GitHub says is left of the hourly GraphQL budget, from the `rateLimit` field of a response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rate {
+    /// Points the last poll cost.
+    pub cost: u32,
+    pub remaining: u32,
+    pub reset_at: DateTime<Utc>,
+}
+
+fn parse_rate(value: &Value) -> Option<Rate> {
+    let limit = value.pointer("/data/rateLimit")?;
+    Some(Rate {
+        cost: limit.get("cost")?.as_u64()? as u32,
+        remaining: limit.get("remaining")?.as_u64()? as u32,
+        reset_at: parse_time(limit.get("resetAt")?.as_str()?)?,
+    })
+}
+
+/// The same from the headers of any GraphQL answer (`gh api -i`), which GitHub sends even when the
+/// budget is spent.
+pub fn parse_rate_headers(output: &str) -> Option<Rate> {
+    let (mut remaining, mut reset) = (None, None);
+    for line in output.lines().take_while(|l| !l.trim().is_empty()) {
+        let lower = line.to_ascii_lowercase();
+        if let Some(v) = lower.strip_prefix("x-ratelimit-remaining:") {
+            remaining = v.trim().parse::<u32>().ok();
+        } else if let Some(v) = lower.strip_prefix("x-ratelimit-reset:") {
+            reset = v.trim().parse::<i64>().ok().and_then(|t| DateTime::from_timestamp(t, 0));
+        }
+    }
+    Some(Rate { cost: 1, remaining: remaining?, reset_at: reset? })
+}
+
+/// How long to wait before the next poll so the budget lasts until it resets: never faster than
+/// `base`, spread out when the budget is running low, and until the reset when it is nearly gone.
+pub fn throttle(base: Duration, rate: &Rate, now: DateTime<Utc>) -> Duration {
+    let to_reset = (rate.reset_at - now).num_seconds().max(0) as u64;
+    let cost = u64::from(rate.cost.max(1));
+    let remaining = u64::from(rate.remaining);
+    if remaining < cost * 2 {
+        return base.max(Duration::from_secs((to_reset + 5).min(3600)));
+    }
+    let calls_left = remaining / cost;
+    base.max(Duration::from_secs(to_reset * 3 / 2 / calls_left))
+}
+
+/// One page of PRs: each with its GraphQL id (to look up its conversations), and the budget left.
+pub struct Page {
+    pub prs: Vec<(Option<String>, PullRequest)>,
+    pub rate: Option<Rate>,
+}
+
+pub fn parse_page(json: &str) -> Result<Page> {
     let value: Value = serde_json::from_str(json).context("parsing gh output")?;
     let Some(nodes) = value.pointer("/data/search/nodes").and_then(Value::as_array) else {
         let message = text(&value, "/errors/0/message")
             .unwrap_or_else(|| "unexpected response from GitHub".to_string());
         bail!("{message}");
     };
-    Ok(nodes.iter().filter_map(parse_pr).collect())
+    let prs = nodes.iter().filter_map(|n| parse_pr(n).map(|pr| (text(n, "/id"), pr))).collect();
+    Ok(Page { prs, rate: parse_rate(&value) })
+}
+
+#[cfg(test)]
+pub fn parse(json: &str) -> Result<Vec<PullRequest>> {
+    Ok(parse_page(json)?.prs.into_iter().map(|(_, pr)| pr).collect())
+}
+
+/// The conversations of each PR in a `nodes(ids: …)` answer, keyed by the PR's id.
+pub fn parse_threads_answer(json: &str) -> Result<(std::collections::HashMap<String, Vec<Thread>>, Option<Rate>)> {
+    let value: Value = serde_json::from_str(json).context("parsing gh output")?;
+    let Some(nodes) = value.pointer("/data/nodes").and_then(Value::as_array) else {
+        let message = text(&value, "/errors/0/message")
+            .unwrap_or_else(|| "unexpected response from GitHub".to_string());
+        bail!("{message}");
+    };
+    let found = nodes.iter().filter_map(|n| Some((text(n, "/id")?, parse_threads(n)))).collect();
+    Ok((found, parse_rate(&value)))
 }
 
 fn parse_time(s: &str) -> Option<DateTime<Utc>> {
@@ -387,6 +478,11 @@ pub trait PrSource: Send + Sync {
     fn fetch_forced(&self) -> Result<Vec<PullRequest>> {
         self.fetch()
     }
+
+    /// The GraphQL budget as of the last call, when this source knows it.
+    fn rate(&self) -> Option<Rate> {
+        None
+    }
 }
 
 /// Shares one fetch between every open copy through the on-disk cache.
@@ -415,6 +511,10 @@ impl SharedSource {
 }
 
 impl PrSource for SharedSource {
+    fn rate(&self) -> Option<Rate> {
+        self.inner.rate()
+    }
+
     fn fetch(&self) -> Result<Vec<PullRequest>> {
         self.get(false)
     }
@@ -426,22 +526,98 @@ impl PrSource for SharedSource {
 
 pub struct GhSource {
     pub query: String,
+    pub rate: Mutex<Option<Rate>>,
 }
 
-impl PrSource for GhSource {
-    fn fetch(&self) -> Result<Vec<PullRequest>> {
+impl GhSource {
+    pub fn new(query: String) -> GhSource {
+        GhSource { query, rate: Mutex::new(None) }
+    }
+
+    fn graphql(&self, query: &str, vars: &[String]) -> Result<String> {
         let mut cmd = Command::new("gh");
-        cmd.args(["api", "graphql", "-f"])
-            .arg(format!("query={GRAPHQL}"))
-            .arg("-f")
-            .arg(format!("q={}", self.query));
+        cmd.args(["api", "graphql", "-f"]).arg(format!("query={query}"));
+        for var in vars {
+            cmd.arg("-f").arg(var);
+        }
         let Some(out) = run_with_timeout(cmd, GH_TIMEOUT).context("running gh")? else {
             bail!("gh timed out after {}s", GH_TIMEOUT.as_secs());
         };
         if !out.status.success() {
             bail!("gh failed: {}", String::from_utf8_lossy(&out.stderr).trim());
         }
-        parse(&String::from_utf8_lossy(&out.stdout))
+        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    }
+
+    fn fetch_all(&self) -> Result<Vec<PullRequest>> {
+        let page = parse_page(&self.graphql(GRAPHQL, &[format!("q={}", self.query)])?)?;
+        let mut rate = page.rate;
+        let mut prs = page.prs;
+        let reviewed: Vec<String> = prs
+            .iter()
+            .filter(|(_, pr)| pr.feedback.copilot == CopilotState::Reviewed)
+            .filter_map(|(id, _)| id.clone())
+            .take(MAX_THREAD_LOOKUPS)
+            .collect();
+        if !reviewed.is_empty() {
+            let vars: Vec<String> = reviewed.iter().map(|id| format!("ids[]={id}")).collect();
+            // the list is still worth showing without the conversations, so only a spent budget stops it
+            match self.graphql(THREADS_GRAPHQL, &vars).and_then(|json| parse_threads_answer(&json)) {
+                Ok((threads, more)) => {
+                    merge_threads(&mut prs, &threads);
+                    if let (Some(first), Some(second)) = (rate.as_mut(), more) {
+                        first.cost += second.cost;
+                        first.remaining = second.remaining;
+                    }
+                }
+                Err(e) if is_rate_limited(&format!("{e:#}")) => return Err(e),
+                Err(_) => {}
+            }
+        }
+        *self.rate.lock().expect("rate lock") = rate;
+        Ok(prs.into_iter().map(|(_, pr)| pr).collect())
+    }
+
+    /// The budget is spent: find out when it comes back, remember it, and say so.
+    fn limited(&self) -> anyhow::Error {
+        let mut cmd = Command::new("gh");
+        cmd.args(["api", "-i", "graphql", "-f", "query={rateLimit{cost}}"]);
+        let probed = run_with_timeout(cmd, GH_TIMEOUT)
+            .ok()
+            .flatten()
+            .and_then(|out| parse_rate_headers(&String::from_utf8_lossy(&out.stdout)));
+        let reset_at = probed.map_or_else(|| Utc::now() + chrono::Duration::minutes(10), |r| r.reset_at);
+        let cost = self.rate.lock().expect("rate lock").map_or(1, |r| r.cost);
+        *self.rate.lock().expect("rate lock") = Some(Rate { cost, remaining: 0, reset_at });
+        anyhow::anyhow!(
+            "GitHub's hourly GraphQL budget is used up; capcom waits until {}",
+            reset_at.with_timezone(&chrono::Local).format("%H:%M")
+        )
+    }
+}
+
+fn merge_threads(prs: &mut [(Option<String>, PullRequest)], threads: &std::collections::HashMap<String, Vec<Thread>>) {
+    for (id, pr) in prs.iter_mut() {
+        if let Some(found) = id.as_ref().and_then(|id| threads.get(id)) {
+            pr.feedback.threads = found.clone();
+        }
+    }
+}
+
+fn is_rate_limited(message: &str) -> bool {
+    message.to_ascii_lowercase().contains("rate limit")
+}
+
+impl PrSource for GhSource {
+    fn rate(&self) -> Option<Rate> {
+        *self.rate.lock().expect("rate lock")
+    }
+
+    fn fetch(&self) -> Result<Vec<PullRequest>> {
+        match self.fetch_all() {
+            Err(e) if is_rate_limited(&format!("{e:#}")) => Err(self.limited()),
+            other => other,
+        }
     }
 }
 
@@ -467,7 +643,7 @@ impl Cadence {
     }
 
     pub fn interval(&self, prs: &[PullRequest]) -> Duration {
-        if prs.iter().any(PullRequest::is_active) {
+        if prs.iter().any(PullRequest::is_busy) {
             self.busy
         } else {
             self.idle
@@ -491,7 +667,10 @@ pub fn spawn(source: Arc<dyn PrSource>, cadence: Cadence) -> (Receiver<PrMsg>, S
             break;
         }
         let result = if forced { source.fetch_forced() } else { source.fetch() }.map_err(|e| format!("{e:#}"));
-        let wait = cadence.next(&result);
+        let wait = match source.rate() {
+            Some(rate) => throttle(cadence.next(&result), &rate, Utc::now()),
+            None => cadence.next(&result),
+        };
         if tx.send(PrMsg::Result(result)).is_err() {
             break;
         }
@@ -551,14 +730,14 @@ mod tests {
         assert_eq!(build.workflow.as_deref(), Some("CI"));
         let lint = a.checks.iter().find(|c| c.name == "lint").unwrap();
         assert_eq!((lint.state, lint.workflow.as_deref()), (CheckState::Passed, None));
-        assert!(a.is_active());
+        assert!(a.is_busy());
         assert_eq!(build.url.as_deref(), Some("https://github.com/acme/widgets/actions/runs/101/job/7"));
         assert_eq!(lint.url, None, "a check without a link has none");
         let legacy = a.checks.iter().find(|c| c.name == "ci/legacy").unwrap();
         assert_eq!(legacy.url.as_deref(), Some("https://ci.example/legacy/1"));
         let b = &prs[1];
         assert!(b.is_draft && b.checks.is_empty() && b.review == Review::None);
-        assert!(!b.is_active());
+        assert!(!b.is_busy());
     }
 
     #[test]
@@ -637,7 +816,7 @@ mod tests {
     }
 
     fn green_pr(review: Review) -> PullRequest {
-        let check = |state| Check { name: "x".into(), workflow: None, state, started_at: None, completed_at: None, url: None };
+        let check = |state| Check { name: "x".into(), workflow: None, state, started_at: None, completed_at: None, url: None, external: false };
         PullRequest {
             feedback: Default::default(),
             repo: "acme/api".into(),
@@ -685,6 +864,102 @@ mod tests {
         assert_eq!(check_state("COMPLETED", "ACTION_REQUIRED"), CheckState::Failed);
         assert_eq!(check_state("COMPLETED", "NEUTRAL"), CheckState::Skipped);
         assert_eq!(check_state("COMPLETED", "SKIPPED"), CheckState::Skipped);
+    }
+
+    fn pr_with(checks: Vec<Check>) -> PullRequest {
+        let mut pr = parse(FIXTURE).unwrap().remove(1);
+        pr.checks = checks;
+        pr
+    }
+
+    fn check_of(name: &str, state: CheckState, external: bool) -> Check {
+        Check { name: name.into(), workflow: None, state, started_at: None, completed_at: None, url: None, external }
+    }
+
+    #[test]
+    fn a_pending_status_from_another_service_does_not_keep_ci_busy_but_a_queued_action_does() {
+        let waiting_for_a_person = pr_with(vec![
+            check_of("unit", CheckState::Failed, false),
+            check_of("UI Tests", CheckState::Queued, true),
+        ]);
+        assert!(waiting_for_a_person.settled() && !waiting_for_a_person.is_busy());
+        let queued = pr_with(vec![check_of("unit", CheckState::Failed, false), check_of("lint", CheckState::Queued, false)]);
+        assert!(!queued.settled() && queued.is_busy());
+        let parsed = parse(FIXTURE).unwrap();
+        let legacy = parsed[0].checks.iter().find(|c| c.name == "ci/legacy").unwrap();
+        assert!(legacy.external, "a StatusContext is another service's status");
+        assert!(!parsed[0].checks.iter().find(|c| c.name == "build").unwrap().external);
+    }
+
+    #[test]
+    fn the_list_query_leaves_out_the_costly_conversations_and_asks_for_the_budget() {
+        assert!(!GRAPHQL.contains("reviewThreads"), "nested conversations multiplied the cost");
+        assert!(GRAPHQL.contains("rateLimit") && GRAPHQL.contains("resetAt"));
+        assert!(THREADS_GRAPHQL.contains("reviewThreads") && THREADS_GRAPHQL.contains("nodes(ids: $ids)"));
+    }
+
+    #[test]
+    fn a_page_carries_each_prs_id_and_the_budget_left() {
+        let json = r#"{"data":{"rateLimit":{"cost":3,"remaining":4900,"resetAt":"2026-10-09T06:00:00Z"},
+          "search":{"nodes":[{"id":"PR_1","number":1,"title":"t","url":"https://github.com/acme/api/pull/1",
+          "repository":{"nameWithOwner":"acme/api"}}]}}}"#;
+        let page = parse_page(json).unwrap();
+        assert_eq!(page.prs[0].0.as_deref(), Some("PR_1"));
+        let rate = page.rate.unwrap();
+        assert_eq!((rate.cost, rate.remaining), (3, 4900));
+        assert_eq!(rate.reset_at.to_rfc3339(), "2026-10-09T06:00:00+00:00");
+    }
+
+    #[test]
+    fn conversations_come_back_keyed_by_pr_and_know_who_started_them() {
+        let json = r#"{"data":{"rateLimit":{"cost":1,"remaining":10,"resetAt":"2026-10-09T06:00:00Z"},"nodes":[
+          {"id":"PR_1","reviewThreads":{"nodes":[
+            {"id":"T1","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"login":"copilot-pull-request-reviewer"}}]}},
+            {"id":"T2","isResolved":true,"isOutdated":false,"comments":{"nodes":[{"author":{"login":"someone"}}]}}]}},
+          null]}}"#;
+        let (threads, rate) = parse_threads_answer(json).unwrap();
+        let found = &threads["PR_1"];
+        assert_eq!(found.len(), 2);
+        assert!(found[0].by_copilot && !found[0].resolved && !found[1].by_copilot && found[1].resolved);
+        assert_eq!(rate.unwrap().remaining, 10);
+    }
+
+    #[test]
+    fn looked_up_conversations_are_attached_to_the_right_pr_and_others_are_left_alone() {
+        let mut prs = vec![
+            (Some("PR_1".to_string()), pr_with(vec![])),
+            (Some("PR_2".to_string()), pr_with(vec![])),
+            (None, pr_with(vec![])),
+        ];
+        let thread = Thread { id: "T1".into(), resolved: false, outdated: false, by_copilot: true };
+        merge_threads(&mut prs, &[("PR_2".to_string(), vec![thread.clone()])].into_iter().collect());
+        assert!(prs[0].1.feedback.threads.is_empty());
+        assert_eq!(prs[1].1.feedback.threads, vec![thread]);
+        assert!(prs[2].1.feedback.threads.is_empty());
+    }
+
+    #[test]
+    fn the_budget_headers_are_read_even_from_a_refused_call() {
+        let out = "HTTP/2.0 200 OK\nX-Ratelimit-Limit: 5000\nX-Ratelimit-Remaining: 0\nX-Ratelimit-Reset: 1791525190\nX-Ratelimit-Resource: graphql\n\n{}";
+        let rate = parse_rate_headers(out).unwrap();
+        assert_eq!((rate.remaining, rate.reset_at.timestamp()), (0, 1791525190));
+        assert!(parse_rate_headers("HTTP/2.0 500\n\n{}").is_none());
+        assert!(is_rate_limited("gh failed: GraphQL: API rate limit already exceeded for user ID 1."));
+        assert!(!is_rate_limited("gh failed: could not resolve host"));
+    }
+
+    #[test]
+    fn polling_slows_down_to_make_the_budget_last_and_stops_when_it_is_spent() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 9, 5, 0, 0).unwrap();
+        let base = Duration::from_secs(5);
+        let rate = |cost, remaining, minutes| Rate { cost, remaining, reset_at: now + chrono::Duration::minutes(minutes) };
+        assert_eq!(throttle(base, &rate(3, 4000, 30), now), base, "plenty left: no change");
+        let low = throttle(base, &rate(3, 90, 30), now);
+        assert!(low >= Duration::from_secs(90), "30 calls left for 30 minutes must not poll every 5 s: {low:?}");
+        let spent = throttle(base, &rate(3, 0, 20), now);
+        assert!(spent >= Duration::from_secs(20 * 60), "wait for the reset: {spent:?}");
+        assert!(throttle(base, &rate(3, 0, 600), now) <= Duration::from_secs(3600), "never longer than an hour");
+        assert_eq!(throttle(base, &rate(3, 0, -5), now), base.max(Duration::from_secs(5)), "a reset in the past waits only a moment");
     }
 
     #[test]
