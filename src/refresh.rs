@@ -57,12 +57,13 @@ impl PrLookup for GhLookup {
         if !url.starts_with("https://") {
             bail!("not an https PR url: {url}");
         }
+        // the REST API has its own budget, so these checks never spend the GraphQL one
+        if let Some(path) = rest_path(url) {
+            let body = crate::github::rest(&path).with_context(|| format!("looking up {url}"))?;
+            return parse_rest_state(&body);
+        }
         let mut cmd = Command::new("gh");
-        match rest_path(url) {
-            // the REST API has its own budget, so these checks never spend the GraphQL one
-            Some(path) => cmd.args(["api", &path, "--jq", REST_STATE_JQ]),
-            None => cmd.args(["pr", "view", url, "--json", "state,isDraft"]),
-        };
+        cmd.args(["pr", "view", url, "--json", "state,isDraft"]);
         let Some(out) = run_with_timeout(cmd, GH_TIMEOUT).context("running gh")? else {
             bail!("gh timed out after {}s for {url}", GH_TIMEOUT.as_secs());
         };
@@ -73,8 +74,22 @@ impl PrLookup for GhLookup {
     }
 }
 
-const REST_STATE_JQ: &str =
-    r#"{state:(if .merged then "MERGED" elif .state=="open" then "OPEN" else "CLOSED" end),isDraft:(.draft // false)}"#;
+/// The state of a pull request from the REST API's `GET /repos/{owner}/{repo}/pulls/{n}`.
+pub fn parse_rest_state(json: &str) -> Result<PrState> {
+    let v: serde_json::Value = serde_json::from_str(json).context("parsing the GitHub answer")?;
+    let Some(state) = v.get("state").and_then(|s| s.as_str()) else {
+        bail!("{}", v.get("message").and_then(|m| m.as_str()).unwrap_or("unexpected answer from GitHub"));
+    };
+    let draft = v.get("draft").and_then(|d| d.as_bool()).unwrap_or(false);
+    let merged = v.get("merged").and_then(|m| m.as_bool()).unwrap_or(false) || v.get("merged_at").is_some_and(|m| !m.is_null());
+    match (state, merged, draft) {
+        (_, true, _) => Ok(PrState::Merged),
+        ("closed", _, _) => Ok(PrState::Closed),
+        ("open", _, true) => Ok(PrState::Draft),
+        ("open", _, false) => Ok(PrState::Ready),
+        (other, _, _) => bail!("unknown PR state {other}"),
+    }
+}
 
 /// `repos/OWNER/NAME/pulls/N` for a github.com pull request link, else None.
 pub fn rest_path(url: &str) -> Option<String> {
@@ -324,6 +339,20 @@ mod tests {
         fast.arg("hi");
         let out = run_with_timeout(fast, Duration::from_secs(5)).unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hi");
+    }
+
+    #[test]
+    fn the_rest_answer_gives_draft_ready_merged_or_closed() {
+        let state = |json: &str| parse_rest_state(json).unwrap();
+        assert_eq!(state(r#"{"state":"open","draft":true,"merged":false}"#), PrState::Draft);
+        assert_eq!(state(r#"{"state":"open","draft":false,"merged":false}"#), PrState::Ready);
+        assert_eq!(state(r#"{"state":"open"}"#), PrState::Ready, "a missing draft flag is ready");
+        assert_eq!(state(r#"{"state":"closed","draft":false,"merged":true,"merged_at":"2026-10-09T01:00:00Z"}"#), PrState::Merged);
+        assert_eq!(state(r#"{"state":"closed","draft":false,"merged":false,"merged_at":null}"#), PrState::Closed);
+        assert_eq!(state(r#"{"state":"closed","merged_at":"2026-10-09T01:00:00Z"}"#), PrState::Merged);
+        let err = parse_rest_state(r#"{"message":"Not Found"}"#).unwrap_err().to_string();
+        assert_eq!(err, "Not Found");
+        assert!(parse_rest_state("nope").is_err());
     }
 
     #[test]

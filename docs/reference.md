@@ -83,7 +83,7 @@ running or queued, every 30 seconds otherwise, or immediately on `r`. Nothing is
 `--no-prs` disables it. See the README for the full key and mouse table.
 
 The manual runs panel lists the GitHub Actions runs you started with the "Run workflow" button
-(`event=workflow_dispatch`, filtered to your login, which is looked up at run time through `gh` and
+(`event=workflow_dispatch`, filtered to your login, which is looked up at run time through the GitHub API and
 kept in memory). The repos come from your open PRs, the PRs recorded on stories, and
 `--deploy-repos` / `CAPCOM_DEPLOY_REPOS` (comma separated `owner/name`). One REST call per repo
 every 10 seconds while any run is active, every 30 seconds otherwise; stages are fetched only for

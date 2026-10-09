@@ -121,8 +121,8 @@ If you use [Herdr](https://herdr.dev), `capcom-tui` run inside a Herdr pane can 
 ## Privacy and security
 
 - **No project data in this repo.** Your stories live in the folder you choose. The examples and tests use invented names (`acme/widgets`, `PROJ-123`, `DEMO-101`).
-- **No tokens.** All GitHub access goes through your existing `gh` login; capcom never reads or stores a credential.
-- **No telemetry, no network of its own.** The only calls are `gh` to GitHub and, when you ask the skills to, your Atlassian MCP server to Jira.
+- **One credential, in memory only.** capcom asks your `gh` for its token (`gh auth token`) once when it starts, keeps it in memory, and sends it only to `api.github.com` over HTTPS. It never writes it to disk or logs it. Calling the API directly instead of starting `gh` for every request is what keeps the board light on CPU (about 2 ms a call instead of about 150 ms). If you would rather capcom never held the token, set `CAPCOM_NO_NATIVE_HTTP=1`: every GitHub call then goes through the `gh` command, as before. Marking a PR ready and asking Copilot for a review always use `gh`.
+- **No telemetry.** The only calls are to GitHub and, when you ask the skills to, your Atlassian MCP server to Jira.
 - **What is written to disk:** the boards (only by `capcom`, under a lock), your panel sizes, and a small cache of GitHub results that is readable only by you and tidied after a day.
 - **Found a vulnerability?** See [SECURITY.md](SECURITY.md).
 

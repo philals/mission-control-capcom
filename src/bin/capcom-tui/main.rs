@@ -207,15 +207,15 @@ fn run_terminal(app: &mut App) -> Result<()> {
 }
 
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
-    // Draw only when something changed, and once a second for the clock and the "ago" times.
+    // Draw only when something changed, and on a slow tick for the "ago" and "running 2m 05s" texts.
     let mut dirty = true;
-    let mut drawn_second = u64::MAX;
+    let mut drawn_tick = u64::MAX;
     loop {
-        let second = app.started.elapsed().as_secs();
-        if dirty || second != drawn_second {
+        let tick = app.started.elapsed().as_secs() / app.tick_seconds();
+        if dirty || tick != drawn_tick {
             terminal.draw(|frame| ui::draw(frame, app))?;
             dirty = false;
-            drawn_second = second;
+            drawn_tick = tick;
         }
         if event::poll(Duration::from_millis(250))? {
             let event = event::read()?;

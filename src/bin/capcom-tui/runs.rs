@@ -5,13 +5,10 @@ use crate::cache::{self, Cache};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::process::Command;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
-use capcom::refresh::run_with_timeout;
 
-const GH_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RunState {
@@ -389,19 +386,8 @@ impl<A: RunApi> RunSource for Fetcher<A> {
     }
 }
 
-fn gh_output(args: &[&str]) -> Result<String> {
-    let mut cmd = Command::new("gh");
-    cmd.args(args);
-    let Some(out) = run_with_timeout(cmd, GH_TIMEOUT).context("running gh")? else {
-        bail!("gh timed out after {}s", GH_TIMEOUT.as_secs());
-    };
-    if !out.status.success() {
-        bail!("gh failed: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).to_string())
-}
-
-/// Talks to GitHub through `gh`. Your login is looked up once, at run time, and kept in memory.
+/// Talks to GitHub from inside capcom (see `capcom::github`). Your login is looked up once, at run
+/// time, and kept in memory.
 #[derive(Default)]
 pub struct GhApi {
     login: OnceLock<Result<String, String>>,
@@ -411,10 +397,13 @@ impl GhApi {
     fn login(&self) -> Result<String> {
         self.login
             .get_or_init(|| {
-                let login = gh_output(&["api", "user", "--jq", ".login"]).map_err(|e| format!("{e:#}"))?;
-                let login = login.trim().to_string();
+                let user = capcom::github::rest("user").map_err(|e| format!("{e:#}"))?;
+                let login = serde_json::from_str::<Value>(&user)
+                    .ok()
+                    .and_then(|v| v.get("login").and_then(Value::as_str).map(str::to_string))
+                    .unwrap_or_default();
                 if login.is_empty() || !login.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-                    return Err("could not read your GitHub login from gh".to_string());
+                    return Err("could not read your GitHub login".to_string());
                 }
                 Ok(login)
             })
@@ -423,24 +412,20 @@ impl GhApi {
     }
 }
 
-/// Only the fields we read: GitHub's full run is about 15 KB, and ten of them come back per repo.
-const RUN_FIELDS: &str = "{id,name,display_title,path,head_branch,status,conclusion,html_url,created_at,run_started_at,updated_at}";
-const RUNS_JQ: &str = "{workflow_runs:[.workflow_runs[]|{id,name,display_title,path,head_branch,status,conclusion,html_url,created_at,run_started_at,updated_at}]}";
-const JOBS_JQ: &str = "{jobs:[.jobs[]|{name,status,conclusion,html_url,started_at,completed_at}]}";
-
 impl RunApi for GhApi {
     fn runs(&self, repo: &str) -> Result<String> {
         let login = self.login()?;
-        let path = format!("repos/{repo}/actions/runs?event=workflow_dispatch&actor={login}&per_page=10&exclude_pull_requests=true");
-        gh_output(&["api", &path, "--jq", RUNS_JQ])
+        capcom::github::rest(&format!(
+            "repos/{repo}/actions/runs?event=workflow_dispatch&actor={login}&per_page=10&exclude_pull_requests=true"
+        ))
     }
 
     fn run(&self, repo: &str, run_id: u64) -> Result<String> {
-        gh_output(&["api", &format!("repos/{repo}/actions/runs/{run_id}"), "--jq", RUN_FIELDS])
+        capcom::github::rest(&format!("repos/{repo}/actions/runs/{run_id}"))
     }
 
     fn jobs(&self, repo: &str, run_id: u64) -> Result<String> {
-        gh_output(&["api", &format!("repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"), "--jq", JOBS_JQ])
+        capcom::github::rest(&format!("repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"))
     }
 }
 
@@ -595,19 +580,6 @@ mod tests {
 
     fn now() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 10, 8, 4, 0, 0).unwrap()
-    }
-
-    #[test]
-    fn the_trimmed_gh_fields_cover_everything_the_parsers_read() {
-        for field in [
-            "id", "name", "display_title", "path", "head_branch", "status", "conclusion", "html_url", "created_at",
-            "run_started_at", "updated_at",
-        ] {
-            assert!(RUNS_JQ.contains(field) && RUN_FIELDS.contains(field), "{field} is trimmed away");
-        }
-        for field in ["name", "status", "conclusion", "html_url", "started_at", "completed_at"] {
-            assert!(JOBS_JQ.contains(field), "{field} is trimmed away");
-        }
     }
 
     #[test]

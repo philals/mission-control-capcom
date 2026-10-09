@@ -1238,16 +1238,15 @@
 <path d="M1263.8 512.0L1263.8 521.0M1259.6 521.0L1263.8 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <g font-family="'DejaVu Sans Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14">
 <text x="33.2" y="21.5" fill="#ff9a3c" font-weight="700" textLength="50.4" lengthAdjust="spacing">CAPCOM</text>
-<text x="100.4" y="21.5" fill="#b8ae94" textLength="84.0" lengthAdjust="spacing">T+00:00:00</text>
-<text x="201.2" y="21.5" fill="#ff806c" font-weight="700" textLength="8.4" lengthAdjust="spacing">●</text>
-<text x="218.0" y="21.5" fill="#ff806c" font-weight="700" textLength="42.0" lengthAdjust="spacing">NO-GO</text>
-<text x="276.8" y="21.5" fill="#f3ebd6" font-weight="700" textLength="58.8" lengthAdjust="spacing">STORIES</text>
-<text x="352.4" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
-<text x="369.2" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">n</text>
-<text x="386.0" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">+</text>
-<text x="402.8" y="21.5" fill="#8cc2ff" textLength="25.2" lengthAdjust="spacing">new</text>
-<text x="436.4" y="21.5" fill="#8cc2ff" textLength="42.0" lengthAdjust="spacing">story</text>
-<text x="486.8" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
+<text x="100.4" y="21.5" fill="#ff806c" font-weight="700" textLength="8.4" lengthAdjust="spacing">●</text>
+<text x="117.2" y="21.5" fill="#ff806c" font-weight="700" textLength="42.0" lengthAdjust="spacing">NO-GO</text>
+<text x="176.0" y="21.5" fill="#f3ebd6" font-weight="700" textLength="58.8" lengthAdjust="spacing">STORIES</text>
+<text x="251.6" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
+<text x="268.4" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">n</text>
+<text x="285.2" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">+</text>
+<text x="302.0" y="21.5" fill="#8cc2ff" textLength="25.2" lengthAdjust="spacing">new</text>
+<text x="335.6" y="21.5" fill="#8cc2ff" textLength="42.0" lengthAdjust="spacing">story</text>
+<text x="386.0" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
 <text x="1083.2" y="21.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">5</text>
 <text x="1100.0" y="21.5" fill="#b8ae94" textLength="42.0" lengthAdjust="spacing">shown</text>
 <text x="1158.8" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
@@ -1326,7 +1325,7 @@
 <text x="285.2" y="327.5" fill="#f3ebd6" font-weight="700" textLength="50.4" lengthAdjust="spacing">review</text>
 <text x="570.8" y="327.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">↻</text>
 <text x="587.6" y="327.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="654.8" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">17:43:27</text>
+<text x="654.8" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">20:15:18</text>
 <text x="755.6" y="327.5" fill="#f3ebd6" font-weight="700" textLength="33.6" lengthAdjust="spacing">RUNS</text>
 <text x="797.6" y="327.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">&amp;</text>
 <text x="814.4" y="327.5" fill="#f3ebd6" font-weight="700" textLength="42.0" lengthAdjust="spacing">WATCH</text>
@@ -1334,7 +1333,7 @@
 <text x="881.6" y="327.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">3</text>
 <text x="1100.0" y="327.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">↻</text>
 <text x="1116.8" y="327.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="1184.0" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">17:43:27</text>
+<text x="1184.0" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">20:15:18</text>
 <text x="33.2" y="345.5" fill="#f3ebd6" font-weight="700" textLength="42.0" lengthAdjust="spacing">docs:</text>
 <text x="83.6" y="345.5" fill="#f3ebd6" font-weight="700" textLength="58.8" lengthAdjust="spacing">explain</text>
 <text x="150.8" y="345.5" fill="#f3ebd6" font-weight="700" textLength="25.2" lengthAdjust="spacing">the</text>
@@ -1528,6 +1527,6 @@
 <text x="772.4" y="543.5" fill="#b8ae94" textLength="33.6" lengthAdjust="spacing">quit</text>
 <text x="814.4" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">]</text>
 <text x="1133.6" y="543.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="1200.8" y="543.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">17:43:27</text>
+<text x="1200.8" y="543.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">20:15:18</text>
 </g>
 </svg>
