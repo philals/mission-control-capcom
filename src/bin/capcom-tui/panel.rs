@@ -25,7 +25,7 @@ fn details_width() -> usize {
 }
 
 fn agent_width(row: &PrRow) -> usize {
-    if row.owner.is_some() {
+    if row.has_agent {
         AGENT_BUTTON.chars().count() + 1
     } else {
         0
@@ -349,7 +349,7 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
     let mut second = fit(summary, width.saturating_sub(button + 1));
     let gap = width.saturating_sub(width_of(&second) + button);
     second.push(Span::raw(" ".repeat(gap)));
-    if row.owner.is_some() {
+    if row.has_agent {
         second.push(Span::styled(AGENT_BUTTON, Style::new().fg(theme::CYAN)));
         second.push(Span::raw(" "));
     }

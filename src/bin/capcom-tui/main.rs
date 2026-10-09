@@ -147,6 +147,9 @@ fn main() -> Result<()> {
         let cwd = cli.workdir.or_else(|| std::env::current_dir().ok()).unwrap_or_default();
         app.herdr = Some(Arc::new(herdr::Cli::new(cwd)));
     }
+    if let Some(config) = capcom::session::config_dir() {
+        app.start_pr_links(config, cache::Cache::default_dir().map(|d| d.join("pr-links.json")));
+    }
     app.settings_path = settings::default_path();
     app.load_settings();
     app.extra_repos = cli.deploy_repos;

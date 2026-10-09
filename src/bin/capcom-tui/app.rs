@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use capcom::session::PrSession;
 use capcom::model::{Board, PrState, Session, Status, StoryStatus, Task};
 use capcom::refresh::{self, GhLookup, Lookups, PrLookup};
 use capcom::rules;
@@ -237,6 +238,8 @@ pub struct PrRow<'a> {
     pub board_state: Option<PrState>,
     /// The story key and task id this PR is recorded on.
     pub owner: Option<(String, String)>,
+    /// Whether `[ agent ]` has anywhere to go: a task, or a session that made this PR.
+    pub has_agent: bool,
 }
 
 fn pr_id(row: &PrRow) -> String {
@@ -351,6 +354,8 @@ pub enum AppMsg {
     Notice(String),
     /// A task finished; ask whether an agent should tidy its worktrees.
     Cleanup(String),
+    /// Which session made which PR, read from Claude Code's transcripts.
+    PrLinks(Vec<(String, PrSession)>),
 }
 
 const NOTICE_SECONDS: u64 = 8;
@@ -460,6 +465,8 @@ pub struct App {
     pub readier: Readier,
     pub confirm: Option<Confirm>,
     pub agent_ask: Option<AgentAsk>,
+    /// (PR url, session that made it) for PRs that are on no task.
+    pub pr_links: Vec<(String, PrSession)>,
     pub herdr: Option<Arc<dyn Herdr>>,
     /// The text typed or pasted into the "new story" box, while it is open.
     pub new_story: Option<String>,
@@ -525,6 +532,7 @@ impl App {
             readier: Arc::new(gh_mark_ready),
             confirm: None,
             agent_ask: None,
+            pr_links: Vec::new(),
             herdr: None,
             new_story: None,
             card_drag: None,
@@ -1162,6 +1170,36 @@ impl App {
         })
     }
 
+    /// The session that made a PR, from the transcripts.
+    fn pr_link(&self, url: &str) -> Option<&PrSession> {
+        self.pr_links.iter().find(|(u, _)| same_url(u, url)).map(|(_, s)| s)
+    }
+
+    /// Read the transcripts for PR links now and then, off the UI thread. The index is kept in
+    /// `index_file`, so a restart reads only what is new.
+    pub fn start_pr_links(&self, config: PathBuf, index_file: Option<PathBuf>) {
+        let done = self.launch_done.0.clone();
+        std::thread::spawn(move || {
+            let mut index = index_file.as_deref().map(capcom::session::Index::load).unwrap_or_default();
+            let mut first = true;
+            loop {
+                let changed = index.refresh(&config);
+                if changed || first {
+                    if changed {
+                        if let Some(file) = &index_file {
+                            let _ = index.save(file);
+                        }
+                    }
+                    if done.send(AppMsg::PrLinks(index.sessions())).is_err() {
+                        return;
+                    }
+                }
+                first = false;
+                std::thread::sleep(std::time::Duration::from_secs(30));
+            }
+        });
+    }
+
     /// The session to resume for a task: the latest implementing one, else the latest of any skill.
     fn session_for(&self, key: &str, task: &str) -> Option<&Session> {
         let story = self.stories.iter().find(|s| s.key == key)?;
@@ -1172,24 +1210,46 @@ impl App {
     /// Go back to the agent that made a PR: focus it if it is still running in Herdr, otherwise
     /// resume its recorded Claude Code session in a new tab.
     pub fn open_pr_agent(&mut self, index: usize) {
-        let Some(owner) = self.pr_rows().get(index).map(|r| r.owner.clone()) else {
+        let Some((owner, url, name)) = self.pr_rows().get(index).map(|r| (r.owner.clone(), r.url.clone(), pr_id(r))) else {
             return;
         };
-        let Some((key, task)) = owner else {
-            self.set_notice("this PR is not recorded on any task, so there is no agent to go back to".into());
+        let linked = self.pr_link(&url).map(|s| (s.session.clone(), s.cwd.clone()));
+        if owner.is_none() && linked.is_none() {
+            self.set_notice("no agent is known for this PR: it is on no task and no Claude Code session recorded making it".into());
             return;
-        };
+        }
         let Some(herdr) = self.herdr.clone() else {
             self.set_notice("not running inside Herdr, so the agent cannot be brought back".into());
             return;
         };
-        let resume = Resume {
-            workspace: key.clone(),
-            label: self.workspace_label(&key),
-            tab: format!("{task} resume"),
-            agent: herdr::agent_name(&[&key, &task, "resume"]),
-            known_agents: ["impl", "cleanup", "plan"].iter().map(|phase| herdr::agent_name(&[&key, &task, phase])).collect(),
-            session: self.session_for(&key, &task).map(|s| (s.id.clone(), s.cwd.clone())),
+        let (resume, task) = match owner {
+            Some((key, task)) => {
+                let recorded = self.session_for(&key, &task).map(|s| (s.id.clone(), s.cwd.clone()));
+                let resume = Resume {
+                    workspace: key.clone(),
+                    label: self.workspace_label(&key),
+                    tab: format!("{task} resume"),
+                    agent: herdr::agent_name(&[&key, &task, "resume"]),
+                    known_agents: ["impl", "cleanup", "plan"].iter().map(|phase| herdr::agent_name(&[&key, &task, phase])).collect(),
+                    // the transcript's own folder is the truth if the session has since moved to a worktree
+                    session: match (recorded, linked) {
+                        (Some((id, _)), Some((linked_id, dir))) if id == linked_id => Some((id, dir)),
+                        (recorded, linked) => recorded.or(linked),
+                    },
+                };
+                (resume, task)
+            }
+            None => {
+                let resume = Resume {
+                    workspace: String::new(),
+                    label: String::new(),
+                    tab: format!("{name} agent"),
+                    agent: herdr::agent_name(&["pr", &name, "resume"]),
+                    known_agents: Vec::new(),
+                    session: linked,
+                };
+                (resume, name)
+            }
         };
         self.set_notice(format!("looking for the agent that made {task}…"));
         let done = self.launch_done.0.clone();
@@ -1230,6 +1290,7 @@ impl App {
                         tag: self.pr_tag(&p.url),
                         board_state: None,
                         owner: self.pr_owner(&p.url),
+                        has_agent: self.pr_owner(&p.url).is_some() || self.pr_link(&p.url).is_some(),
                     })
                     .collect();
                 // PRs that are green and only waiting for a reviewer come first (the order is otherwise kept)
@@ -1259,6 +1320,7 @@ impl App {
                             tag: Some(task.id.clone()),
                             board_state: Some(pr.state),
                             owner: self.pr_owner(&pr.url),
+                            has_agent: true,
                         });
                     }
                 }
@@ -1619,6 +1681,7 @@ impl App {
         for msg in msgs {
             match msg {
                 AppMsg::Notice(text) => self.set_notice(text),
+                AppMsg::PrLinks(links) => self.pr_links = links,
                 AppMsg::Cleanup(id) => {
                     let title = self.board.as_ref().and_then(|b| b.task(&id)).map_or(String::new(), |t| t.title.clone());
                     self.agent_ask = Some(AgentAsk { id, title, kind: AskKind::Cleanup });

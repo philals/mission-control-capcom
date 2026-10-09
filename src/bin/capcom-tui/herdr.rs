@@ -20,6 +20,7 @@ pub struct Launch {
 /// recorded Claude Code session in a new tab.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resume {
+    /// Empty for a PR that is on no task: the tab then opens in the workspace you are in.
     pub workspace: String,
     pub label: String,
     pub tab: String,
@@ -171,6 +172,10 @@ impl Cli {
     fn new_pane(&self, l: &Launch, cwd: Option<&str>) -> Result<String, String> {
         let cwd = cwd.map_or_else(|| self.cwd.to_string_lossy().to_string(), str::to_string);
         let pane = |v: &Value| v["result"]["root_pane"]["pane_id"].as_str().map(str::to_string);
+        if l.workspace.is_empty() {
+            let made = self.call(&["tab", "create", "--label", &l.tab, "--cwd", &cwd, "--no-focus"])?;
+            return pane(&made).ok_or_else(|| "herdr did not return the new tab's pane".to_string());
+        }
         match self.find_workspace(&l.workspace)? {
             Some((id, label)) => {
                 if l.label != l.workspace && label != l.label {
@@ -225,8 +230,10 @@ impl Cli {
             return Err("no session is recorded for this task yet".into());
         };
         let launch = Launch { workspace: r.workspace.clone(), label: r.label.clone(), tab: r.tab.clone(), agent: r.agent.clone(), prompt: String::new() };
-        let dir = std::path::Path::new(cwd).is_dir().then_some(cwd.as_str());
-        let pane = self.new_pane(&launch, dir)?;
+        if !std::path::Path::new(cwd).is_dir() {
+            return Err(format!("its session started in {cwd}, which no longer exists"));
+        }
+        let pane = self.new_pane(&launch, Some(cwd))?;
         self.call(&["agent", "start", &r.agent, "--kind", "claude", "--pane", &pane, "--", "--resume", id])?;
         Ok(Outcome::Started)
     }
@@ -391,6 +398,31 @@ mod tests {
         let calls = calls.lock().unwrap();
         assert!(calls.contains(&format!("tab create --workspace w3 --label T2 resume --cwd {dir} --no-focus")), "{calls:?}");
         assert!(calls.contains(&"agent start proj-123-t2-resume --kind claude --pane w3:p2 -- --resume abc-123".to_string()), "{calls:?}");
+    }
+
+    #[test]
+    fn a_pr_on_no_task_is_resumed_in_a_tab_of_the_current_workspace() {
+        let (cli, calls) = cli(json!([]), json!([]));
+        let dir = std::env::temp_dir().to_string_lossy().to_string();
+        let mut r = resume();
+        r.workspace = String::new();
+        r.known_agents = vec![];
+        r.tab = "api#7 agent".into();
+        r.session = Some(("abc-123".into(), dir.clone()));
+        assert_eq!(cli.resume(&r), Ok(Outcome::Started));
+        let calls = calls.lock().unwrap();
+        assert!(calls.contains(&format!("tab create --label api#7 agent --cwd {dir} --no-focus")), "{calls:?}");
+        assert!(!calls.iter().any(|c| c.starts_with("workspace ")), "{calls:?}");
+    }
+
+    #[test]
+    fn a_session_whose_folder_is_gone_says_so_instead_of_starting_in_the_wrong_place() {
+        let (cli, calls) = cli(json!([]), json!([]));
+        let mut r = resume();
+        r.session = Some(("abc-123".into(), "/no/such/folder".into()));
+        let error = cli.resume(&r).unwrap_err();
+        assert!(error.contains("/no/such/folder") && error.contains("no longer exists"), "{error}");
+        assert!(!calls.lock().unwrap().iter().any(|c| c.starts_with("agent start")));
     }
 
     #[test]

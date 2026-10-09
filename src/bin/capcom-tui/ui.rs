@@ -1670,6 +1670,30 @@ mod tests {
     }
 
     #[test]
+    fn a_pr_made_outside_the_workflow_goes_back_to_the_session_that_linked_it() {
+        let (_root, mut app) = with_prs();
+        let url = "https://github.com/acme/api/pull/99";
+        let fake = with_herdr(&mut app);
+        assert_eq!(render(&app, 170, 44).matches("[ agent ]").count(), 1);
+        app.pr_links = vec![(url.to_string(), capcom::session::PrSession { session: "s-99".into(), cwd: "/w/api/tree".into() })];
+        let out = render(&app, 170, 44);
+        assert_eq!(out.matches("[ agent ]").count(), 2, "the task PR and the linked one:\n{out}");
+        let line = out.lines().position(|l| l.contains("acme/api#99")).unwrap();
+        let (x, y) = out
+            .lines()
+            .enumerate()
+            .skip(line)
+            .find_map(|(y, l)| l.find("[ agent ]").map(|b| (l[..b].chars().count() as u16, y as u16)))
+            .unwrap();
+        app.on_click(x + 2, y);
+        let resumes = resumes_after(&mut app, &fake);
+        assert_eq!(resumes.len(), 1);
+        assert_eq!(resumes[0].session, Some(("s-99".to_string(), "/w/api/tree".to_string())));
+        assert_eq!(resumes[0].workspace, "", "no story, so the tab opens where you are");
+        assert_eq!(resumes[0].tab, "acme/api#99 agent");
+    }
+
+    #[test]
     fn a_pr_on_no_task_says_so_instead_of_starting_anything() {
         let (_root, mut app) = with_prs();
         let fake = with_herdr(&mut app);
@@ -1679,7 +1703,7 @@ mod tests {
         app.focus = Focus::Prs;
         app.pr_sel = unrecorded;
         app.on_key(KeyCode::Char('a'), false);
-        assert!(render(&app, 170, 44).contains("not recorded on any task"));
+        assert!(render(&app, 170, 44).contains("no agent is known for this PR"));
         assert!(fake.resumes.lock().unwrap().is_empty());
     }
 
