@@ -71,15 +71,46 @@ pub fn live_prs(task: &Task) -> Vec<&Pr> {
     task.prs.iter().filter(|p| p.state != PrState::Closed).collect()
 }
 
+/// The repos still waiting for a PR, once per missing PR: a repo listed twice in the task's
+/// `repos` expects two live PRs there.
 pub fn missing_repos(task: &Task) -> Vec<&str> {
     if task.kind != TaskType::Pr {
         return Vec::new();
     }
-    task.repos
+    let mut missing = Vec::new();
+    let mut seen: Vec<&str> = Vec::new();
+    for repo in task.repos.iter().map(String::as_str) {
+        if seen.contains(&repo) {
+            continue;
+        }
+        seen.push(repo);
+        let need = task.repos.iter().filter(|r| *r == repo).count();
+        let have = task.prs.iter().filter(|p| p.repo == repo && p.state != PrState::Closed).count();
+        missing.extend(std::iter::repeat(repo).take(need.saturating_sub(have)));
+    }
+    missing
+}
+
+/// `api ×2, ui`: each repo once, with a count when it is expected more than once.
+pub fn repo_summary(repos: &[String]) -> String {
+    let mut order: Vec<&str> = Vec::new();
+    for repo in repos {
+        if !order.contains(&repo.as_str()) {
+            order.push(repo);
+        }
+    }
+    order
         .iter()
-        .filter(|r| !task.prs.iter().any(|p| &p.repo == *r && p.state != PrState::Closed))
-        .map(String::as_str)
-        .collect()
+        .map(|repo| match repos.iter().filter(|r| r == repo).count() {
+            1 => repo.to_string(),
+            n => format!("{repo} ×{n}"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+pub fn missing_summary(task: &Task) -> String {
+    repo_summary(&missing_repos(task).into_iter().map(str::to_string).collect::<Vec<_>>())
 }
 
 fn allowed(from: Status, to: Status) -> bool {
@@ -126,7 +157,7 @@ pub fn transition(board: &mut Board, id: &str, to: Status) -> Result<()> {
                 }
             }
             Status::Done if !missing_repos(t).is_empty() => {
-                bail!("{id} is waiting for PRs in: {}", missing_repos(t).join(", "));
+                bail!("{id} is waiting for PRs in: {}", missing_summary(t));
             }
             Status::Done => {
                 let live = live_prs(t);
@@ -344,6 +375,35 @@ mod tests {
         ui.state = PrState::Merged;
         prs(&mut b, "T1", vec![pr(PrState::Merged), ui]);
         transition(&mut b, "T1", Status::Done).unwrap();
+    }
+
+    #[test]
+    fn a_repo_listed_twice_needs_two_prs_before_done() {
+        let mut b = board(vec![t("T1", &[])]);
+        b.tasks[0].repos = vec!["r".into(), "r".into(), "ui".into()];
+        set(&mut b, "T1", Status::Implementing);
+        assert_eq!(missing_summary(&b.tasks[0]), "r ×2, ui");
+        let mut ui = pr(PrState::Merged);
+        ui.repo = "ui".into();
+        ui.url = "https://github.com/o/ui/pull/9".into();
+        prs(&mut b, "T1", vec![pr(PrState::Merged), ui.clone()]);
+        assert_eq!(missing_summary(&b.tasks[0]), "r");
+        assert!(err(transition(&mut b, "T1", Status::Done)).contains("waiting for PRs in: r"));
+        let mut second = pr(PrState::Closed);
+        second.url = "https://github.com/o/r/pull/2".into();
+        prs(&mut b, "T1", vec![pr(PrState::Merged), ui.clone(), second.clone()]);
+        assert!(err(transition(&mut b, "T1", Status::Done)).contains("waiting for PRs in: r"), "a closed PR does not count");
+        second.state = PrState::Merged;
+        prs(&mut b, "T1", vec![pr(PrState::Merged), ui, second]);
+        transition(&mut b, "T1", Status::Done).unwrap();
+    }
+
+    #[test]
+    fn repos_are_summarised_with_a_count_for_repeats() {
+        let list = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(repo_summary(&list(&["api", "api", "ui"])), "api ×2, ui");
+        assert_eq!(repo_summary(&list(&["ui", "api"])), "ui, api");
+        assert_eq!(repo_summary(&[]), "");
     }
 
     #[test]

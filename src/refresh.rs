@@ -148,7 +148,7 @@ pub fn apply(board: &mut Board, looked_up: &Lookups) -> Vec<String> {
         if failed || board.tasks[idx].status != Status::Implementing {
             continue;
         }
-        let missing = rules::missing_repos(&board.tasks[idx]).join(", ");
+        let missing = rules::missing_summary(&board.tasks[idx]);
         if !missing.is_empty() {
             messages.push(format!("{id}: waiting for PRs in: {missing}"));
             continue;

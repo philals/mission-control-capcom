@@ -649,12 +649,12 @@ fn status_line(task: &Task, board: &Board, known: &HashMap<String, PrState>) -> 
             let state = |p: &capcom::model::Pr| known.get(&p.url).copied().unwrap_or(p.state);
             let live = task.prs.iter().filter(|p| state(p) != PrState::Closed).count();
             let merged = task.prs.iter().filter(|p| state(p) == PrState::Merged).count();
-            let missing = rules::missing_repos(task);
+            let missing = rules::missing_summary(task);
             if live > 0 && merged == live {
                 if missing.is_empty() {
                     return ("✓ all PRs merged · drag to DONE".into(), theme::GREEN);
                 }
-                return (format!("● merged · needs a PR in {}", missing.join(", ")), theme::YELLOW);
+                return (format!("● merged · needs a PR in {missing}"), theme::YELLOW);
             }
             (format!("● implementing · PRs {merged}/{}", task.prs.len()), theme::CYAN)
         }
@@ -686,7 +686,7 @@ fn draw_card(f: &mut Frame, area: Rect, task: &Task, board: &Board, known: &Hash
     let mut meta = format!(
         "{} · {}",
         task.kind.as_str(),
-        if task.repos.is_empty() { "no repos".to_string() } else { task.repos.join(", ") }
+        if task.repos.is_empty() { "no repos".to_string() } else { rules::repo_summary(&task.repos) }
     );
     if let Some(sub) = &task.jira_subtask {
         meta.push_str(&format!(" · {sub}"));
@@ -740,7 +740,7 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         ]));
     }
     lines.push(row("Depends on", or_none(deps)));
-    lines.push(row("Repos", or_none(task.repos.clone())));
+    lines.push(row("Repos", or_none(if task.repos.is_empty() { vec![] } else { vec![rules::repo_summary(&task.repos)] })));
     lines.push(row("Jira", task.jira_subtask.clone().unwrap_or_else(|| "none".into())));
     if let Some(a) = &task.agent {
         lines.push(row("Agent", format!("{} · {} · since {}", a.pane, a.skill, a.started_at)));
@@ -2094,6 +2094,18 @@ mod tests {
         drag_card(&mut app, "T1 Add endpoint", "DONE");
         wait_for_notice(&mut app, "waiting for PRs in: ui");
         assert_eq!(status_of(&app, "T1"), Status::Implementing);
+    }
+
+    #[test]
+    fn a_repo_listed_twice_shows_a_count_and_waits_for_its_second_pr() {
+        let (_root, mut app) = finishing();
+        store::update(&app.root.clone(), "PROJ-1", |b| ops::set_repos(b, "T1", vec!["api".into(), "api".into()])).unwrap();
+        app.reload();
+        app.pr_states.insert(PR7.to_string(), PrState::Merged);
+        let out = render(&app, 200, 40);
+        assert!(out.contains("pr · api ×2"), "the card shows two PRs are expected:\n{out}");
+        assert!(out.contains("needs a PR in api"), "{out}");
+        assert!(!out.contains("drag to DONE"));
     }
 
     #[test]

@@ -239,6 +239,21 @@ mod tests {
     }
 
     #[test]
+    fn two_prs_in_one_repo_are_both_needed() {
+        let root = board(TaskType::Pr, Some(PrState::Draft));
+        store::update(root.path(), "PROJ-1", |b| ops::set_repos(b, "T1", vec!["api".into(), "api".into()])).unwrap();
+        let second = "https://github.com/acme/api/pull/8";
+        let first_merged = Fake([(U.to_string(), PrState::Merged)].into());
+        let out = finish(root.path(), "PROJ-1", "T1", &first_merged);
+        assert_eq!(status(&root), Status::Implementing);
+        assert!(notices(&out).contains("waiting for PRs in: api"), "{}", notices(&out));
+        store::update(root.path(), "PROJ-1", |b| ops::add_pr(b, "T1", "api", second, PrState::Draft)).unwrap();
+        let both = Fake([(U.to_string(), PrState::Merged), (second.to_string(), PrState::Merged)].into());
+        finish(root.path(), "PROJ-1", "T1", &both);
+        assert_eq!(status(&root), Status::Done);
+    }
+
+    #[test]
     fn worktree_detection_needs_a_path_on_the_line() {
         assert!(mentions_worktrees("- worktree: /work/x"));
         assert!(mentions_worktrees("Worktree at ~/code/x-t1"));
