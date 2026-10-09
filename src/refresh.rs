@@ -100,6 +100,11 @@ pub fn pending_urls(board: &Board) -> Vec<String> {
     urls
 }
 
+/// The PR urls recorded on one task.
+pub fn task_urls(board: &Board, id: &str) -> Vec<String> {
+    board.task(id).map(|t| t.prs.iter().map(|p| p.url.clone()).collect()).unwrap_or_default()
+}
+
 pub fn lookup_all(urls: &[String], lookup: &dyn PrLookup) -> Lookups {
     urls.iter()
         .map(|u| (u.clone(), lookup.state(u).map_err(|e| format!("{e:#}"))))
@@ -192,6 +197,13 @@ mod tests {
         let mut b = Board::new("PROJ-1", "s", None);
         b.tasks = tasks;
         b
+    }
+
+    #[test]
+    fn task_urls_lists_only_that_tasks_prs() {
+        let b = board(vec![task("T1", Status::Implementing, U1, PrState::Draft), task("T2", Status::Implementing, "https://github.com/o/r/pull/2", PrState::Draft)]);
+        assert_eq!(task_urls(&b, "T2"), vec!["https://github.com/o/r/pull/2".to_string()]);
+        assert!(task_urls(&b, "T9").is_empty());
     }
 
     const U1: &str = "https://github.com/o/r/pull/1";

@@ -1,7 +1,9 @@
 mod app;
 mod cache;
+mod finish;
 mod herdr;
 mod panel;
+mod pr_state;
 mod prs;
 mod runs;
 mod runs_ui;
@@ -87,6 +89,9 @@ fn main() -> Result<()> {
     app.settings_path = settings::default_path();
     app.load_settings();
     app.extra_repos = cli.deploy_repos;
+    let (checker_tx, checker_rx) =
+        pr_state::spawn(Arc::new(capcom::refresh::GhLookup), shared_cache(), Duration::from_secs(60));
+    app.attach_checker(checker_tx, checker_rx);
     if cli.no_runs {
         app.runs.disabled = true;
     } else {

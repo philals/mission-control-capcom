@@ -16,6 +16,8 @@ pub struct Settings {
     pub bottom_pct: Option<u16>,
     pub split_pinned: bool,
     pub columns: Vec<u16>,
+    /// Write PR states found on GitHub to the open story's board (merged PRs finish their task).
+    pub auto_sync: bool,
 }
 
 impl Default for Settings {
@@ -25,6 +27,7 @@ impl Default for Settings {
             bottom_pct: None,
             split_pinned: false,
             columns: vec![DEFAULT_COLUMN_WEIGHT; COLUMNS],
+            auto_sync: false,
         }
     }
 }
@@ -99,7 +102,7 @@ mod tests {
     fn settings_survive_a_save_and_a_load() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("tui.json");
-        let saved = Settings { split_pct: 63, bottom_pct: Some(50), split_pinned: true, columns: vec![120, 80, 100, 100, 100, 100] };
+        let saved = Settings { split_pct: 63, bottom_pct: Some(50), split_pinned: true, columns: vec![120, 80, 100, 100, 100, 100], auto_sync: true };
         save(&path, &saved).unwrap();
         assert_eq!(load(&path), saved);
     }

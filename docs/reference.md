@@ -118,3 +118,11 @@ never cached. If the folder cannot be created, the TUI simply polls on its own.
 script finds a pane titled `capcom-tui` in the active workspace (`capcom-tui --find-pane` reads `herdr pane list` JSON on
 stdin), focuses it, or else opens a new overlay with the `KEY=VALUE` lines of `<plugin config dir>/env` passed as
 `--env`. The TUI sets its terminal title to `capcom-tui` at start-up so it can be found again.
+
+### Finishing tasks from the board
+
+`x` or a drop on DONE: `refresh::lookup_all` for the task's PR urls (`gh pr view`), then `refresh::apply` under the board lock
+(`store::update`); a task with no PRs goes through `rules::transition` to done, which refuses a `pr` task without a merged PR.
+`R` does the same for every unfinished task (`capcom refresh KEY`). A background thread rechecks the recorded PRs that the open
+PR list does not show every 60 seconds (merged and closed results are cached for an hour, shared through the cache folder); results
+only feed the card hint unless auto-sync (`S`, saved as `auto_sync` in `tui.json`) is on, in which case changes are applied to the board.

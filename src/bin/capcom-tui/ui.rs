@@ -1,5 +1,5 @@
 use crate::theme;
-use crate::app::{App, BottomTab, Column, Focus, Geometry, Screen, StorySummary, Target, STATUS_ORDER};
+use crate::app::{App, AskKind, BottomTab, Column, Focus, Geometry, Screen, StorySummary, Target, STATUS_ORDER};
 use crate::{panel, runs_ui};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -8,6 +8,7 @@ use ratatui::widgets::{Block, BorderType, Paragraph, Wrap};
 use ratatui::Frame;
 use capcom::model::{Board, PrState, Status, StoryStatus, Task};
 use capcom::rules;
+use std::collections::HashMap;
 
 type Hits = Vec<(Rect, Target)>;
 
@@ -230,6 +231,9 @@ fn brand(app: &App) -> Vec<Span<'static>> {
             Style::new().fg(theme::DIM),
         ),
     ];
+    if app.auto_sync {
+        spans.push(Span::styled("  ⟳ AUTO-SYNC", Style::new().fg(theme::CYAN).add_modifier(Modifier::BOLD)));
+    }
     if app.prs.loaded && !app.prs.disabled {
         let failing = app.prs.items.iter().any(|p| p.counts().failed > 0);
         let (text, color) = if failing { ("NO-GO", theme::RED) } else { ("GO", theme::GREEN) };
@@ -457,6 +461,7 @@ fn draw_new_story(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
 }
 
 const AGENT_YES: &str = "[ y Start an agent ]";
+const CLEANUP_NO: &str = "[ n No agent ]";
 const AGENT_NO: &str = "[ n No agent: just move it to IMPLEMENTING ]";
 
 fn draw_agent_ask(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
@@ -467,24 +472,38 @@ fn draw_agent_ask(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let h = 11.min(area.height);
     let rect = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
     let title = trunc(&format!(" {} {}", ask.id, ask.title), (w as usize).saturating_sub(2));
+    let (heading, question, hint, no_label) = match ask.kind {
+        AskKind::Implement => (
+            " Move to IMPLEMENTING ",
+            " Does an agent need to implement this?",
+            " Say no for work you will do yourself, like a spike or manual testing.",
+            AGENT_NO,
+        ),
+        AskKind::Cleanup => (
+            " Task done ",
+            " Does an agent need to clean up its worktrees?",
+            " Say no if you will tidy them yourself.",
+            CLEANUP_NO,
+        ),
+    };
     let lines = vec![
         Line::raw(""),
         Line::from(Span::styled(title, Style::new().add_modifier(Modifier::BOLD))),
         Line::raw(""),
-        Line::from(Span::raw(" Does an agent need to implement this?")),
-        Line::from(Span::styled(" Say no for work you will do yourself, like a spike or manual testing.", Style::new().fg(theme::DIM))),
+        Line::from(Span::raw(question)),
+        Line::from(Span::styled(hint, Style::new().fg(theme::DIM))),
     ];
     let block = Block::bordered()
         .border_type(BorderType::Double)
         .border_style(Style::new().fg(panel::ORANGE))
-        .title(Span::styled(" Move to IMPLEMENTING ", Style::new().add_modifier(Modifier::BOLD)));
+        .title(Span::styled(heading, Style::new().add_modifier(Modifier::BOLD)));
     theme::clear(f, rect);
     f.render_widget(Paragraph::new(lines).block(block), rect);
     hits.push((rect, Target::Sheet));
     let first = rect.y + 6;
     for (i, (text, target, style)) in [
         (AGENT_YES, Target::AgentYes, Style::new().fg(theme::GREEN).add_modifier(Modifier::BOLD)),
-        (AGENT_NO, Target::AgentNo, Style::new().fg(theme::CYAN).add_modifier(Modifier::BOLD)),
+        (no_label, Target::AgentNo, Style::new().fg(theme::CYAN).add_modifier(Modifier::BOLD)),
         (CANCEL_BUTTON, Target::AgentCancel, Style::new().fg(theme::DIM)),
     ]
     .into_iter()
@@ -513,7 +532,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     let keys: &[&str] = match app.screen {
         Screen::List => &["↑↓ story", "⏎ open", "n new story", "d show/hide done", "Tab PRs/runs", "? help", "q quit"],
         Screen::Board => &[
-            "←→ column", "↑↓ card", "[ ] story", "⏎ detail", "p plan", "i implement", "Tab PRs/runs",
+            "←→ column", "↑↓ card", "[ ] story", "⏎ detail", "p plan", "i implement", "x done", "R sync PRs", "Tab PRs/runs",
             "Esc stories", "? help", "q quit",
         ],
     };
@@ -542,13 +561,13 @@ fn draw_board(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         let half = area.width / 2;
         hits.push((Rect::new(area.x, area.y, half, 1), Target::PrevColumn));
         hits.push((Rect::new(area.x + half, area.y, area.width - half, 1), Target::NextColumn));
-        draw_column(f, area, &cols[i], i, true, false, app.row[i], board, Some(title), hits);
+        draw_column(f, area, &cols[i], i, true, false, app.row[i], board, &app.pr_states, Some(title), hits);
         return;
     }
     let rects = Layout::horizontal((0..cols.len()).map(|i| Constraint::Fill(app.col_weights[i]))).split(area);
     for (i, col) in cols.iter().enumerate() {
         hits.push((rects[i], Target::Column(i)));
-        draw_column(f, rects[i], col, i, i == app.col, app.drop_column() == Some(i), app.row[i], board, None, hits);
+        draw_column(f, rects[i], col, i, i == app.col, app.drop_column() == Some(i), app.row[i], board, &app.pr_states, None, hits);
     }
     for i in 0..cols.len().saturating_sub(1) {
         let strip = Rect::new(rects[i + 1].x.saturating_sub(1), rects[i + 1].y + 1, 2, rects[i + 1].height.saturating_sub(1));
@@ -566,6 +585,7 @@ fn draw_column(
     drop: bool,
     sel_row: usize,
     board: &Board,
+    known: &HashMap<String, PrState>,
     title: Option<String>,
     hits: &mut Hits,
 ) {
@@ -597,7 +617,7 @@ fn draw_column(
             break;
         }
         let rect = Rect::new(inner.x, y, inner.width, CARD_HEIGHT);
-        draw_card(f, rect, task, board, selected && n == sel_row);
+        draw_card(f, rect, task, board, known, selected && n == sel_row);
         hits.push((rect, Target::Card { col: index, row: n }));
     }
 }
@@ -610,7 +630,7 @@ fn unfinished_deps<'a>(task: &'a Task, board: &Board) -> Vec<&'a str> {
         .collect()
 }
 
-fn status_line(task: &Task, board: &Board) -> (String, Color) {
+fn status_line(task: &Task, board: &Board, known: &HashMap<String, PrState>) -> (String, Color) {
     if let Some(b) = &task.blocked {
         return (format!("✖ blocked: {}", b.reason), theme::RED);
     }
@@ -626,7 +646,12 @@ fn status_line(task: &Task, board: &Board) -> (String, Color) {
         Status::Planned => (format!("◷ waits {}", waiting.join(", ")), theme::YELLOW),
         Status::Implementing if task.prs.is_empty() => ("● implementing".into(), theme::CYAN),
         Status::Implementing => {
-            let merged = task.prs.iter().filter(|p| p.state == PrState::Merged).count();
+            let state = |p: &capcom::model::Pr| known.get(&p.url).copied().unwrap_or(p.state);
+            let live = task.prs.iter().filter(|p| state(p) != PrState::Closed).count();
+            let merged = task.prs.iter().filter(|p| state(p) == PrState::Merged).count();
+            if live > 0 && merged == live {
+                return ("✓ all PRs merged · drag to DONE".into(), theme::GREEN);
+            }
             (format!("● implementing · PRs {merged}/{}", task.prs.len()), theme::CYAN)
         }
         Status::Done => ("✓ done".into(), theme::GREEN),
@@ -634,8 +659,8 @@ fn status_line(task: &Task, board: &Board) -> (String, Color) {
     }
 }
 
-fn draw_card(f: &mut Frame, area: Rect, task: &Task, board: &Board, selected: bool) {
-    let (status, tone) = status_line(task, board);
+fn draw_card(f: &mut Frame, area: Rect, task: &Task, board: &Board, known: &HashMap<String, PrState>, selected: bool) {
+    let (status, tone) = status_line(task, board, known);
     let ready_planned = task.status == Status::Planned && rules::is_ready(board, task);
     let border = if selected {
         Style::new().fg(theme::FG).add_modifier(Modifier::BOLD)
@@ -749,6 +774,9 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("o", "open the selected pull request or run in the browser".into()),
         row("n", "new story: paste a Jira key or link to start its breakdown in Herdr".into()),
         row("p / i", "start planning / implementing the selected task in Herdr (or drag the card); a TODO task asks whether an agent is needed".into()),
+        row("x", "finish the selected IMPLEMENTING task: checks its PRs on GitHub, done only if all merged (or drag to DONE)".into()),
+        row("R", "sync the open story's PR states from GitHub (like capcom refresh); merged tasks finish".into()),
+        row("S", "auto-sync on/off: write PR states found on GitHub to the board by itself (saved)".into()),
         row("c", "copy the selected pull request's link".into()),
         row("m", "mark the selected draft ready for review (asks first)".into()),
         row("d", "show or hide completed stories (list)".into()),
@@ -1636,9 +1664,11 @@ mod tests {
     fn other_drops_start_nothing_and_say_why() {
         let (_root, mut app) = sample();
         let fake = with_herdr(&mut app);
-        drag_card(&mut app, "T3 Spike it", "DONE");
+        drag_card(&mut app, "T1 Add endpoint", "TODO");
         assert!(launches_after(&mut app, &fake, 1).is_empty());
         assert!(app.current_notice().unwrap().contains("drop a TODO card on PLANNING"));
+        drag_card(&mut app, "T3 Spike it", "DONE");
+        assert!(app.current_notice().unwrap().contains("cannot be marked done"));
     }
 
     #[test]
@@ -1839,6 +1869,213 @@ mod tests {
         assert_eq!(out.matches('╔').count(), 1);
         let (_root, board) = sample();
         assert!(render(&board, 200, 30).contains('╔'), "the selected board column too");
+    }
+
+    struct FakeLookup(std::collections::HashMap<String, PrState>);
+
+    impl capcom::refresh::PrLookup for FakeLookup {
+        fn state(&self, url: &str) -> anyhow::Result<PrState> {
+            self.0.get(url).copied().ok_or_else(|| anyhow::anyhow!("no such PR"))
+        }
+    }
+
+    const PR7: &str = "https://github.com/acme/api/pull/7";
+
+    fn lookup_says(app: &mut App, state: PrState) {
+        app.pr_lookup = std::sync::Arc::new(FakeLookup([(PR7.to_string(), state)].into()));
+    }
+
+    /// T1 is a pr task in IMPLEMENTING with its PR recorded as a draft; T2 is a spike in IMPLEMENTING.
+    fn finishing() -> (TempDir, App) {
+        let root = TempDir::new().unwrap();
+        ops::init_story(root.path(), "PROJ-1", "Notices", None).unwrap();
+        store::update(root.path(), "PROJ-1", |b| {
+            let dir = root.path().join("PROJ-1");
+            ops::add_task(&dir, b, "Add endpoint", TaskType::Pr, vec![], vec!["api".into()])?;
+            ops::add_task(&dir, b, "Look around", TaskType::Spike, vec![], vec![])?;
+            for id in ["T1", "T2"] {
+                rules::transition(b, id, Status::Implementing)?;
+            }
+            ops::add_pr(b, "T1", "api", PR7, capcom::model::PrState::Draft)?;
+            Ok(())
+        })
+        .unwrap();
+        let mut app = App::new(root.path().to_path_buf(), Some("PROJ-1".into()));
+        lookup_says(&mut app, PrState::Merged);
+        (root, app)
+    }
+
+    fn wait_for_notice(app: &mut App, text: &str) {
+        for _ in 0..300 {
+            app.poll_ready();
+            if app.current_notice().is_some_and(|n| n.contains(text)) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("no notice containing {text:?}, have {:?}", app.current_notice());
+    }
+
+    fn status_of(app: &App, id: &str) -> Status {
+        store::load(&app.root, "PROJ-1").unwrap().task(id).unwrap().status
+    }
+
+    #[test]
+    fn dragging_an_implementing_card_to_done_checks_its_prs_and_finishes_it_when_merged() {
+        let (_root, mut app) = finishing();
+        drag_card(&mut app, "T1 Add endpoint", "DONE");
+        wait_for_notice(&mut app, "T1 is done: every PR is merged");
+        assert_eq!(status_of(&app, "T1"), Status::Done);
+        let b = store::load(&app.root, "PROJ-1").unwrap();
+        assert_eq!(b.task("T1").unwrap().prs[0].state, PrState::Merged, "the recorded PR state is updated too");
+        assert!(app.agent_ask.is_none(), "no worktrees recorded, so no cleanup question");
+    }
+
+    #[test]
+    fn an_unmerged_pr_refuses_and_says_which() {
+        let (_root, mut app) = finishing();
+        lookup_says(&mut app, PrState::Ready);
+        drag_card(&mut app, "T1 Add endpoint", "DONE");
+        wait_for_notice(&mut app, "T1 is not done: #7 is still open");
+        assert_eq!(status_of(&app, "T1"), Status::Implementing);
+    }
+
+    #[test]
+    fn only_implementing_cards_can_be_marked_done_and_x_does_the_same_as_the_drag() {
+        let (_root, mut app) = sample();
+        app.col = 0;
+        app.row[0] = 0;
+        app.on_key(KeyCode::Char('x'), false);
+        assert!(app.current_notice().unwrap().contains("cannot be marked done"), "{:?}", app.current_notice());
+        let (_root, mut app) = finishing();
+        app.col = 3;
+        app.row[3] = 0;
+        app.on_key(KeyCode::Char('x'), false);
+        wait_for_notice(&mut app, "T1 is done");
+        let out = render(&app, 200, 40);
+        assert!(out.contains("DONE"), "{out}");
+    }
+
+    #[test]
+    fn a_spike_with_no_prs_finishes_straight_away() {
+        let (_root, mut app) = finishing();
+        app.col = 3;
+        app.row[3] = 1;
+        assert_eq!(app.selected_task().unwrap().id, "T2");
+        app.on_key(KeyCode::Char('x'), false);
+        wait_for_notice(&mut app, "T2 is done");
+        assert_eq!(status_of(&app, "T2"), Status::Done);
+    }
+
+    #[test]
+    fn a_card_whose_prs_are_all_merged_says_to_drag_it_to_done() {
+        let (_root, mut app) = finishing();
+        let out = render(&app, 200, 40);
+        assert!(!out.contains("drag to DONE"), "the board file still says draft:\n{out}");
+        app.pr_states.insert(PR7.to_string(), PrState::Merged);
+        let out = render(&app, 200, 40);
+        assert!(out.contains("✓ all PRs merged · drag to DONE"), "{out}");
+        assert_readable(&app, 200, 40, "the done hint");
+    }
+
+    #[test]
+    fn the_checker_watches_unlisted_recorded_prs_and_the_hint_appears_without_writing() {
+        let (_root, mut app) = finishing();
+        let (url_tx, url_rx) = std::sync::mpsc::channel();
+        let (res_tx, res_rx) = std::sync::mpsc::channel();
+        app.attach_checker(url_tx, res_rx);
+        app.poll_ready();
+        match url_rx.try_recv() {
+            Ok(crate::pr_state::Msg::Urls(urls)) => assert_eq!(urls, vec![PR7.to_string()]),
+            _ => panic!("the open story's recorded PR should be handed to the checker"),
+        }
+        res_tx.send([(PR7.to_string(), Ok(PrState::Merged))].into()).unwrap();
+        app.poll_ready();
+        assert_eq!(app.pr_states.get(PR7), Some(&PrState::Merged));
+        assert_eq!(status_of(&app, "T1"), Status::Implementing, "auto-sync is off, so the board file is untouched");
+        assert!(render(&app, 200, 40).contains("drag to DONE"));
+    }
+
+    #[test]
+    fn a_pr_that_github_lists_as_open_is_not_looked_up_again() {
+        let (_root, mut app) = finishing();
+        let mut live = feed();
+        live[0].url = PR7.to_string();
+        app.apply_prs(Ok(live));
+        let (url_tx, url_rx) = std::sync::mpsc::channel();
+        let (_res_tx, res_rx) = std::sync::mpsc::channel();
+        app.attach_checker(url_tx, res_rx);
+        app.poll_ready();
+        assert!(url_rx.try_recv().is_err(), "nothing to watch: the open list already knows this PR");
+    }
+
+    #[test]
+    fn with_auto_sync_on_a_merged_pr_finishes_its_task_by_itself() {
+        let (_root, mut app) = finishing();
+        let (url_tx, _url_rx) = std::sync::mpsc::channel();
+        let (res_tx, res_rx) = std::sync::mpsc::channel();
+        app.attach_checker(url_tx, res_rx);
+        app.auto_sync = true;
+        res_tx.send([(PR7.to_string(), Ok(PrState::Merged))].into()).unwrap();
+        app.poll_ready();
+        assert_eq!(status_of(&app, "T1"), Status::Done);
+        assert!(app.current_notice().unwrap().starts_with("auto-sync: T1"), "{:?}", app.current_notice());
+        assert!(render(&app, 200, 40).contains("AUTO-SYNC"));
+        res_tx.send([(PR7.to_string(), Ok(PrState::Merged))].into()).unwrap();
+        app.poll_ready();
+        assert_eq!(status_of(&app, "T1"), Status::Done, "a second result changes nothing");
+    }
+
+    #[test]
+    fn r_syncs_the_whole_story_and_s_toggles_and_saves_auto_sync() {
+        let (_root, mut app) = finishing();
+        app.on_key(KeyCode::Char('R'), false);
+        wait_for_notice(&mut app, "implementing -> done");
+        assert_eq!(status_of(&app, "T1"), Status::Done);
+        let dir = TempDir::new().unwrap();
+        app.settings_path = Some(dir.path().join("tui.json"));
+        app.on_key(KeyCode::Char('S'), false);
+        assert!(app.auto_sync && app.current_notice().unwrap().contains("auto-sync on"));
+        assert!(crate::settings::load(&dir.path().join("tui.json")).auto_sync, "the choice is remembered");
+        app.on_key(KeyCode::Char('S'), false);
+        assert!(!app.auto_sync);
+    }
+
+    #[test]
+    fn recorded_worktrees_lead_to_a_cleanup_question_that_can_start_an_agent_or_not() {
+        let (root, mut app) = finishing();
+        let notes = store::load(&app.root, "PROJ-1").unwrap().task("T1").unwrap().file.clone();
+        std::fs::write(root.path().join("PROJ-1").join(notes), "## Progress\n- worktree: /work/api-t1\n").unwrap();
+        let fake = with_herdr(&mut app);
+        app.col = 3;
+        app.row[3] = 0;
+        app.on_key(KeyCode::Char('x'), false);
+        for _ in 0..300 {
+            app.poll_ready();
+            if app.agent_ask.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let out = render(&app, 200, 40);
+        assert!(out.contains("Does an agent need to clean up its worktrees?") && out.contains("[ n No agent ]"), "{out}");
+        assert_readable(&app, 200, 40, "cleanup question");
+        app.on_key(KeyCode::Char('y'), false);
+        let launches = launches_after(&mut app, &fake, 1);
+        assert_eq!(launches.len(), 1);
+        assert_eq!(launches[0].prompt, "/story-implement-task PROJ-1 T1");
+        assert_eq!((launches[0].tab.as_str(), launches[0].agent.as_str()), ("T1 cleanup", "proj-1-t1-cleanup"));
+    }
+
+    #[test]
+    fn answering_no_to_the_cleanup_question_starts_nothing() {
+        let (_root, mut app) = finishing();
+        let fake = with_herdr(&mut app);
+        app.agent_ask = Some(crate::app::AgentAsk { id: "T1".into(), title: "Add endpoint".into(), kind: AskKind::Cleanup });
+        app.on_key(KeyCode::Char('n'), false);
+        assert!(app.agent_ask.is_none());
+        assert!(launches_after(&mut app, &fake, 1).is_empty());
+        assert_eq!(status_of(&app, "T1"), Status::Implementing, "a cleanup answer never moves a card");
     }
 
     #[test]

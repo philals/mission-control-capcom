@@ -1,4 +1,6 @@
+use crate::finish;
 use crate::herdr::{self, Herdr, Launch, Outcome};
+use crate::pr_state;
 use crate::prs::{PrMsg, PullRequest};
 use crate::runs::{valid_repo, Batch, Run, RunMsg};
 use crate::settings::{self, Settings, COLUMNS, DEFAULT_COLUMN_WEIGHT, DEFAULT_SPLIT, MIN_COLUMN_WEIGHT};
@@ -6,12 +8,14 @@ use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
 use std::cell::{Cell, RefCell};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use capcom::model::{Board, PrState, Status, StoryStatus, Task};
+use capcom::refresh::{self, GhLookup, Lookups, PrLookup};
 use capcom::rules;
 use capcom::store;
 
@@ -279,11 +283,27 @@ pub struct Confirm {
     pub title: String,
 }
 
-/// A TODO task about to be implemented: ask whether an agent should do it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AskKind {
+    /// A TODO task is moving to IMPLEMENTING: should an agent do the work?
+    Implement,
+    /// A task just finished and recorded worktrees: should an agent clean them up?
+    Cleanup,
+}
+
+/// A question about starting an agent for a task.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AgentAsk {
     pub id: String,
     pub title: String,
+    pub kind: AskKind,
+}
+
+/// What a background thread reports back.
+pub enum AppMsg {
+    Notice(String),
+    /// A task finished; ask whether an agent should tidy its worktrees.
+    Cleanup(String),
 }
 
 const NOTICE_SECONDS: u64 = 8;
@@ -397,7 +417,14 @@ pub struct App {
     /// The text typed or pasted into the "new story" box, while it is open.
     pub new_story: Option<String>,
     pub card_drag: Option<CardDrag>,
-    launch_done: (Sender<String>, Receiver<String>),
+    launch_done: (Sender<AppMsg>, Receiver<AppMsg>),
+    pub pr_lookup: Arc<dyn PrLookup + Send + Sync>,
+    /// The real state of recorded PRs, as last found on GitHub (newer than what the board file says).
+    pub pr_states: HashMap<String, PrState>,
+    /// Write PR states found on GitHub to the open story's board.
+    pub auto_sync: bool,
+    checker: Option<(Sender<pr_state::Msg>, Receiver<Lookups>)>,
+    watched: Vec<String>,
     pub started: std::time::Instant,
     notice: Option<(String, std::time::Instant)>,
     ready_done: (Sender<Result<String, String>>, Receiver<Result<String, String>>),
@@ -454,6 +481,11 @@ impl App {
             new_story: None,
             card_drag: None,
             launch_done: std::sync::mpsc::channel(),
+            pr_lookup: Arc::new(GhLookup),
+            pr_states: HashMap::new(),
+            auto_sync: false,
+            checker: None,
+            watched: Vec::new(),
             started: std::time::Instant::now(),
             notice: None,
             ready_done: std::sync::mpsc::channel(),
@@ -802,6 +834,7 @@ impl App {
             bottom_pct: self.bottom_pct,
             split_pinned: self.split_pinned,
             columns: self.col_weights.to_vec(),
+            auto_sync: self.auto_sync,
         }
     }
 
@@ -813,6 +846,7 @@ impl App {
         self.split_pct = saved.split_pct;
         self.bottom_pct = saved.bottom_pct;
         self.split_pinned = saved.split_pinned;
+        self.auto_sync = saved.auto_sync;
         for (slot, weight) in self.col_weights.iter_mut().zip(saved.columns) {
             *slot = weight;
         }
@@ -1101,7 +1135,7 @@ impl App {
                 Ok(Outcome::Focused) => format!("{} is already running: brought to the front", launch.agent),
                 Err(e) => format!("could not start {}: {e}", launch.agent),
             };
-            let _ = done.send(text);
+            let _ = done.send(AppMsg::Notice(text));
         });
     }
 
@@ -1130,14 +1164,22 @@ impl App {
                     return;
                 }
                 if from == Status::Todo {
-                    self.agent_ask = Some(AgentAsk { id: task_id.to_string(), title });
+                    self.agent_ask = Some(AgentAsk { id: task_id.to_string(), title, kind: AskKind::Implement });
                     return;
                 }
                 ("story-implement-task", "implement", "impl")
             }
+            (Status::Implementing, Status::Done) => {
+                self.finish_task(task_id);
+                return;
+            }
             (from, to) if from == to => return,
+            (_, Status::Done) => {
+                self.set_notice(format!("{task_id} is not IMPLEMENTING, so it cannot be marked done"));
+                return;
+            }
             _ => {
-                self.set_notice("drop a TODO card on PLANNING to plan it, or a TODO or PLANNED card on IMPLEMENTING".into());
+                self.set_notice("drop a TODO card on PLANNING, a TODO or PLANNED card on IMPLEMENTING, or an IMPLEMENTING card on DONE".into());
                 return;
             }
         };
@@ -1161,6 +1203,12 @@ impl App {
         let Some(ask) = self.agent_ask.take() else {
             return;
         };
+        if ask.kind == AskKind::Cleanup {
+            if use_agent {
+                self.launch_skill(&ask.id, "story-implement-task", "cleanup", "cleanup");
+            }
+            return;
+        }
         if use_agent {
             self.launch_skill(&ask.id, "story-implement-task", "implement", "impl");
             return;
@@ -1174,6 +1222,109 @@ impl App {
                 self.set_notice(format!("{} moved to implementing, no agent started", ask.id));
             }
             Err(e) => self.set_notice(format!("could not move {}: {e:#}", ask.id)),
+        }
+    }
+
+    /// Check a task's PRs on GitHub and move it to done when they are all merged.
+    pub fn finish_task(&mut self, id: &str) {
+        let Some(key) = self.keys.get(self.story).cloned() else {
+            return;
+        };
+        match self.board.as_ref().and_then(|b| b.task(id)) {
+            Some(t) if t.status == Status::Implementing => {}
+            Some(_) => {
+                self.set_notice(format!("{id} is not IMPLEMENTING, so it cannot be marked done"));
+                return;
+            }
+            None => return,
+        }
+        self.set_notice(format!("checking {id}'s PRs on GitHub…"));
+        let id = id.to_string();
+        self.in_background(move |root, lookup| finish::finish(root, &key, &id, lookup));
+    }
+
+    pub fn finish_selected(&mut self) {
+        if let Some(id) = self.selected_task().map(|t| t.id.clone()) {
+            self.finish_task(&id);
+        }
+    }
+
+    /// `capcom refresh` for the open story: record every PR's state, finish what is merged.
+    pub fn sync_story_now(&mut self) {
+        let Some(key) = self.keys.get(self.story).cloned() else {
+            return;
+        };
+        self.set_notice(format!("syncing {key}'s PRs with GitHub…"));
+        self.in_background(move |root, lookup| finish::sync_story(root, &key, lookup));
+    }
+
+    fn in_background(&self, work: impl FnOnce(&Path, &dyn PrLookup) -> Vec<AppMsg> + Send + 'static) {
+        let (root, lookup, done) = (self.root.clone(), self.pr_lookup.clone(), self.launch_done.0.clone());
+        std::thread::spawn(move || {
+            for msg in work(&root, lookup.as_ref()) {
+                let _ = done.send(msg);
+            }
+        });
+    }
+
+    pub fn toggle_auto_sync(&mut self) {
+        self.auto_sync = !self.auto_sync;
+        self.save_settings();
+        self.set_notice(format!("auto-sync {}", if self.auto_sync { "on: merged PRs finish their tasks" } else { "off" }));
+        if self.auto_sync {
+            if let Some((tx, _)) = &self.checker {
+                let _ = tx.send(pr_state::Msg::Refresh);
+            }
+        }
+    }
+
+    pub fn attach_checker(&mut self, tx: Sender<pr_state::Msg>, rx: Receiver<Lookups>) {
+        self.checker = Some((tx, rx));
+    }
+
+    /// The recorded PRs of the open story that GitHub's open list cannot vouch for.
+    fn wanted_urls(&self) -> Vec<String> {
+        let Some(board) = &self.board else {
+            return Vec::new();
+        };
+        refresh::pending_urls(board)
+            .into_iter()
+            .filter(|u| !self.prs.items.iter().any(|p| same_url(&p.url, u)))
+            .collect()
+    }
+
+    fn watch_pr_states(&mut self) {
+        let wanted = self.wanted_urls();
+        if wanted == self.watched {
+            return;
+        }
+        self.watched = wanted.clone();
+        if let Some((tx, _)) = &self.checker {
+            let _ = tx.send(pr_state::Msg::Urls(wanted));
+        }
+    }
+
+    fn apply_checked(&mut self, results: Lookups) {
+        for (url, state) in &results {
+            if let Ok(state) = state {
+                self.pr_states.insert(url.clone(), *state);
+            }
+        }
+        if !self.auto_sync {
+            return;
+        }
+        let (Some(key), Some(board)) = (self.keys.get(self.story).cloned(), self.board.clone()) else {
+            return;
+        };
+        let mut trial = board;
+        let changes: Vec<String> = refresh::apply(&mut trial, &results).into_iter().filter(|m| m.contains("->")).collect();
+        if changes.is_empty() {
+            return;
+        }
+        if let Ok(messages) = store::update(&self.root, &key, |b| Ok(refresh::apply(b, &results))) {
+            self.reload();
+            let shown: Vec<String> = messages.into_iter().filter(|m| m.contains("->")).collect();
+            self.set_notice(format!("auto-sync: {}", shown.join("; ")));
         }
     }
 
@@ -1220,13 +1371,29 @@ impl App {
     }
 
     pub fn poll_ready(&mut self) {
-        let mut texts = Vec::new();
-        while let Ok(text) = self.launch_done.1.try_recv() {
-            texts.push(text);
+        let mut msgs = Vec::new();
+        while let Ok(msg) = self.launch_done.1.try_recv() {
+            msgs.push(msg);
         }
-        if let Some(last) = texts.pop() {
-            self.set_notice(last);
+        for msg in msgs {
+            match msg {
+                AppMsg::Notice(text) => self.set_notice(text),
+                AppMsg::Cleanup(id) => {
+                    let title = self.board.as_ref().and_then(|b| b.task(&id)).map_or(String::new(), |t| t.title.clone());
+                    self.agent_ask = Some(AgentAsk { id, title, kind: AskKind::Cleanup });
+                }
+            }
         }
+        let mut checked = Vec::new();
+        if let Some((_, rx)) = &self.checker {
+            while let Ok(results) = rx.try_recv() {
+                checked.push(results);
+            }
+        }
+        for results in checked {
+            self.apply_checked(results);
+        }
+        self.watch_pr_states();
         while let Ok(result) = self.ready_done.1.try_recv() {
             match result {
                 Ok(id) => self.set_notice(format!("{id} is ready for review")),
@@ -1483,6 +1650,9 @@ impl App {
             KeyCode::Enter | KeyCode::Char(' ') => self.detail = !self.detail,
             KeyCode::Char('p') => self.start_selected(Status::Planning),
             KeyCode::Char('i') => self.start_selected(Status::Implementing),
+            KeyCode::Char('x') => self.finish_selected(),
+            KeyCode::Char('R') => self.sync_story_now(),
+            KeyCode::Char('S') => self.toggle_auto_sync(),
             KeyCode::Char('r') => self.reload_now(),
             _ => {}
         }
