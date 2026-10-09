@@ -16,49 +16,46 @@ const OPEN_BUTTON: &str = "[ o Open in browser ]";
 const DETAILS_BUTTON: &str = "[ details ]";
 const COPY_BUTTON: &str = "[ copy ]";
 const AGENT_BUTTON: &str = "[ agent ]";
-const FIX_BUTTON: &str = "[ fix ]";
 const CONFIRM_YES: &str = "[ y Mark ready ]";
 const CONFIRM_NO: &str = "[ n Cancel ]";
 pub const SHEET_STAGE_OPEN: &str = "[ open ]";
 
-fn details_width() -> usize {
-    DETAILS_BUTTON.chars().count()
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Btn {
+    AutoFix,
+    AutoReview,
+    Agent,
+    Copy,
+    Details,
 }
 
-fn auto_text(on: bool) -> &'static str {
-    if on {
-        "[x] auto-fix"
-    } else {
-        "[ ] auto-fix"
+fn tick(on: bool, label: &str) -> String {
+    format!("{} {label}", if on { "[x]" } else { "[ ]" })
+}
+
+/// The buttons at the right of a row's CI line, left to right, each with its text and colour. The
+/// same list gives the drawing and the click areas, so they cannot drift apart.
+fn buttons(row: &PrRow) -> Vec<(Btn, String, Style)> {
+    let cyan = Style::new().fg(theme::CYAN);
+    let tick_style = |on: bool| if on { Style::new().fg(theme::GREEN).add_modifier(Modifier::BOLD) } else { cyan };
+    let mut list = Vec::new();
+    if let Some(on) = row.auto {
+        list.push((Btn::AutoFix, tick(on, "auto-fix"), tick_style(on)));
     }
-}
-
-fn auto_width(row: &PrRow) -> usize {
-    if row.auto.is_some() {
-        auto_text(true).chars().count() + 1
-    } else {
-        0
+    if let Some(on) = row.auto_review {
+        list.push((Btn::AutoReview, tick(on, "auto-review"), tick_style(on)));
     }
-}
-
-fn fix_width(row: &PrRow) -> usize {
-    if row.can_fix {
-        FIX_BUTTON.chars().count() + 1
-    } else {
-        0
-    }
-}
-
-fn agent_width(row: &PrRow) -> usize {
     if row.has_agent {
-        AGENT_BUTTON.chars().count() + 1
-    } else {
-        0
+        list.push((Btn::Agent, AGENT_BUTTON.to_string(), cyan));
     }
+    list.push((Btn::Copy, COPY_BUTTON.to_string(), cyan));
+    list.push((Btn::Details, DETAILS_BUTTON.to_string(), cyan));
+    list
 }
 
-fn copy_width() -> usize {
-    COPY_BUTTON.chars().count()
+/// Characters the buttons take, with a space between each.
+fn buttons_width(list: &[(Btn, String, Style)]) -> usize {
+    list.iter().map(|(_, t, _)| t.chars().count()).sum::<usize>() + list.len().saturating_sub(1)
 }
 
 /// Width of the `[DRAFT]` badge that marks a draft ready when clicked.
@@ -393,26 +390,17 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
         (false, true) => Style::new().bg(theme::GO_ROW),
         _ => Style::new(),
     };
-    let button = details_width() + 1 + copy_width() + agent_width(row) + fix_width(row) + auto_width(row);
+    let list = buttons(row);
+    let button = buttons_width(&list);
     let mut second = fit(summary, width.saturating_sub(button + 1));
     let gap = width.saturating_sub(width_of(&second) + button);
     second.push(Span::raw(" ".repeat(gap)));
-    if let Some(on) = row.auto {
-        let style = if on { Style::new().fg(theme::GREEN).add_modifier(Modifier::BOLD) } else { Style::new().fg(theme::CYAN) };
-        second.push(Span::styled(auto_text(on), style));
-        second.push(Span::raw(" "));
+    for (n, (_, text, style)) in list.into_iter().enumerate() {
+        if n > 0 {
+            second.push(Span::raw(" "));
+        }
+        second.push(Span::styled(text, style));
     }
-    if row.can_fix {
-        second.push(Span::styled(FIX_BUTTON, Style::new().fg(theme::CYAN)));
-        second.push(Span::raw(" "));
-    }
-    if row.has_agent {
-        second.push(Span::styled(AGENT_BUTTON, Style::new().fg(theme::CYAN)));
-        second.push(Span::raw(" "));
-    }
-    second.push(Span::styled(COPY_BUTTON, Style::new().fg(theme::CYAN)));
-    second.push(Span::raw(" "));
-    second.push(Span::styled(DETAILS_BUTTON, Style::new().fg(theme::CYAN)));
     let mut lines: Vec<Line<'static>> = title_lines(row, width)
         .into_iter()
         .map(|t| Line::from(vec![marker.clone(), Span::styled(t, bold)]).style(style))
@@ -506,25 +494,24 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         let lines = row_lines(row, body.width as usize, focused && i == selected, now);
         f.render_widget(Paragraph::new(lines), rect);
         hits.push((rect, Target::Pr(i)));
-        let button = details_width() as u16;
-        let copy = copy_width() as u16;
         let title_n = title_lines(row, width).len() as u16;
-        let agent = agent_width(row) as u16;
-        let fix = fix_width(row) as u16;
-        let auto = auto_width(row) as u16;
-        if body.width > button + copy + agent + fix + auto + 1 && h > title_n + 1 {
+        let list = buttons(row);
+        let total = buttons_width(&list) as u16;
+        if body.width > total + 1 && h > title_n + 1 {
             let line = y + title_n + 1;
-            if agent > 0 {
-                hits.push((Rect::new(body.x + body.width - button - 1 - copy - agent, line, agent - 1, 1), Target::PrAgent(i)));
+            let mut x = body.x + body.width - total;
+            for (which, text, _) in &list {
+                let w = text.chars().count() as u16;
+                let target = match which {
+                    Btn::AutoFix => Target::PrAuto(i),
+                    Btn::AutoReview => Target::PrReview(i),
+                    Btn::Agent => Target::PrAgent(i),
+                    Btn::Copy => Target::PrCopy(i),
+                    Btn::Details => Target::PrDetails(i),
+                };
+                hits.push((Rect::new(x, line, w, 1), target));
+                x += w + 1;
             }
-            if fix > 0 {
-                hits.push((Rect::new(body.x + body.width - button - 1 - copy - agent - fix, line, fix - 1, 1), Target::PrFix(i)));
-            }
-            if auto > 0 {
-                hits.push((Rect::new(body.x + body.width - button - 1 - copy - agent - fix - auto, line, auto - 1, 1), Target::PrAuto(i)));
-            }
-            hits.push((Rect::new(body.x + body.width - button, line, button, 1), Target::PrDetails(i)));
-            hits.push((Rect::new(body.x + body.width - button - 1 - copy, line, copy, 1), Target::PrCopy(i)));
         }
         if row.live.is_some_and(|pr| pr.is_draft) && h > title_n {
             hits.push((Rect::new(body.x + 2, y + title_n, BADGE_CLICK_WIDTH.min(body.width), 1), Target::PrBadge(i)));
@@ -548,7 +535,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
 fn draw_toggles(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let boxes = [
         (app.autofix, "auto-fix PRs by default (F)", Target::ToggleAutoFix),
-        (app.autocopilot, "auto-request Copilot (C)", Target::ToggleAutoCopilot),
+        (app.autocopilot, "auto-review new PRs by default (C)", Target::ToggleAutoCopilot),
     ];
     let mut spans: Vec<Span<'static>> = vec![Span::raw(" ")];
     let mut x = area.x + 1;

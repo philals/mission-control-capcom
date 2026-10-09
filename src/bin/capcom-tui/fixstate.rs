@@ -135,6 +135,11 @@ impl Store {
         .unwrap_or(false)
     }
 
+    /// Forget that Copilot was asked about this PR, so it can be asked again (you ticked it again).
+    pub fn forget_copilot(&self, url: &str) {
+        self.with(|state| state.copilot_asked.retain(|u| u != url));
+    }
+
     /// True the first time this PR is seen: the caller should ask Copilot to review it.
     pub fn claim_copilot(&self, url: &str) -> bool {
         self.with(|state| {

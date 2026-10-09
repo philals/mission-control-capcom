@@ -94,8 +94,8 @@ pub enum Target {
     PrCopy(usize),
     /// The `[ agent ]` button: back to the agent session that made the PR.
     PrAgent(usize),
-    /// The `[ fix ]` button: ask the agent to address this PR now.
-    PrFix(usize),
+    /// The `[x] auto-review` tick box on one PR.
+    PrReview(usize),
     /// The `[x] auto-fix` tick box on one PR.
     PrAuto(usize),
     ToggleAutoFix,
@@ -249,8 +249,8 @@ pub struct PrRow<'a> {
     pub has_agent: bool,
     /// Whether auto-fix is on for this PR (None for a PR that is not yours).
     pub auto: Option<bool>,
-    /// There is something an agent could fix on this PR.
-    pub can_fix: bool,
+    /// Whether Copilot is asked to review this PR by itself (None for a PR that is not yours).
+    pub auto_review: Option<bool>,
     /// What capcom has asked the agent so far, such as `⟳ fix round 2/5 sent 3m ago`.
     pub fix: Option<String>,
 }
@@ -519,6 +519,8 @@ pub struct App {
     /// Per-PR choices (PR url to on or off) that override the default.
     pub autofix_prs: HashMap<String, bool>,
     pub autocopilot: bool,
+    /// Per-PR choices for asking Copilot to review, overriding `autocopilot`.
+    pub autocopilot_prs: HashMap<String, bool>,
     pub fix_store: Option<FixStore>,
     pub copilot_requester: Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>,
     fix_seen: HashMap<String, String>,
@@ -602,6 +604,7 @@ impl App {
             autofix: false,
             autofix_prs: HashMap::new(),
             autocopilot: false,
+            autocopilot_prs: HashMap::new(),
             fix_store: None,
             copilot_requester: Arc::new(gh_request_copilot),
             fix_seen: HashMap::new(),
@@ -949,9 +952,10 @@ impl App {
                 self.alert_awaiting_review(&items);
                 self.alert_copilot_reviews(&items);
                 self.autopilot(&items);
-                let before = self.autofix_prs.len();
+                let before = self.autofix_prs.len() + self.autocopilot_prs.len();
                 self.autofix_prs.retain(|url, _| items.iter().any(|p| p.url == *url));
-                if self.autofix_prs.len() != before {
+                self.autocopilot_prs.retain(|url, _| items.iter().any(|p| p.url == *url));
+                if self.autofix_prs.len() + self.autocopilot_prs.len() != before {
                     self.save_settings();
                 }
                 self.prs.items = items;
@@ -1046,7 +1050,7 @@ impl App {
             return;
         };
         for pr in items.iter().filter(|p| p.feedback.mine) {
-            if self.autocopilot
+            if self.autocopilot_on(&pr.url)
                 && pr.feedback.copilot == crate::prs::CopilotState::None
                 && self.copilot_tried.insert(pr.url.clone())
             {
@@ -1077,7 +1081,7 @@ impl App {
                         self.check_stalled(pr, &fingerprint, &store);
                     } else {
                         self.fix_seen.insert(pr.url.clone(), fingerprint.clone());
-                        self.dispatch_fix(pr, fingerprint, why, false);
+                        self.dispatch_fix(pr, fingerprint, why);
                     }
                 }
             }
@@ -1101,34 +1105,26 @@ impl App {
 
     /// Ask the agent that made a PR to address it: the running agent if there is one and it is idle,
     /// else its session resumed, else a fresh agent in the repo's folder.
-    fn dispatch_fix(&mut self, pr: &PullRequest, fingerprint: String, why: String, manual: bool) {
+    fn dispatch_fix(&mut self, pr: &PullRequest, fingerprint: String, why: String) {
         let (Some(herdr), Some(store)) = (self.herdr.clone(), self.fix_store.clone()) else {
-            if manual {
-                self.set_notice("not running inside Herdr, so no agent can be asked".into());
-            }
             return;
         };
         let name = format!("{}#{}", pr.repo, pr.number);
         let owner = self.pr_owner(&pr.url);
         let mut resume = self.resume_request(&pr.url, &pr.repo, &name, owner.as_ref());
-        resume.focus = manual;
+        resume.focus = false;
         let (url, done, notify) = (pr.url.clone(), self.launch_done.0.clone(), self.notify.clone());
-        std::thread::spawn(move || match store.claim(&url, &fingerprint, MAX_FIX_ROUNDS, manual) {
+        std::thread::spawn(move || match store.claim(&url, &fingerprint, MAX_FIX_ROUNDS, false) {
             Claim::Same => {}
             Claim::Busy => {
                 let _ = done.send(AppMsg::FixRetry(url));
             }
             Claim::GaveUp => {
                 notify("CAPCOM: giving up on a PR", &format!("{name} is still not right after {MAX_FIX_ROUNDS} rounds: over to you"));
-                let _ = done.send(AppMsg::Notice(format!("{name}: still not right after {MAX_FIX_ROUNDS} automatic rounds: over to you (press f to start again)")));
+                let _ = done.send(AppMsg::Notice(format!("{name}: still not right after {MAX_FIX_ROUNDS} automatic rounds: over to you (untick and tick auto-fix on it to start again)")));
             }
             Claim::Go { round, undo } => {
-                let text = if manual {
-                    format!("/pr-address {url} (asked by hand: {why})")
-                } else {
-                    format!("/pr-address {url} (automatic round {round} of {MAX_FIX_ROUNDS}: {why})")
-                };
-                resume.prompt = Some(text);
+                resume.prompt = Some(format!("/pr-address {url} (automatic round {round} of {MAX_FIX_ROUNDS}: {why})"));
                 match herdr.resume(&resume) {
                     Ok(Outcome::Busy) => {
                         store.undo(&url, undo);
@@ -1147,24 +1143,6 @@ impl App {
         });
     }
 
-    /// `f` or `[ fix ]`: ask the agent to address the selected PR now, whatever the tick boxes say.
-    pub fn fix_pr(&mut self, index: usize) {
-        let Some(url) = self.pr_rows().get(index).map(|r| r.url.clone()) else {
-            return;
-        };
-        let Some(pr) = self.prs.items.iter().find(|p| same_url(&p.url, &url)).cloned() else {
-            self.set_notice("only open PRs from GitHub can be fixed".into());
-            return;
-        };
-        if !pr.feedback.mine {
-            self.set_notice("you did not write this PR, so capcom leaves it alone".into());
-            return;
-        }
-        let (fingerprint, why) = Self::fix_needed(&pr).unwrap_or_else(|| (format!("{}|by hand", pr.feedback.head), "everything outstanding".to_string()));
-        self.fix_seen.insert(pr.url.clone(), fingerprint.clone());
-        self.dispatch_fix(&pr, fingerprint, why, true);
-    }
-
     /// Whether the agent is asked to fix this PR by itself: its own tick, else the default.
     pub fn autofix_on(&self, url: &str) -> bool {
         self.autofix_prs.get(url).copied().unwrap_or(self.autofix)
@@ -1180,9 +1158,45 @@ impl App {
             return;
         }
         let on = !self.autofix_on(&url);
+        if on {
+            // ticking it again starts afresh: forget earlier rounds, so it can ask again at once
+            if let Some(store) = &self.fix_store {
+                store.clear(&url);
+            }
+            self.fix_seen.remove(&url);
+            self.fix_rounds.remove(&url);
+        }
         self.autofix_prs.insert(url, on);
         self.save_settings();
         self.set_notice(format!("auto-fix {} for {name}", if on { format!("on: the agent is asked to fix it, up to {MAX_FIX_ROUNDS} rounds") } else { "off".into() }));
+        let items = self.prs.items.clone();
+        self.autopilot(&items);
+    }
+
+    /// Whether Copilot is asked to review this PR by itself: its own tick, else the default.
+    pub fn autocopilot_on(&self, url: &str) -> bool {
+        self.autocopilot_prs.get(url).copied().unwrap_or(self.autocopilot)
+    }
+
+    /// The tick box on one PR: ask Copilot to review it (now, if it has not reviewed yet).
+    pub fn toggle_pr_review(&mut self, index: usize) {
+        let Some((url, mine, name)) = self.pr_rows().get(index).map(|r| (r.url.clone(), r.auto_review.is_some(), pr_id(r))) else {
+            return;
+        };
+        if !mine {
+            self.set_notice("you did not write this PR, so capcom leaves it alone".into());
+            return;
+        }
+        let on = !self.autocopilot_on(&url);
+        if on {
+            if let Some(store) = &self.fix_store {
+                store.forget_copilot(&url);
+            }
+            self.copilot_tried.remove(&url);
+        }
+        self.autocopilot_prs.insert(url, on);
+        self.save_settings();
+        self.set_notice(format!("auto-review {} for {name}", if on { "on: Copilot is asked to review it" } else { "off" }));
         let items = self.prs.items.clone();
         self.autopilot(&items);
     }
@@ -1196,7 +1210,7 @@ impl App {
     pub fn toggle_autocopilot(&mut self) {
         self.autocopilot = !self.autocopilot;
         self.save_settings();
-        self.set_notice(format!("auto-request Copilot {}", if self.autocopilot { "on: Copilot reviews your PRs as they appear" } else { "off" }));
+        self.set_notice(format!("auto-review by default {}", if self.autocopilot { "on: PRs without a tick of their own get Copilot asked to review them as they appear" } else { "off" }));
     }
 
     pub fn attach_runs(
@@ -1448,6 +1462,7 @@ impl App {
             autofix: self.autofix,
             autofix_prs: self.autofix_prs.iter().map(|(u, on)| (u.clone(), *on)).collect(),
             autocopilot: self.autocopilot,
+            autocopilot_prs: self.autocopilot_prs.iter().map(|(u, on)| (u.clone(), *on)).collect(),
         }
     }
 
@@ -1464,6 +1479,7 @@ impl App {
         self.autofix = saved.autofix;
         self.autofix_prs = saved.autofix_prs.into_iter().collect();
         self.autocopilot = saved.autocopilot;
+        self.autocopilot_prs = saved.autocopilot_prs.into_iter().collect();
         self.sync_watched();
         for (slot, weight) in self.col_weights.iter_mut().zip(saved.columns) {
             *slot = weight;
@@ -1749,7 +1765,7 @@ impl App {
                         owner: self.pr_owner(&p.url),
                         has_agent: self.pr_owner(&p.url).is_some() || self.pr_link(&p.url).is_some(),
                         auto: p.feedback.mine.then(|| self.autofix_on(&p.url)),
-                        can_fix: p.feedback.mine && (Self::fix_needed(p).is_some() || p.open_threads() > 0),
+                        auto_review: p.feedback.mine.then(|| self.autocopilot_on(&p.url)),
                         fix: self.fix_label(&p.url),
                     })
                     .collect();
@@ -1782,7 +1798,7 @@ impl App {
                             owner: self.pr_owner(&pr.url),
                             has_agent: true,
                             auto: live.filter(|p| p.feedback.mine).map(|p| self.autofix_on(&p.url)),
-                            can_fix: live.is_some_and(|p| p.feedback.mine && (Self::fix_needed(p).is_some() || p.open_threads() > 0)),
+                            auto_review: live.filter(|p| p.feedback.mine).map(|p| self.autocopilot_on(&p.url)),
                             fix: self.fix_label(&pr.url),
                         });
                     }
@@ -2372,8 +2388,8 @@ impl App {
                 self.toggle_pr_autofix(self.pr_sel);
                 return false;
             }
-            KeyCode::Char('f') if self.focus == Focus::Prs => {
-                self.fix_pr(self.pr_sel);
+            KeyCode::Char('v') if self.focus == Focus::Prs => {
+                self.toggle_pr_review(self.pr_sel);
                 return false;
             }
             KeyCode::Char('a') if self.focus == Focus::Prs => {
@@ -2546,10 +2562,10 @@ impl App {
                 self.toggle_pr_autofix(i);
                 return;
             }
-            Some(Target::PrFix(i)) => {
+            Some(Target::PrReview(i)) => {
                 self.set_focus(Focus::Prs);
                 self.pr_sel = i;
-                self.fix_pr(i);
+                self.toggle_pr_review(i);
                 return;
             }
             Some(Target::ToggleAutoFix) => {
@@ -2647,7 +2663,7 @@ impl App {
             return;
         }
         let target = self.hit(x, y);
-        if matches!(target, Some(Target::Pr(_) | Target::PrDetails(_) | Target::PrAgent(_) | Target::PrFix(_) | Target::PrAuto(_) | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::PrPanel | Target::OpenCheck(..))) {
+        if matches!(target, Some(Target::Pr(_) | Target::PrDetails(_) | Target::PrAgent(_) | Target::PrReview(_) | Target::PrAuto(_) | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::PrPanel | Target::OpenCheck(..))) {
             self.set_focus(Focus::Prs);
             self.pr_move(delta);
             return;
