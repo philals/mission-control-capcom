@@ -10,9 +10,23 @@ capcom-tui              # the story list; click or press Enter to open one
 capcom-tui PROJ-123     # open a story's board straight away
 ```
 
-## Story list
+## Story board
 
-One row per story with its key, title, story status, `done/total` tasks, a progress bar and a count per task status. Completed stories (story status `done`) are hidden by default; click `[ Show done ]` in the header or press `d` to show them, and again to hide them.
+![capcom-tui story board](img/list.svg)
+
+The main page is a kanban of your stories in columns **TO DO**, **DOING** and **IN REVIEW** (and **DONE**, which is hidden by default: click `[ Show done ]` in the header or press `d`). A story sits in:
+
+- **TO DO** when it has no task that has left `todo` (including a story with no tasks yet, which has not been broken down).
+- **DOING** once any task is planned or under way, up to and including when every task is finished.
+- **IN REVIEW** when its story status is `in_review` (set by `/story-review`).
+
+Each card shows the key, title, `done/total` tasks with a progress bar, and a count per task status. Click a card (or press `Enter`) to open the story's board. Narrow terminals (under 80 columns) show a plain list of rows instead.
+
+Drag a card to another column:
+
+- **DOING → IN REVIEW** (or `v`): if every task is `done` or `dropped`, opens a new tab named `review` in the story's Herdr workspace and starts `/story-review KEY`. The skill moves the story to `in_review` itself. Otherwise it says which tasks are unfinished. `v` on a story already in review runs the review again.
+- **TO DO → DOING** on a story with no tasks starts `/story-break-down KEY`; on one with tasks it explains that the story moves by itself once its first task leaves TODO.
+- **IN REVIEW → DOING** reopens the story; **IN REVIEW → DONE** (with DONE shown) accepts it. Both change the board directly.
 
 ## Board
 
@@ -20,7 +34,7 @@ One column per task status (a Dropped column appears only if something was dropp
 
 | Where | Mouse | Keys |
 |---|---|---|
-| List | click a row to open it; click `[ Show done ]` / `[ Hide done ]`; wheel moves the selection | `↑↓`/`jk` select, `Enter`/`→` open, `d` show or hide done |
+| Story board | click a card to open it; drag a card to another column; click `[ Show done ]` / `[ Hide done ]`; wheel moves the selection | `←→` column, `↑↓` story, `Enter` open, `v` review, `d` show or hide done, `n` new story |
 | Board | click `‹ Stories` to go back; click a column or card to select it; click the selected card again for its detail; click outside a sheet to close it; wheel scrolls a column | `←→`/`hl` column, `↑↓`/`jk` card, `[` `]` switch story, `Tab` PR panel, `Enter` detail, `Esc`/`b` back to the list |
 | PR panel | click a PR to open it on GitHub, a CI stage line to open that check, `[ details ]` for its sheet (each check there has `[ open ]`); wheel scrolls | `Tab` focus, `↑↓` select, `Enter` sheet, `o` open on GitHub, `c` copy link, `m` mark draft ready, `r` refresh (or click the `↻ updated` label) |
 | Runs panel | click a run to open it on GitHub, a stage line to open that stage, `[ details ]` for the sheet (each stage there has `[ open ]`); click a tab when narrow; wheel scrolls | `Tab` focus, `↑↓` select, `Enter` sheet, `o` open run, `r` refresh |

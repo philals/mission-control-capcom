@@ -14,6 +14,9 @@ type Hits = Vec<(Rect, Target)>;
 
 const CARD_HEIGHT: u16 = 5;
 const STORY_ROW_HEIGHT: u16 = 4;
+/// From this width the stories are a kanban of columns; narrower, a plain list of rows.
+const STORY_COLUMNS_FROM: u16 = 80;
+const STORY_CARD_HEIGHT: u16 = 5;
 const COMPACT_BELOW: u16 = 60;
 const WIDE_FROM: u16 = 150;
 const RUNS_SMALL_WIDTH: u16 = 30;
@@ -318,6 +321,10 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         f.render_widget(Paragraph::new(lines).centered(), area);
         return;
     }
+    if area.width >= STORY_COLUMNS_FROM {
+        draw_story_columns(f, area, app, hits);
+        return;
+    }
     let capacity = ((area.height / STORY_ROW_HEIGHT) as usize).max(1);
     let offset = if app.list_sel >= capacity { app.list_sel + 1 - capacity } else { 0 };
     for (n, story) in visible.iter().enumerate().skip(offset).take(capacity) {
@@ -329,6 +336,84 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         draw_story_row(f, rect, story, n == app.list_sel);
         hits.push((rect, Target::Story(n)));
     }
+}
+
+fn draw_story_columns(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
+    let visible = app.visible_stories();
+    let columns = app.list_columns();
+    let rects = Layout::horizontal((0..columns.len()).map(|_| Constraint::Fill(1))).split(area);
+    let drop = app.drop_list_column();
+    for ((col, stories), rect) in columns.iter().zip(rects.iter()) {
+        hits.push((*rect, Target::StoryColumn(*col)));
+        let holds_selection = app.focus == Focus::Main && stories.contains(&app.list_sel);
+        let accent = if drop == Some(*col) {
+            panel::ORANGE
+        } else if holds_selection {
+            theme::BLUE
+        } else {
+            theme::BORDER
+        };
+        let block = Block::bordered()
+            .border_type(if holds_selection || drop == Some(*col) { BorderType::Double } else { BorderType::Plain })
+            .border_style(Style::new().fg(accent))
+            .title(Span::styled(
+                format!(" {} · {} ", col.label(), stories.len()),
+                Style::new().fg(if holds_selection { theme::BLUE } else { theme::FG }).add_modifier(Modifier::BOLD),
+            ));
+        let inner = block.inner(*rect);
+        f.render_widget(block, *rect);
+        let capacity = ((inner.height / STORY_CARD_HEIGHT) as usize).max(1);
+        let selected_pos = stories.iter().position(|i| *i == app.list_sel).unwrap_or(0);
+        let offset = if selected_pos >= capacity { selected_pos + 1 - capacity } else { 0 };
+        for (n, index) in stories.iter().enumerate().skip(offset).take(capacity) {
+            let y = inner.y + (n - offset) as u16 * STORY_CARD_HEIGHT;
+            if y + STORY_CARD_HEIGHT > inner.y + inner.height {
+                break;
+            }
+            let card = Rect::new(inner.x, y, inner.width, STORY_CARD_HEIGHT);
+            draw_story_card(f, card, visible[*index], *index == app.list_sel);
+            hits.push((card, Target::Story(*index)));
+        }
+    }
+}
+
+fn draw_story_card(f: &mut Frame, area: Rect, story: &StorySummary, selected: bool) {
+    let border = if selected {
+        Style::new().fg(theme::FG).add_modifier(Modifier::BOLD)
+    } else if story.error.is_some() {
+        Style::new().fg(theme::RED)
+    } else {
+        Style::new().fg(theme::DIM)
+    };
+    let block = Block::bordered()
+        .border_type(if selected { BorderType::Thick } else { BorderType::Plain })
+        .border_style(border);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let width = inner.width as usize;
+    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let dim = Style::new().fg(theme::DIM);
+    if let Some(error) = &story.error {
+        let lines = vec![
+            Line::from(Span::styled(story.key.clone(), bold)),
+            Line::from(Span::styled(trunc(&format!("! {error}"), width), Style::new().fg(theme::RED))),
+        ];
+        f.render_widget(Paragraph::new(lines), inner);
+        return;
+    }
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(story.key.clone(), bold),
+            Span::raw("  "),
+            Span::raw(trunc(&story.title, width.saturating_sub(story.key.len() + 2))),
+        ]),
+        Line::from(vec![
+            Span::styled(format!("{}/{} done  ", story.done, story.total), Style::new().fg(theme::GREEN)),
+            Span::styled(progress_bar(story.done, story.total), Style::new().fg(theme::GREEN)),
+        ]),
+        Line::from(Span::styled(trunc(&counts_text(story), width), dim)),
+    ];
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_story_row(f: &mut Frame, area: Rect, story: &StorySummary, selected: bool) {
@@ -530,7 +615,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     }
     let dim = Style::new().fg(theme::DIM);
     let keys: &[&str] = match app.screen {
-        Screen::List => &["↑↓ story", "⏎ open", "n new story", "d show/hide done", "Tab PRs/runs", "? help", "q quit"],
+        Screen::List => &["←→↑↓ move", "⏎ open", "v review", "n new", "d done", "Tab PRs/runs", "? help", "q quit"],
         Screen::Board => &[
             "←→ column", "↑↓ card", "[ ] story", "⏎ detail", "p plan", "i implement", "x done", "R sync PRs", "Tab PRs/runs",
             "Esc stories", "? help", "q quit",
@@ -771,7 +856,8 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
     let rect = centered(area, 60, 60);
     let lines = vec![
         row("↑ ↓  j k", "move between stories or cards".into()),
-        row("← →  h l", "move between columns (open a story from the list)".into()),
+        row("← →  h l", "move between columns (on the story board and on a story's board)".into()),
+        row("v", "start the review of the selected story in Herdr (it must have every task finished); or drag it from DOING to IN REVIEW".into()),
         row("Enter", "open a story, or open a card's detail".into()),
         row("[ ]", "switch story on the board".into()),
         row("Tab", "focus: board or list, then PRs, then manual runs".into()),
@@ -957,14 +1043,14 @@ mod tests {
     fn the_story_list_shows_rows_counts_and_the_done_toggle() {
         let (_root, mut app) = two_stories();
         let out = render(&app, 120, 30);
-        for want in ["STORIES", "PROJ-2", "Story PROJ-2", "[ in_progress ]", "0/2 done", "2 todo", "[ Show done ]", "1 done hidden", "q quit"] {
+        for want in ["STORIES", "TO DO · 1", "DOING · 0", "IN REVIEW · 0", "PROJ-2", "Story PROJ-2", "0/2 done", "2 todo", "[ Show done ]", "1 done hidden", "q quit"] {
             assert!(out.contains(want), "missing {want:?} in:\n{out}");
         }
         assert!(!out.contains("PROJ-1"), "{out}");
         app.hide_done = false;
         let out = render(&app, 120, 30);
         assert!(out.contains("PROJ-1"), "{out}");
-        assert!(out.contains("[ done ]"), "{out}");
+        assert!(out.contains("DONE · 1"), "{out}");
         assert!(out.contains("2/2 done"), "{out}");
         assert!(out.contains("[ Hide done ]"), "{out}");
     }
@@ -984,6 +1070,8 @@ mod tests {
         let out = render(&app, 120, 30);
         let (x, y) = find(&out, "Story PROJ-2");
         app.on_click(x, y);
+        assert_eq!(app.screen, Screen::List, "a press may start a drag, so it opens on release");
+        app.on_release();
         assert_eq!(app.screen, Screen::Board);
         assert_eq!(app.board.as_ref().unwrap().story.key, "PROJ-2");
     }
@@ -1864,7 +1952,7 @@ mod tests {
     fn the_focused_panel_is_marked_by_its_border_shape_not_only_by_colour() {
         let (_root, mut app) = with_runs();
         let out = render(&app, 170, 44);
-        assert!(!out.contains('╔'), "nothing in a panel is focused yet:\n{out}");
+        assert_eq!(out.matches('╔').count(), 1, "only the story column holding the selection (the main area has focus):\n{out}");
         app.focus = Focus::Prs;
         let out = render(&app, 170, 44);
         assert_eq!(out.matches('╔').count(), 1, "only the focused panel has a double border:\n{out}");
@@ -2106,6 +2194,201 @@ mod tests {
         assert!(out.contains("pr · api ×2"), "the card shows two PRs are expected:\n{out}");
         assert!(out.contains("needs a PR in api"), "{out}");
         assert!(!out.contains("drag to DONE"));
+    }
+
+    /// PROJ-1 has no tasks, PROJ-2 only todo tasks, PROJ-3 has work under way, PROJ-4 has every task
+    /// done, PROJ-5 is in review, PROJ-6 is done.
+    fn story_columns() -> (TempDir, App) {
+        let root = TempDir::new().unwrap();
+        for (key, tasks) in [("PROJ-1", 0), ("PROJ-2", 2), ("PROJ-3", 2), ("PROJ-4", 1), ("PROJ-5", 1), ("PROJ-6", 1)] {
+            ops::init_story(root.path(), key, &format!("Story {key}"), None).unwrap();
+            store::update(root.path(), key, |b| {
+                let dir = root.path().join(key);
+                for n in 0..tasks {
+                    ops::add_task(&dir, b, &format!("Task {n}"), TaskType::Spike, vec![], vec![])?;
+                }
+                match key {
+                    "PROJ-3" => rules::transition(b, "T1", Status::Implementing)?,
+                    "PROJ-4" | "PROJ-5" | "PROJ-6" => {
+                        rules::transition(b, "T1", Status::Implementing)?;
+                        rules::transition(b, "T1", Status::Done)?;
+                    }
+                    _ => {}
+                }
+                match key {
+                    "PROJ-5" => rules::story_transition(b, StoryStatus::InReview)?,
+                    "PROJ-6" => {
+                        rules::story_transition(b, StoryStatus::InReview)?;
+                        rules::story_transition(b, StoryStatus::Done)?;
+                    }
+                    _ => {}
+                }
+                Ok(())
+            })
+            .unwrap();
+        }
+        let app = App::new(root.path().to_path_buf(), None);
+        (root, app)
+    }
+
+    fn drag_story(app: &mut App, card: &str, column: &str) {
+        let out = render(app, 170, 44);
+        let (x, y) = find(&out, card);
+        let (cx, cy) = find(&out, column);
+        app.on_click(x + 1, y);
+        app.on_drag(cx + 4, cy + 1);
+        app.on_drag(cx + 5, cy + 12);
+        app.on_release();
+    }
+
+    fn story_status_of(app: &App, key: &str) -> StoryStatus {
+        store::load(&app.root, key).unwrap().story.status
+    }
+
+    #[test]
+    fn the_main_page_is_a_kanban_of_to_do_doing_and_in_review() {
+        let (_root, mut app) = story_columns();
+        let out = render(&app, 170, 44);
+        for want in ["TO DO · 2", "DOING · 2", "IN REVIEW · 1", "PROJ-1", "PROJ-3", "PROJ-4", "PROJ-5", "1/1 done", "1 done hidden"] {
+            assert!(out.contains(want), "missing {want:?}:\n{out}");
+        }
+        assert!(!out.contains("PROJ-6") && !out.contains("DONE ·"), "done stories stay hidden:\n{out}");
+        app.hide_done = false;
+        let out = render(&app, 170, 44);
+        assert!(out.contains("DONE · 1") && out.contains("PROJ-6"), "{out}");
+        let columns: Vec<(&str, usize)> = app.list_columns().iter().map(|(c, s)| (c.label(), s.len())).collect();
+        assert_eq!(columns, vec![("TO DO", 2), ("DOING", 2), ("IN REVIEW", 1), ("DONE", 1)]);
+    }
+
+    #[test]
+    fn arrow_keys_move_between_columns_and_within_one() {
+        let (_root, mut app) = story_columns();
+        let key = |app: &App| app.visible_stories()[app.list_sel].key.clone();
+        assert_eq!(key(&app), "PROJ-1");
+        app.on_key(KeyCode::Down, false);
+        assert_eq!(key(&app), "PROJ-2");
+        app.on_key(KeyCode::Down, false);
+        assert_eq!(key(&app), "PROJ-2", "down stops at the end of the column");
+        app.on_key(KeyCode::Right, false);
+        assert_eq!(key(&app), "PROJ-4", "the same row in the next column");
+        app.on_key(KeyCode::Right, false);
+        assert_eq!(key(&app), "PROJ-5");
+        app.on_key(KeyCode::Right, false);
+        assert_eq!(key(&app), "PROJ-5", "no column beyond");
+        app.on_key(KeyCode::Left, false);
+        assert_eq!(key(&app), "PROJ-3", "back to the first row of DOING");
+        app.on_key(KeyCode::Left, false);
+        assert_eq!(key(&app), "PROJ-1");
+        app.on_key(KeyCode::Enter, false);
+        assert_eq!(app.screen, Screen::Board);
+    }
+
+    #[test]
+    fn dragging_a_finished_story_from_doing_to_in_review_opens_a_herdr_tab_with_the_review_skill() {
+        let (_root, mut app) = story_columns();
+        let fake = with_herdr(&mut app);
+        drag_story(&mut app, "PROJ-4", "IN REVIEW");
+        let launches = launches_after(&mut app, &fake, 1);
+        assert_eq!(
+            launches,
+            vec![crate::herdr::Launch {
+                workspace: "PROJ-4".into(),
+                tab: "review".into(),
+                agent: "proj-4-review".into(),
+                prompt: "/story-review PROJ-4".into(),
+            }]
+        );
+        assert_eq!(story_status_of(&app, "PROJ-4"), StoryStatus::InProgress, "the skill moves the story, not the drag");
+        assert_eq!(app.screen, Screen::List, "dropping a card does not open it");
+    }
+
+    #[test]
+    fn a_story_with_unfinished_tasks_is_not_ready_for_review() {
+        let (_root, mut app) = story_columns();
+        let fake = with_herdr(&mut app);
+        drag_story(&mut app, "PROJ-3", "IN REVIEW");
+        assert!(launches_after(&mut app, &fake, 1).is_empty());
+        let notice = app.current_notice().unwrap().to_string();
+        assert!(notice.contains("PROJ-3 is not ready for review") && notice.contains("unfinished tasks"), "{notice}");
+    }
+
+    #[test]
+    fn v_reviews_the_selected_story_and_a_story_already_in_review_can_be_reviewed_again() {
+        let (_root, mut app) = story_columns();
+        let fake = with_herdr(&mut app);
+        app.list_sel = 3;
+        assert_eq!(app.visible_stories()[3].key, "PROJ-4");
+        app.on_key(KeyCode::Char('v'), false);
+        app.list_sel = 4;
+        assert_eq!(app.visible_stories()[4].key, "PROJ-5");
+        app.on_key(KeyCode::Char('v'), false);
+        let prompts: Vec<String> = launches_after(&mut app, &fake, 2).into_iter().map(|l| l.prompt).collect();
+        assert!(prompts.contains(&"/story-review PROJ-4".to_string()) && prompts.contains(&"/story-review PROJ-5".to_string()), "{prompts:?}");
+        app.hide_done = false;
+        app.list_sel = 5;
+        assert_eq!(app.visible_stories()[5].key, "PROJ-6");
+        app.on_key(KeyCode::Char('v'), false);
+        assert!(app.current_notice().unwrap().contains("it is done"), "{:?}", app.current_notice());
+    }
+
+    #[test]
+    fn dragging_a_story_with_no_tasks_to_doing_starts_its_breakdown_and_one_with_tasks_explains() {
+        let (_root, mut app) = story_columns();
+        let fake = with_herdr(&mut app);
+        drag_story(&mut app, "PROJ-1", "DOING");
+        let launches = launches_after(&mut app, &fake, 1);
+        assert_eq!(launches.len(), 1);
+        assert_eq!(launches[0].prompt, "/story-break-down PROJ-1");
+        assert_eq!((launches[0].tab.as_str(), launches[0].agent.as_str()), ("break down", "proj-1-breakdown"));
+        drag_story(&mut app, "PROJ-2", "DOING");
+        assert!(app.current_notice().unwrap().contains("moves to DOING by itself"), "{:?}", app.current_notice());
+    }
+
+    #[test]
+    fn a_story_in_review_can_go_back_to_doing_or_be_accepted_into_done() {
+        let (_root, mut app) = story_columns();
+        drag_story(&mut app, "PROJ-5", "DOING");
+        assert_eq!(story_status_of(&app, "PROJ-5"), StoryStatus::InProgress);
+        assert!(app.current_notice().unwrap().contains("back in DOING"));
+        let (_root, mut app) = story_columns();
+        app.hide_done = false;
+        drag_story(&mut app, "PROJ-5", "DONE");
+        assert_eq!(story_status_of(&app, "PROJ-5"), StoryStatus::Done);
+        drag_story(&mut app, "PROJ-4", "DONE");
+        assert!(app.current_notice().unwrap().contains("review PROJ-4 first"), "{:?}", app.current_notice());
+        assert_eq!(story_status_of(&app, "PROJ-4"), StoryStatus::InProgress);
+    }
+
+    #[test]
+    fn a_press_without_a_move_to_another_column_opens_the_story() {
+        let (_root, mut app) = story_columns();
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "PROJ-3");
+        app.on_click(x, y);
+        app.on_drag(x + 1, y);
+        app.on_release();
+        assert_eq!(app.screen, Screen::Board);
+        assert_eq!(app.board.as_ref().unwrap().story.key, "PROJ-3");
+    }
+
+    #[test]
+    fn narrow_terminals_keep_the_plain_story_list() {
+        let (_root, app) = story_columns();
+        let out = render(&app, 70, 30);
+        assert!(out.contains("[ in_progress ]") && !out.contains("TO DO ·"), "{out}");
+    }
+
+    #[test]
+    fn the_story_board_and_the_drop_highlight_are_readable() {
+        let (_root, mut app) = story_columns();
+        assert_readable(&app, 170, 44, "story kanban");
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "PROJ-4");
+        let (cx, cy) = find(&out, "IN REVIEW");
+        app.on_click(x, y);
+        app.on_drag(cx + 4, cy + 1);
+        assert_eq!(app.drop_list_column(), Some(crate::app::ListCol::Review));
+        assert_readable(&app, 170, 44, "dragging a story over IN REVIEW");
     }
 
     #[test]

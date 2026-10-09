@@ -73,6 +73,13 @@ fn build_stories(root: &Path) {
         ops::add_pr(b, "T1", "worker", "https://github.com/acme/worker/pull/41", PrState::Ready)?;
         Ok(())
     });
+    story(root, "DEMO-104", "Onboarding checklist", |dir, b| {
+        use TaskType::Pr;
+        ops::add_task(dir, b, "Checklist component", Pr, vec![], vec!["web".into()])?;
+        ops::add_task(dir, b, "Progress endpoint", Pr, vec![], vec!["api".into()])?;
+        Ok(())
+    });
+    story(root, "DEMO-105", "Billing export to CSV", |_, _| Ok(()));
     story(root, "DEMO-103", "Dark mode", |dir, b| {
         ops::add_task(dir, b, "Theme tokens", TaskType::Pr, vec![], vec!["web".into()])?;
         finish(b, "T1", "web", 190)?;
@@ -216,7 +223,7 @@ mod tests {
     fn the_demo_has_stories_in_every_column_and_nothing_real() {
         let root = make_root();
         let app = app(&root);
-        assert_eq!(app.keys, vec!["DEMO-101", "DEMO-102", "DEMO-103"]);
+        assert_eq!(app.keys, vec!["DEMO-101", "DEMO-102", "DEMO-103", "DEMO-104", "DEMO-105"]);
         let board: Board = store::load(&root, "DEMO-101").unwrap();
         let statuses: Vec<Status> = board.tasks.iter().map(|t| t.status).collect();
         for want in [Status::Todo, Status::Planning, Status::Planned, Status::Implementing, Status::Done] {

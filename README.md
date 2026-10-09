@@ -81,10 +81,10 @@ A typical run, in order: break the story down and approve the table; plan each t
 ## The terminal board
 
 <p align="center">
-  <img src="docs/img/list.svg" alt="capcom-tui story list: three demo stories with progress bars and task counts, above the pull requests and manual runs panels" width="100%">
+  <img src="docs/img/list.svg" alt="capcom-tui story board: demo stories in TO DO, DOING and IN REVIEW columns with progress bars and task counts, above the pull requests and manual runs panels" width="100%">
 </p>
 
-- **Stories and boards:** a list of stories, and a kanban per story with a card for each task (ready to implement, waits on dependencies, blocked, PRs merged).
+- **Stories and boards:** a kanban of your stories (TO DO, DOING, IN REVIEW) and a kanban per story with a card for each task (ready to implement, waits on dependencies, blocked, PRs merged). Drag a finished story from DOING to IN REVIEW and it opens a Herdr tab running `/story-review`.
 - **Your PRs, with CI:** every open PR from a GitHub search you control, `[DRAFT]` or `[READY]`, with the CI stages that are running, queued or failed listed one per line. Click to open, copy the link, or mark a draft ready (it asks first).
 - **Your manual runs:** the "Run workflow" runs you started, such as a nonprod deploy, with their stages and a link to each.
 - **Finishing tasks:** drag an IMPLEMENTING card to DONE (or press `x`) and capcom checks its PRs on GitHub, and only finishes the task if every one is merged.

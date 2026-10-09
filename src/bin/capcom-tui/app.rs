@@ -80,6 +80,7 @@ pub const HEIGHT_RANGE: (u16, u16) = (15, 80);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
     Story(usize),
+    StoryColumn(ListCol),
     ToggleDone,
     Back,
     Column(usize),
@@ -291,6 +292,44 @@ pub enum AskKind {
     Cleanup,
 }
 
+/// The columns of the story board on the main page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ListCol {
+    Todo,
+    Doing,
+    Review,
+    Done,
+}
+
+impl ListCol {
+    pub fn label(self) -> &'static str {
+        match self {
+            ListCol::Todo => "TO DO",
+            ListCol::Doing => "DOING",
+            ListCol::Review => "IN REVIEW",
+            ListCol::Done => "DONE",
+        }
+    }
+}
+
+/// Which column a story sits in: its status, and for an in-progress story whether any task has started.
+pub fn list_col_of(story: &StorySummary) -> ListCol {
+    match story.status {
+        StoryStatus::InReview => ListCol::Review,
+        StoryStatus::Done => ListCol::Done,
+        StoryStatus::InProgress if story.error.is_none() && story.total > 0 && story.counts[0] < story.total => ListCol::Doing,
+        StoryStatus::InProgress => ListCol::Todo,
+    }
+}
+
+/// A story card being pressed: dropping it on another column moves it, or starts its review.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoryDrag {
+    pub index: usize,
+    pub from: ListCol,
+    pub over: Option<ListCol>,
+}
+
 /// A question about starting an agent for a task.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AgentAsk {
@@ -417,6 +456,7 @@ pub struct App {
     /// The text typed or pasted into the "new story" box, while it is open.
     pub new_story: Option<String>,
     pub card_drag: Option<CardDrag>,
+    pub story_drag: Option<StoryDrag>,
     launch_done: (Sender<AppMsg>, Receiver<AppMsg>),
     pub pr_lookup: Arc<dyn PrLookup + Send + Sync>,
     /// The real state of recorded PRs, as last found on GitHub (newer than what the board file says).
@@ -480,6 +520,7 @@ impl App {
             herdr: None,
             new_story: None,
             card_drag: None,
+            story_drag: None,
             launch_done: std::sync::mpsc::channel(),
             pr_lookup: Arc::new(GhLookup),
             pr_states: HashMap::new(),
@@ -586,10 +627,119 @@ impl App {
         self.reselect(key);
     }
 
+    /// The story columns that are showing, each with the positions (in `visible_stories`) of its stories.
+    pub fn list_columns(&self) -> Vec<(ListCol, Vec<usize>)> {
+        let mut shown = vec![ListCol::Todo, ListCol::Doing, ListCol::Review];
+        if !self.hide_done {
+            shown.push(ListCol::Done);
+        }
+        let visible = self.visible_stories();
+        shown
+            .into_iter()
+            .map(|col| {
+                let stories = visible.iter().enumerate().filter(|(_, s)| list_col_of(s) == col).map(|(i, _)| i).collect();
+                (col, stories)
+            })
+            .collect()
+    }
+
+    /// Up or down within the selected story's column.
     pub fn list_move(&mut self, delta: i32) {
-        let len = self.visible_stories().len() as i32;
-        if len > 0 {
-            self.list_sel = (self.list_sel as i32 + delta).clamp(0, len - 1) as usize;
+        let columns = self.list_columns();
+        let Some((_, stories)) = columns.iter().find(|(_, s)| s.contains(&self.list_sel)) else {
+            let len = self.visible_stories().len() as i32;
+            if len > 0 {
+                self.list_sel = (self.list_sel as i32 + delta).clamp(0, len - 1) as usize;
+            }
+            return;
+        };
+        let pos = stories.iter().position(|i| *i == self.list_sel).unwrap_or(0) as i32;
+        self.list_sel = stories[(pos + delta).clamp(0, stories.len() as i32 - 1) as usize];
+    }
+
+    /// Left or right to the next column that has stories, keeping the row where it can.
+    pub fn list_move_col(&mut self, delta: i32) {
+        let columns = self.list_columns();
+        let Some(here) = columns.iter().position(|(_, s)| s.contains(&self.list_sel)) else {
+            return;
+        };
+        let row = columns[here].1.iter().position(|i| *i == self.list_sel).unwrap_or(0);
+        let mut next = here as i32 + delta;
+        while next >= 0 && (next as usize) < columns.len() {
+            let stories = &columns[next as usize].1;
+            if !stories.is_empty() {
+                self.list_sel = stories[row.min(stories.len() - 1)];
+                return;
+            }
+            next += delta;
+        }
+    }
+
+    /// The column a pressed story card is held over, for highlighting the drop target.
+    pub fn drop_list_column(&self) -> Option<ListCol> {
+        self.story_drag.as_ref().and_then(|d| d.over).filter(|c| Some(*c) != self.story_drag.as_ref().map(|d| d.from))
+    }
+
+    fn story_info(&self, index: usize) -> Option<(String, ListCol, usize)> {
+        self.visible_stories().get(index).map(|s| (s.key.clone(), list_col_of(s), s.total))
+    }
+
+    /// Start the review skill for a story whose tasks are all finished, in a new Herdr tab.
+    pub fn review_story(&mut self, key: &str) {
+        let checked = store::load(&self.root, key).and_then(|mut board| match board.story.status {
+            StoryStatus::InReview => Ok(()),
+            StoryStatus::Done => anyhow::bail!("it is done; drag it back to DOING first to review it again"),
+            StoryStatus::InProgress => rules::story_transition(&mut board, StoryStatus::InReview),
+        });
+        if let Err(e) = checked {
+            self.set_notice(format!("{key} is not ready for review: {e:#}"));
+            return;
+        }
+        self.run_launch(Launch {
+            workspace: key.to_string(),
+            tab: "review".into(),
+            agent: herdr::agent_name(&[key, "review"]),
+            prompt: format!("/story-review {key}"),
+        });
+    }
+
+    pub fn review_selected(&mut self) {
+        if let Some(key) = self.selected_story_key() {
+            self.review_story(&key);
+        }
+    }
+
+    fn set_story_status(&mut self, key: &str, to: StoryStatus, done_text: &str) {
+        match store::update(&self.root, key, |b| rules::story_transition(b, to)) {
+            Ok(()) => {
+                self.reload();
+                self.set_notice(format!("{key} {done_text}"));
+            }
+            Err(e) => self.set_notice(format!("could not move {key}: {e:#}")),
+        }
+    }
+
+    /// A story card dropped on another column.
+    pub fn move_story(&mut self, index: usize, to: ListCol) {
+        let Some((key, from, total)) = self.story_info(index) else {
+            return;
+        };
+        match (from, to) {
+            (ListCol::Doing, ListCol::Review) => self.review_story(&key),
+            (ListCol::Todo, ListCol::Doing) if total == 0 => self.run_launch(Launch {
+                workspace: key.clone(),
+                tab: "break down".into(),
+                agent: herdr::agent_name(&[&key, "breakdown"]),
+                prompt: format!("/story-break-down {key}"),
+            }),
+            (ListCol::Todo, ListCol::Doing) => self.set_notice(format!(
+                "{key} moves to DOING by itself when its first task leaves TODO: open it and drag a card to PLANNING or IMPLEMENTING"
+            )),
+            (ListCol::Review | ListCol::Done, ListCol::Doing) => self.set_story_status(&key, StoryStatus::InProgress, "is back in DOING"),
+            (ListCol::Review, ListCol::Done) => self.set_story_status(&key, StoryStatus::Done, "is done"),
+            (ListCol::Doing, ListCol::Done) => self.set_notice(format!("review {key} first: drag it to IN REVIEW")),
+            (ListCol::Todo, _) => self.set_notice(format!("{key} has tasks that are not finished yet")),
+            _ => self.set_notice(format!("{key} cannot move from {} to {}", from.label(), to.label())),
         }
     }
 
@@ -901,6 +1051,17 @@ impl App {
     }
 
     pub fn on_drag(&mut self, x: u16, y: u16) {
+        if self.story_drag.is_some() {
+            let over = match self.hit(x, y) {
+                Some(Target::StoryColumn(c)) => Some(c),
+                Some(Target::Story(n)) => self.story_info(n).map(|(_, c, _)| c),
+                _ => None,
+            };
+            if let Some(drag) = &mut self.story_drag {
+                drag.over = over;
+            }
+            return;
+        }
         if self.card_drag.is_some() {
             let over = match self.hit(x, y) {
                 Some(Target::Column(c) | Target::Card { col: c, .. }) => Some(c),
@@ -936,6 +1097,13 @@ impl App {
     }
 
     pub fn on_release(&mut self) {
+        if let Some(drag) = self.story_drag.take() {
+            match drag.over {
+                Some(to) if to != drag.from => self.move_story(drag.index, to),
+                _ => self.open_selected(),
+            }
+            return;
+        }
         if let Some(drag) = self.card_drag.take() {
             match drag.over {
                 Some(to) if to != drag.col => {
@@ -1627,9 +1795,10 @@ impl App {
             KeyCode::Esc => return true,
             KeyCode::Up | KeyCode::Char('k') => self.list_move(-1),
             KeyCode::Down | KeyCode::Char('j') => self.list_move(1),
-            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => {
-                self.open_selected()
-            }
+            KeyCode::Left | KeyCode::Char('h') => self.list_move_col(-1),
+            KeyCode::Right | KeyCode::Char('l') => self.list_move_col(1),
+            KeyCode::Enter | KeyCode::Char(' ') => self.open_selected(),
+            KeyCode::Char('v') => self.review_selected(),
             KeyCode::Char('d') => self.toggle_hide_done(),
             KeyCode::Char('n') => self.open_new_story(),
             KeyCode::Char('r') => self.reload_now(),
@@ -1792,7 +1961,9 @@ impl App {
         match target {
             Some(Target::Story(i)) => {
                 self.list_sel = i;
-                self.open_selected();
+                if let Some((_, from, _)) = self.story_info(i) {
+                    self.story_drag = Some(StoryDrag { index: i, from, over: None });
+                }
             }
             Some(Target::ToggleDone) => self.toggle_hide_done(),
             Some(Target::Back) => self.back(),
@@ -2187,7 +2358,7 @@ mod tests {
         app.on_key(KeyCode::Esc, false);
         assert_eq!(app.screen, Screen::List);
         app.on_key(KeyCode::Char('j'), false);
-        app.on_key(KeyCode::Char('l'), false);
+        app.on_key(KeyCode::Enter, false);
         assert_eq!(open_key(&app), "PROJ-3");
         app.on_key(KeyCode::Backspace, false);
         assert_eq!(app.screen, Screen::List);
