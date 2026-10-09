@@ -1,4 +1,4 @@
-# capcom-tui (Mission Control's terminal board)
+# capcom-tui (CAPCOM's terminal board)
 
 ![capcom-tui board](img/board.svg)
 

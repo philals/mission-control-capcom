@@ -1,6 +1,6 @@
-# Mission Control / CAPCOM
+# CAPCOM
 
-**Mission control for story-driven work, with a single voice at the console: `capcom`.** Break a Jira story into PR-sized tasks, plan and implement each one with [Claude Code](https://claude.com/claude-code) skills, and watch all of it (tasks, draft PRs, CI stages, manual deploys) on one live board in your terminal.
+**Mission Control for story-driven work: one voice at the console.** Break a Jira story into PR-sized tasks, plan and implement each one with [Claude Code](https://claude.com/claude-code) skills, and watch all of it (tasks, draft PRs, CI stages, manual deploys) on one live board in your terminal.
 
 [![CI](https://github.com/philals/mission-control-capcom/actions/workflows/ci.yml/badge.svg)](https://github.com/philals/mission-control-capcom/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -13,11 +13,11 @@
 
 ## The name
 
-In NASA's Mission Control, **CAPCOM** (capsule communicator) is the one specialist who talks to the crew, so the crew hears a single voice. This project is meant to be that voice for your work: one place that tells you what is planned, what is in flight and what needs you. The project is called **Mission Control** and its commands are `capcom` and `capcom-tui`. It is not affiliated with the video-game company Capcom; the name is the NASA role.
+In NASA's Mission Control, **CAPCOM** (capsule communicator) is the one specialist who talks to the crew, so the crew hears a single voice. This app is meant to be that voice for your work: one place that tells you what is planned, what is in flight and what needs you. The app and its commands are called `capcom` and `capcom-tui`; the repository is `mission-control-capcom` so it is easy to tell apart from the video-game company Capcom, which this project has nothing to do with.
 
 ## Read this first: it is one person's workflow
 
-Mission Control is built around **how its author works**, not around a general idea of project management. The author takes a Jira story, splits it into tasks that each become one or more *draft* pull requests (often in several repositories), reviews and merges them by hand, and likes to keep the real state in plain local files rather than in a tool. The statuses, the "no stacked PRs" rule, the draft-only PRs, the 1960s space-programme look and the Herdr integration all come from that mental model.
+CAPCOM is built around **how its author works**, not around a general idea of project management. The author takes a Jira story, splits it into tasks that each become one or more *draft* pull requests (often in several repositories), reviews and merges them by hand, and likes to keep the real state in plain local files rather than in a tool. The statuses, the "no stacked PRs" rule, the draft-only PRs, the 1960s space-programme look and the Herdr integration all come from that mental model.
 
 If that sounds like you, great. If not, treat this as a worked example: fork it, delete what you do not need, change the statuses and skills to fit how you work. Issues and ideas are welcome, but changes that pull it away from this model may be politely declined. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
