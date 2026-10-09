@@ -201,7 +201,13 @@ fn summary_line(pr: &PullRequest) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     if let Some(waiting) = pr.waiting_for() {
         let (text, color) = waiting_label(waiting);
-        spans.push(Span::styled(text, Style::new().fg(color).add_modifier(Modifier::BOLD)));
+        if waiting == Waiting::Reviewer {
+            // the flight controller's "GO": dark text on a solid green block
+            let go = Style::new().fg(theme::BG).bg(theme::GREEN).add_modifier(Modifier::BOLD);
+            spans.push(Span::styled(format!(" GO · {text} "), go));
+        } else {
+            spans.push(Span::styled(text, Style::new().fg(color).add_modifier(Modifier::BOLD)));
+        }
         spans.push(Span::raw("  "));
     }
     let mut push = |text: String, color: Color| {
@@ -266,7 +272,12 @@ fn stage_line(
 }
 
 fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> Vec<Line<'static>> {
-    let marker = Span::styled(if selected { "▌ " } else { "  " }, Style::new().fg(theme::CYAN));
+    let go = row.live.and_then(PullRequest::waiting_for) == Some(Waiting::Reviewer);
+    let marker = match (selected, go) {
+        (true, _) => Span::styled("▌ ", Style::new().fg(theme::CYAN)),
+        (false, true) => Span::styled("▌ ", Style::new().fg(theme::GREEN)),
+        _ => Span::raw("  "),
+    };
     let bold = Style::new().add_modifier(Modifier::BOLD);
     let id = match row.number {
         Some(n) => format!("{}#{n}", row.repo),
@@ -329,7 +340,11 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
     let pad = width.saturating_sub(width_of(&first) + width_of(&right));
     first.push(Span::raw(" ".repeat(pad)));
     first.extend(right);
-    let style = if selected { Style::new().bg(theme::SELECT) } else { Style::new() };
+    let style = match (selected, go) {
+        (true, _) => Style::new().bg(theme::SELECT),
+        (false, true) => Style::new().bg(theme::GO_ROW),
+        _ => Style::new(),
+    };
     let button = details_width() + 1 + copy_width() + agent_width(row);
     let mut second = fit(summary, width.saturating_sub(button + 1));
     let gap = width.saturating_sub(width_of(&second) + button);

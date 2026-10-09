@@ -2506,6 +2506,32 @@ mod tests {
     }
 
     #[test]
+    fn a_pr_waiting_for_a_reviewer_gets_a_go_block_a_green_bar_and_a_tinted_row_but_others_do_not() {
+        let (_root, mut app) = two_stories();
+        app.apply_prs(Ok(vec![
+            green(1, "Waits for a reviewer", Review::Required, false),
+            green(3, "Approved and green", Review::Approved, false),
+        ]));
+        app.focus = Focus::Main;
+        let mut term = Terminal::new(TestBackend::new(170, 44)).unwrap();
+        term.draw(|f| draw(f, &app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "GO · ◉ AWAITING REVIEW");
+        let go = &buf[(x, y)];
+        assert_eq!((go.fg, go.bg), (theme::BG, theme::GREEN), "a solid green block with dark text");
+        let tinted = (0..170).filter(|c| buf[(*c, y)].bg == theme::GO_ROW).count();
+        assert!(tinted > 60, "the whole panel row is tinted, found {tinted} cells");
+        let bar = (0..170).map(|c| &buf[(c, y)]).find(|c| c.symbol() == "▌").expect("a bar on the left");
+        assert_eq!(bar.fg, theme::GREEN);
+        let (_, approved_y) = find(&out, "✔ APPROVED");
+        assert!((0..170).all(|c| buf[(c, approved_y)].bg != theme::GO_ROW), "only awaiting-review rows are tinted");
+        assert_readable(&app, 170, 44, "go row");
+        app.focus = Focus::Prs;
+        assert_readable(&app, 170, 44, "go row selected");
+    }
+
+    #[test]
     fn prs_waiting_for_a_reviewer_are_listed_first_and_the_rest_keep_their_order() {
         let (_root, mut app) = two_stories();
         app.apply_prs(Ok(vec![

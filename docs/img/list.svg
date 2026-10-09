@@ -3,6 +3,11 @@
 <desc id="d">A list of demo stories with progress bars, above panels of open pull requests with their CI stages and of manual workflow runs.</desc>
 <rect width="100%" height="100%" rx="10" fill="#14181a"/>
 <rect x="8.0" y="8.0" width="1260.0" height="18" fill="#0d2c5c"/>
+<rect x="16.4" y="332.0" width="403.2" height="18" fill="#103a22"/>
+<rect x="16.4" y="350.0" width="714.0" height="18" fill="#103a22"/>
+<rect x="16.4" y="368.0" width="33.6" height="18" fill="#103a22"/>
+<rect x="50.0" y="368.0" width="201.6" height="18" fill="#84f0a0"/>
+<rect x="251.6" y="368.0" width="478.8" height="18" fill="#103a22"/>
 <rect x="8.0" y="530.0" width="1260.0" height="18" fill="#0d2c5c"/>
 <path d="M16.4 10.0C21.9 14.0 21.4 18.0 20.0 21.0L12.8 21.0C11.4 18.0 10.9 14.0 16.4 10.0Z" fill="#f3ebd6"/>
 <path d="M12.8 18.0L9.2 23.0L12.8 21.0ZM20.0 18.0L23.6 23.0L20.0 21.0Z" fill="#ff806c"/>
@@ -970,14 +975,17 @@
 <path d="M1083.2 323.0L1087.4 323.0M1087.4 323.0L1091.6 323.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M1263.8 323.0L1263.8 332.0M1259.6 323.0L1263.8 323.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M12.2 332.0L12.2 341.0M12.2 341.0L12.2 350.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
+<rect x="16.4" y="332.0" width="4.2" height="18" fill="#84f0a0"/>
 <path d="M734.6 332.0L734.6 341.0M734.6 341.0L734.6 350.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M743.0 332.0L743.0 341.0M743.0 341.0L743.0 350.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M1263.8 332.0L1263.8 341.0M1263.8 341.0L1263.8 350.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M12.2 350.0L12.2 359.0M12.2 359.0L12.2 368.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
+<rect x="16.4" y="350.0" width="4.2" height="18" fill="#84f0a0"/>
 <path d="M734.6 350.0L734.6 359.0M734.6 359.0L734.6 368.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M743.0 350.0L743.0 359.0M743.0 359.0L743.0 368.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M1263.8 350.0L1263.8 359.0M1263.8 359.0L1263.8 368.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M12.2 368.0L12.2 377.0M12.2 377.0L12.2 386.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
+<rect x="16.4" y="368.0" width="4.2" height="18" fill="#84f0a0"/>
 <path d="M734.6 368.0L734.6 377.0M734.6 377.0L734.6 386.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M743.0 368.0L743.0 377.0M743.0 377.0L743.0 386.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M1263.8 368.0L1263.8 377.0M1263.8 377.0L1263.8 386.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
@@ -1395,14 +1403,14 @@
 <text x="285.2" y="327.5" fill="#f3ebd6" font-weight="700" textLength="50.4" lengthAdjust="spacing">review</text>
 <text x="570.8" y="327.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">↻</text>
 <text x="587.6" y="327.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="654.8" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">16:06:34</text>
+<text x="654.8" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">16:09:28</text>
 <text x="755.6" y="327.5" fill="#f3ebd6" font-weight="700" textLength="50.4" lengthAdjust="spacing">MANUAL</text>
 <text x="814.4" y="327.5" fill="#f3ebd6" font-weight="700" textLength="33.6" lengthAdjust="spacing">RUNS</text>
 <text x="856.4" y="327.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">·</text>
 <text x="873.2" y="327.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">2</text>
 <text x="1100.0" y="327.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">↻</text>
 <text x="1116.8" y="327.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="1184.0" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">16:06:34</text>
+<text x="1184.0" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">16:09:28</text>
 <text x="33.2" y="345.5" fill="#f3ebd6" font-weight="700" textLength="42.0" lengthAdjust="spacing">docs:</text>
 <text x="83.6" y="345.5" fill="#f3ebd6" font-weight="700" textLength="58.8" lengthAdjust="spacing">explain</text>
 <text x="150.8" y="345.5" fill="#f3ebd6" font-weight="700" textLength="25.2" lengthAdjust="spacing">the</text>
@@ -1431,13 +1439,15 @@
 <text x="1167.2" y="363.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
 <text x="1184.0" y="363.5" fill="#8cc2ff" textLength="58.8" lengthAdjust="spacing">details</text>
 <text x="1251.2" y="363.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
-<text x="50.0" y="381.5" fill="#8cc2ff" font-weight="700" textLength="8.4" lengthAdjust="spacing">◉</text>
-<text x="66.8" y="381.5" fill="#8cc2ff" font-weight="700" textLength="67.2" lengthAdjust="spacing">AWAITING</text>
-<text x="142.4" y="381.5" fill="#8cc2ff" font-weight="700" textLength="50.4" lengthAdjust="spacing">REVIEW</text>
-<text x="209.6" y="381.5" fill="#84f0a0" textLength="8.4" lengthAdjust="spacing">✓</text>
-<text x="226.4" y="381.5" fill="#84f0a0" textLength="8.4" lengthAdjust="spacing">3</text>
-<text x="251.6" y="381.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">⊘</text>
-<text x="268.4" y="381.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">1</text>
+<text x="58.4" y="381.5" fill="#14181a" font-weight="700" textLength="16.8" lengthAdjust="spacing">GO</text>
+<text x="83.6" y="381.5" fill="#14181a" font-weight="700" textLength="8.4" lengthAdjust="spacing">·</text>
+<text x="100.4" y="381.5" fill="#14181a" font-weight="700" textLength="8.4" lengthAdjust="spacing">◉</text>
+<text x="117.2" y="381.5" fill="#14181a" font-weight="700" textLength="67.2" lengthAdjust="spacing">AWAITING</text>
+<text x="192.8" y="381.5" fill="#14181a" font-weight="700" textLength="50.4" lengthAdjust="spacing">REVIEW</text>
+<text x="268.4" y="381.5" fill="#84f0a0" textLength="8.4" lengthAdjust="spacing">✓</text>
+<text x="285.2" y="381.5" fill="#84f0a0" textLength="8.4" lengthAdjust="spacing">3</text>
+<text x="310.4" y="381.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">⊘</text>
+<text x="327.2" y="381.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">1</text>
 <text x="562.4" y="381.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
 <text x="579.2" y="381.5" fill="#8cc2ff" textLength="33.6" lengthAdjust="spacing">copy</text>
 <text x="621.2" y="381.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
@@ -1564,6 +1574,6 @@
 <text x="772.4" y="543.5" fill="#b8ae94" textLength="33.6" lengthAdjust="spacing">quit</text>
 <text x="814.4" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">]</text>
 <text x="1133.6" y="543.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="1200.8" y="543.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">16:06:34</text>
+<text x="1200.8" y="543.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">16:09:28</text>
 </g>
 </svg>

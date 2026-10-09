@@ -11,6 +11,8 @@ pub const BG: Color = Color::Rgb(0x14, 0x18, 0x1a);
 /// The title and key strips, like the blue of a Mercury-era console.
 pub const HEADER: Color = Color::Rgb(0x0d, 0x2c, 0x5c);
 pub const SELECT: Color = Color::Rgb(0x2b, 0x3b, 0x34);
+/// Row tint for a PR that is green and waiting for a reviewer: a dark console green.
+pub const GO_ROW: Color = Color::Rgb(0x10, 0x3a, 0x22);
 pub const FG: Color = Color::Rgb(0xf3, 0xeb, 0xd6);
 pub const MUTED: Color = Color::Rgb(0xd9, 0xd0, 0xb8);
 pub const DIM: Color = Color::Rgb(0xb8, 0xae, 0x94);
