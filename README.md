@@ -13,7 +13,9 @@
 
 ## The name
 
-In NASA's Mission Control, **CAPCOM** (capsule communicator) is the one specialist who talks to the crew, so the crew hears a single voice. This app is meant to be that voice for your work: one place that tells you what is planned, what is in flight and what needs you. The app and its commands are called `capcom` and `capcom-tui`; the repository is `mission-control-capcom` so it is easy to tell apart from the video-game company Capcom, which this project has nothing to do with.
+**CAPCOM** (short for Capsule Communicator) is the designated communication liaison at NASA's Mission Control Center in Houston, Texas, who serves as the single voice speaking directly to astronauts in space.
+
+This app is meant to be that voice for your work: one place that tells you what is planned, what is in flight and what needs you. The app and its commands are called `capcom` and `capcom-tui`; the repository is `mission-control-capcom` so it is easy to tell apart from the video-game company Capcom, which this project has nothing to do with.
 
 ## Read this first: it is one person's workflow
 
