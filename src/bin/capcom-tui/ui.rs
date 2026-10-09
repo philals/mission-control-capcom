@@ -224,8 +224,25 @@ fn padded(left: Vec<Span<'static>>, right: Vec<Span<'static>>, width: u16) -> Li
     Line::from(spans)
 }
 
-/// The brand and the go/no-go light (no-go while any open PR has a failed check).
-fn brand(app: &App) -> Vec<Span<'static>> {
+/// The go/no-go light: `GO`, or how many PRs are red, or `FIXING` when an agent is on every red one.
+fn light(app: &App) -> Option<(String, ratatui::style::Color)> {
+    if !app.prs.loaded || app.prs.disabled {
+        return None;
+    }
+    let (red, fixing) = app.red_prs();
+    Some(if red == 0 {
+        ("● GO".to_string(), theme::GREEN)
+    } else if fixing == red {
+        (format!("◐ FIXING · {red}"), theme::ORANGE)
+    } else if fixing > 0 {
+        (format!("● NO-GO · {red} red ({fixing} fixing)"), theme::RED)
+    } else {
+        (format!("● NO-GO · {red} red"), theme::RED)
+    })
+}
+
+/// The brand and the go/no-go light, and where the light is (offset and width in cells) to click on.
+fn brand(app: &App) -> (Vec<Span<'static>>, Option<(usize, usize)>) {
     let mut spans = vec![Span::styled("🚀 CAPCOM", Style::new().fg(panel::ORANGE).add_modifier(Modifier::BOLD))];
     if app.attention.away() {
         spans.push(Span::styled("  ☾ AWAY · slow polling", Style::new().fg(theme::DIM)));
@@ -233,13 +250,14 @@ fn brand(app: &App) -> Vec<Span<'static>> {
     if app.auto_sync {
         spans.push(Span::styled("  ⟳ AUTO-SYNC", Style::new().fg(theme::CYAN).add_modifier(Modifier::BOLD)));
     }
-    if app.prs.loaded && !app.prs.disabled {
-        let failing = app.prs.items.iter().any(|p| p.counts().failed > 0);
-        let (text, color) = if failing { ("NO-GO", theme::RED) } else { ("GO", theme::GREEN) };
+    let mut at = None;
+    if let Some((text, color)) = light(app) {
         spans.push(Span::raw("  "));
-        spans.push(Span::styled(format!("● {text}"), Style::new().fg(color).add_modifier(Modifier::BOLD)));
+        let offset = Line::from(spans.clone()).width();
+        at = Some((offset, text.chars().count()));
+        spans.push(Span::styled(text, Style::new().fg(color).add_modifier(Modifier::BOLD)));
     }
-    spans
+    (spans, at)
 }
 
 const NEW_STORY_BUTTON: &str = "[ n + new story ]";
@@ -252,7 +270,10 @@ fn bar(f: &mut Frame, area: Rect, line: Line<'static>) {
 
 fn draw_list_header(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let dim = Style::new().fg(theme::DIM);
-    let mut left = brand(app);
+    let (mut left, light_at) = brand(app);
+    if let Some((offset, width)) = light_at {
+        hits.push((Rect::new(area.x + offset as u16, area.y, width as u16, 1), Target::GoLight));
+    }
     left.push(Span::styled("  STORIES", Style::new().add_modifier(Modifier::BOLD)));
     left.push(Span::raw("  "));
     let new_x = area.x + Line::from(left.clone()).width() as u16;
@@ -465,7 +486,12 @@ fn draw_board_header(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         Span::styled(BACK_LABEL, Style::new().fg(theme::CYAN)),
         Span::raw("  "),
     ];
-    left.extend(brand(app));
+    let before = Line::from(left.clone()).width();
+    let (brand_spans, light_at) = brand(app);
+    if let Some((offset, width)) = light_at {
+        hits.push((Rect::new(area.x + (before + offset) as u16, area.y, width as u16, 1), Target::GoLight));
+    }
+    left.extend(brand_spans);
     let mut right = Vec::new();
     if let Some((pos, count)) = app.story_position() {
         if count > 1 {
@@ -1926,6 +1952,64 @@ mod tests {
         app.focus = Focus::Main;
         app.apply_prs(Ok(vec![calm(1), calm(2), calm(3), red(4)]));
         assert_eq!(app.pr_sel, 0, "with the panel not in use, the most urgent row is the selected one");
+    }
+
+    #[test]
+    fn the_light_counts_the_red_prs_says_fixing_when_agents_are_on_them_and_jumps_to_the_first_on_a_click() {
+        let (_root, mut app, _fake, _) = autopilot_app();
+        let header = |app: &App| render(app, 170, 44).lines().next().unwrap().to_string();
+        app.apply_prs(Ok(vec![mine(1, "a"), mine(2, "b")]));
+        assert!(header(&app).contains("● GO"), "{}", header(&app));
+        let mut broken = red(3, "c");
+        broken.url = "https://github.com/acme/api/pull/3".into();
+        let mut broken2 = red(4, "d");
+        broken2.url = "https://github.com/acme/api/pull/4".into();
+        app.apply_prs(Ok(vec![mine(1, "a"), broken.clone(), broken2.clone()]));
+        assert!(header(&app).contains("● NO-GO · 2 red"), "{}", header(&app));
+        // an agent is asked about #3 only
+        app.autofix_prs.insert(broken.url.clone(), true);
+        app.fix_rounds.insert(broken.url.clone(), (1, std::time::Instant::now()));
+        assert!(header(&app).contains("NO-GO · 2 red (1 fixing)"), "{}", header(&app));
+        app.autofix_prs.insert(broken2.url.clone(), true);
+        app.fix_rounds.insert(broken2.url.clone(), (1, std::time::Instant::now()));
+        let line = header(&app);
+        assert!(line.contains("◐ FIXING · 2") && !line.contains("NO-GO"), "{line}");
+        // click the light: the first red PR is selected
+        let (x, y) = find(&render(&app, 170, 44), "FIXING");
+        app.pr_sel = 0;
+        app.on_click(x + 2, y);
+        assert_eq!(app.focus, Focus::Prs);
+        assert!(app.pr_rows()[app.pr_sel].live.is_some_and(|p| p.is_red()), "the first red row is selected");
+        assert!(app.current_notice().is_some_and(|n| n.contains("is red")), "{:?}", app.current_notice());
+        app.apply_prs(Ok(vec![mine(1, "a")]));
+        let (x, y) = find(&render(&app, 170, 44), "● GO");
+        app.on_click(x + 1, y);
+        assert!(app.current_notice().is_some_and(|n| n.contains("nothing is red")), "{:?}", app.current_notice());
+    }
+
+    #[test]
+    fn a_failing_feed_says_how_stale_the_data_is_and_a_refresh_shows_a_spinner() {
+        let (_root, mut app) = two_stories();
+        app.apply_prs(Ok(feed()));
+        let fine = render(&app, 170, 44);
+        assert!(fine.contains("↻ updated") && !fine.contains("stale"), "{fine}");
+        app.apply_prs(Err("GitHub's hourly GraphQL budget is used up; capcom waits until 18:53".into()));
+        let stale = render(&app, 170, 44);
+        assert!(stale.contains("⚠ stale") && stale.contains("last good"), "the old list stays, labelled:\n{stale}");
+        assert!(stale.contains("acme/widgets#12"), "{stale}");
+        app.apply_prs(Ok(feed()));
+        assert!(!render(&app, 170, 44).contains("stale"), "a good answer clears it");
+        app.prs.loading = true;
+        for frame in 0..6 {
+            app.frame_override = Some(frame);
+            let spinning = render(&app, 170, 44);
+            assert!(spinning.contains("refreshing…"), "{spinning}");
+        }
+        app.frame_override = Some(0);
+        let a = render(&app, 170, 44);
+        app.frame_override = Some(1);
+        assert_ne!(a, render(&app, 170, 44), "the spinner turns");
+        assert_eq!(app.tick_millis(), 250, "so the screen is redrawn four times a second while it spins");
     }
 
     #[test]

@@ -98,6 +98,8 @@ pub enum Target {
     PrAuto(usize),
     ToggleAutoFix,
     ToggleAutoCopilot,
+    /// The go/no-go light in the header: click to select the first red PR.
+    GoLight,
     /// The `[DRAFT]` badge of a live draft pull request.
     PrBadge(usize),
     ConfirmYes,
@@ -234,6 +236,8 @@ pub struct PrData {
     pub items: Vec<PullRequest>,
     pub error: Option<String>,
     pub updated: Option<String>,
+    /// When the last good answer arrived, so a failing feed can say how stale its data is.
+    pub fresh: Option<std::time::Instant>,
     pub loaded: bool,
     pub loading: bool,
     pub disabled: bool,
@@ -245,6 +249,7 @@ pub struct RunData {
     pub warnings: Vec<String>,
     pub error: Option<String>,
     pub updated: Option<String>,
+    pub fresh: Option<std::time::Instant>,
     pub loaded: bool,
     pub loading: bool,
     pub disabled: bool,
@@ -556,7 +561,7 @@ pub struct App {
     pub fix_store: Option<FixStore>,
     pub copilot_requester: Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>,
     fix_seen: HashMap<String, String>,
-    fix_rounds: HashMap<String, (u32, std::time::Instant)>,
+    pub(crate) fix_rounds: HashMap<String, (u32, std::time::Instant)>,
     fix_stall_checked: std::collections::HashSet<String>,
     copilot_tried: std::collections::HashSet<String>,
     /// (PR url, session that made it) for PRs that are on no task.
@@ -725,7 +730,8 @@ impl App {
     /// the loading screen animates, every second while something on screen counts time (a running
     /// check or run, a status line that will clear), else rarely, for the "5 minutes ago" texts.
     pub fn tick_millis(&self) -> u64 {
-        if self.loading_screen() || self.runs_loading_screen() {
+        // the loading screens and the spinner in a panel title move
+        if self.loading_screen() || self.runs_loading_screen() || self.prs.loading || self.runs.loading {
             return crate::loading::FRAME_MILLIS;
         }
         let counting = self.current_notice().is_some()
@@ -1053,6 +1059,7 @@ impl App {
                 }
                 self.prs.error = None;
                 self.prs.updated = Some(now());
+                self.prs.fresh = Some(std::time::Instant::now());
             }
             Err(e) => self.prs.error = Some(e),
         }
@@ -1132,6 +1139,32 @@ impl App {
         let state = format!("{}|{}|{}", pr.feedback.head, failing.join(","), threads.join(","));
         // a conflict is its own state, so clearing it (or a new one) is a new ask; no conflict leaves the key as it was
         Some((if conflicts { format!("{state}|conflict") } else { state }, why.join(" and ")))
+    }
+
+    /// Auto-fix is on for this PR and the agent has been asked about what is wrong with it.
+    pub fn being_fixed(&self, url: &str) -> bool {
+        self.autofix_on(url) && self.fix_rounds.contains_key(url)
+    }
+
+    /// The go/no-go light: the PRs that are red, and how many of those an agent is already on.
+    pub fn red_prs(&self) -> (usize, usize) {
+        let red: Vec<&PullRequest> = self.prs.items.iter().filter(|p| p.is_red()).collect();
+        (red.len(), red.iter().filter(|p| self.being_fixed(&p.url)).count())
+    }
+
+    /// Click on the go/no-go light: select the first red PR.
+    pub fn jump_to_red(&mut self) {
+        let found = self.pr_rows().iter().position(|r| r.live.is_some_and(PullRequest::is_red));
+        match found {
+            Some(i) => {
+                self.set_focus(Focus::Prs);
+                self.pr_sel = i;
+                let name = self.pr_rows().get(i).map(pr_id).unwrap_or_default();
+                self.set_notice(format!("{name} is red"));
+            }
+            None if self.red_prs().0 > 0 => self.set_notice("the red pull request is not on this story: Esc goes back to the list".into()),
+            None => self.set_notice("nothing is red".into()),
+        }
     }
 
     /// The PR panel's "fix round 2/5 sent 3m ago" note for a PR.
@@ -1447,6 +1480,7 @@ impl App {
                 self.runs.warnings = batch.warnings;
                 self.runs.error = None;
                 self.runs.updated = Some(now());
+                self.runs.fresh = Some(std::time::Instant::now());
             }
             Err(e) => self.runs.error = Some(e),
         }
@@ -2661,6 +2695,10 @@ impl App {
         match target {
             Some(Target::Refresh) => {
                 self.refresh_prs();
+                return;
+            }
+            Some(Target::GoLight) => {
+                self.jump_to_red();
                 return;
             }
             Some(Target::SplitHandle) => {
