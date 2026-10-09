@@ -130,11 +130,6 @@ impl PullRequest {
         self.feedback.threads.iter().filter(|t| t.by_copilot && !t.resolved).collect()
     }
 
-    /// Unresolved conversations from anyone.
-    pub fn open_threads(&self) -> usize {
-        self.feedback.threads.iter().filter(|t| !t.resolved).count()
-    }
-
     /// Checks that really failed, not ones that were cancelled.
     pub fn real_failures(&self) -> Vec<&Check> {
         self.checks
@@ -713,7 +708,6 @@ mod tests {
         assert_eq!(pr.feedback.copilot, CopilotState::Reviewed);
         assert_eq!(pr.feedback.copilot_reviewed_at.as_deref(), Some("2026-10-09T02:46:40Z"));
         assert_eq!(pr.copilot_open().iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["T1"]);
-        assert_eq!(pr.open_threads(), 2, "Copilot's and the person's");
         assert_eq!(pr.real_failures().iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), vec!["test"], "a cancelled check is not a failure");
         assert!(pr.settled());
         let requested = json.replace(r#""reviewRequests":{"nodes":[]}"#, r#""reviewRequests":{"nodes":[{"requestedReviewer":{"__typename":"Bot","login":"copilot-pull-request-reviewer"}}]}"#);

@@ -1860,72 +1860,56 @@ mod tests {
     }
 
     #[test]
-    fn the_f_key_and_the_fix_button_ask_now_even_with_the_tick_box_off_and_bring_the_agent_forward() {
+    fn there_is_no_fix_button_and_ticking_auto_fix_again_after_giving_up_starts_the_count_afresh() {
         let (_root, mut app, fake, _) = autopilot_app();
-        app.apply_prs(Ok(vec![with_open_comment(red(1, "sha1"), "T1")]));
-        let out = render(&app, 170, 44);
-        assert!(out.contains("[ fix ]"), "{out}");
-        let (x, y) = find(&out, "[ fix ]");
-        app.on_click(x + 2, y);
-        settle(&mut app);
-        {
-            let asks = fake.resumes.lock().unwrap();
-            assert_eq!(asks.len(), 1);
-            assert!(asks[0].focus && asks[0].prompt.clone().unwrap().contains("asked by hand"), "{:?}", asks[0]);
-        }
+        app.apply_prs(Ok(vec![red(1, "a")]));
+        assert!(!render(&app, 170, 44).contains("[ fix ]"));
         app.focus = Focus::Prs;
-        app.on_key(KeyCode::Char('f'), false);
+        let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = told.clone();
+        app.notify = std::sync::Arc::new(move |title, _| log.lock().unwrap().push(title.to_string()));
+        app.on_key(KeyCode::Char('t'), false);
+        for i in 2..=7 {
+            app.apply_prs(Ok(vec![red(1, &format!("s{i}"))]));
+            settle(&mut app);
+        }
+        assert_eq!(fake.resumes.lock().unwrap().len(), 5, "five rounds, then it stopped");
+        assert_eq!(told.lock().unwrap().len(), 1);
+        app.on_key(KeyCode::Char('t'), false);
+        app.on_key(KeyCode::Char('t'), false);
         settle(&mut app);
-        assert_eq!(fake.resumes.lock().unwrap().len(), 2, "pressing it again asks again");
-        app.apply_prs(Ok(vec![mine(2, "x")]));
-        assert!(!render(&app, 170, 44).contains("[ fix ]"), "a PR with nothing to fix has no button");
+        let asks = fake.resumes.lock().unwrap();
+        assert_eq!(asks.len(), 6, "ticking again asks at once");
+        assert!(asks[5].prompt.clone().unwrap().contains("round 1 of 5"), "{:?}", asks[5].prompt);
     }
 
     #[test]
-    fn auto_fix_is_ticked_per_pr_and_a_pr_s_own_tick_beats_the_default() {
-        let (root, mut app, fake, _) = autopilot_app();
+    fn auto_review_is_ticked_per_pr_and_ticking_it_asks_copilot_even_if_it_was_asked_before() {
+        let (root, mut app, _, asked) = autopilot_app();
         app.settings_path = Some(root.path().join("tui.json"));
-        let mut other = red(2, "b");
+        let mut other = mine(2, "b");
         other.url = "https://github.com/acme/api/pull/2".into();
-        let mut theirs = red(3, "c");
-        theirs.feedback.mine = false;
-        app.apply_prs(Ok(vec![red(1, "a"), other.clone(), theirs.clone()]));
+        app.apply_prs(Ok(vec![mine(1, "a"), other.clone()]));
+        settle(&mut app);
+        assert!(asked.lock().unwrap().is_empty(), "off by default");
         let out = render(&app, 170, 44);
-        assert_eq!(out.matches("[ ] auto-fix").count(), 3, "one per PR of yours, plus the default at the bottom:\n{out}");
-        let (x, y) = find(&out, "[ ] auto-fix");
+        assert_eq!(out.matches("[ ] auto-review").count(), 3, "a tick on each of your two PRs, plus the default at the bottom:\n{out}");
+        let (x, y) = find(&out, "[ ] auto-review");
         app.on_click(x + 2, y);
         settle(&mut app);
-        {
-            let asks = fake.resumes.lock().unwrap();
-            assert_eq!(asks.len(), 1, "ticking a red PR asks straight away, for that PR only");
-        }
-        assert!(app.autofix_prs.values().filter(|on| **on).count() == 1 && !app.autofix);
-        app.apply_prs(Ok(vec![red(1, "a2"), other.clone(), theirs.clone()]));
+        assert_eq!(asked.lock().unwrap().len(), 1, "that PR only: {:?}", asked.lock().unwrap());
+        app.on_key(KeyCode::Char('v'), false);
+        app.on_key(KeyCode::Char('v'), false);
         settle(&mut app);
-        assert_eq!(fake.resumes.lock().unwrap().len(), 2, "the ticked PR keeps being looked after; the other is left alone");
-        app.autofix = true;
-        let second = app.pr_rows().iter().position(|r| r.url.ends_with("/pull/2")).unwrap();
-        app.toggle_pr_autofix(second);
-        app.apply_prs(Ok(vec![red(1, "a2"), other.clone(), theirs]));
-        settle(&mut app);
-        assert_eq!(fake.resumes.lock().unwrap().len(), 2, "default on, but PR 2 has been switched off by its own tick and PR 3 is not yours");
+        assert_eq!(asked.lock().unwrap().len(), 2, "unticked and ticked again asks again");
         let mut again = App::new(root.path().to_path_buf(), None);
         again.settings_path = app.settings_path.clone();
         again.load_settings();
-        assert_eq!(again.autofix_prs.get("https://github.com/acme/api/pull/2"), Some(&false), "remembered");
-        app.apply_prs(Ok(vec![]));
-        assert!(app.autofix_prs.is_empty(), "choices for PRs that are gone are tidied away");
-    }
-
-    #[test]
-    fn the_t_key_toggles_auto_fix_on_the_selected_pr() {
-        let (_root, mut app, _, _) = autopilot_app();
-        app.apply_prs(Ok(vec![mine(1, "a")]));
-        app.focus = Focus::Prs;
-        app.on_key(KeyCode::Char('t'), false);
-        assert!(app.autofix_on("https://github.com/acme/api/pull/1"));
-        app.on_key(KeyCode::Char('t'), false);
-        assert!(!app.autofix_on("https://github.com/acme/api/pull/1"));
+        assert_eq!(again.autocopilot_prs.values().filter(|on| **on).count(), 1, "remembered");
+        app.autocopilot = true;
+        app.apply_prs(Ok(vec![mine(1, "a"), other]));
+        settle(&mut app);
+        assert!(app.autocopilot_on("https://github.com/acme/api/pull/2"), "the default covers a PR with no tick of its own");
     }
 
     #[test]
@@ -1934,7 +1918,7 @@ mod tests {
         app.settings_path = Some(root.path().join("tui.json"));
         app.apply_prs(Ok(vec![mine(1, "a")]));
         let out = render(&app, 170, 44);
-        assert!(out.contains("[ ] auto-fix PRs by default (F)") && out.contains("[ ] auto-request Copilot (C)"), "{out}");
+        assert!(out.contains("[ ] auto-fix PRs by default (F)") && out.contains("[ ] auto-review new PRs by default (C)"), "{out}");
         let (x, y) = find(&out, "auto-fix PRs by default");
         app.on_click(x, y);
         assert!(app.autofix && render(&app, 170, 44).contains("[x] auto-fix PRs by default"));

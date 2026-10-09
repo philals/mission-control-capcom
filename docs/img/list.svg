@@ -1164,16 +1164,6 @@
 <path d="M1263.8 494.0L1263.8 503.0M1263.8 503.0L1263.8 512.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M12.2 512.0L12.2 521.0M12.2 521.0L16.4 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M16.4 521.0L20.6 521.0M20.6 521.0L24.8 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
-<path d="M579.2 521.0L583.4 521.0M583.4 521.0L587.6 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
-<path d="M587.6 521.0L591.8 521.0M591.8 521.0L596.0 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
-<path d="M596.0 521.0L600.2 521.0M600.2 521.0L604.4 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
-<path d="M604.4 521.0L608.6 521.0M608.6 521.0L612.8 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
-<path d="M612.8 521.0L617.0 521.0M617.0 521.0L621.2 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
-<path d="M621.2 521.0L625.4 521.0M625.4 521.0L629.6 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
-<path d="M629.6 521.0L633.8 521.0M633.8 521.0L638.0 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
-<path d="M638.0 521.0L642.2 521.0M642.2 521.0L646.4 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
-<path d="M646.4 521.0L650.6 521.0M650.6 521.0L654.8 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
-<path d="M654.8 521.0L659.0 521.0M659.0 521.0L663.2 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M663.2 521.0L667.4 521.0M667.4 521.0L671.6 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M671.6 521.0L675.8 521.0M675.8 521.0L680.0 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
 <path d="M680.0 521.0L684.2 521.0M684.2 521.0L688.4 521.0" stroke="#80897a" stroke-width="1.2" fill="none" stroke-linecap="square"/>
@@ -1336,7 +1326,7 @@
 <text x="285.2" y="327.5" fill="#f3ebd6" font-weight="700" textLength="50.4" lengthAdjust="spacing">review</text>
 <text x="570.8" y="327.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">↻</text>
 <text x="587.6" y="327.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="654.8" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">17:39:19</text>
+<text x="654.8" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">17:43:27</text>
 <text x="755.6" y="327.5" fill="#f3ebd6" font-weight="700" textLength="33.6" lengthAdjust="spacing">RUNS</text>
 <text x="797.6" y="327.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">&amp;</text>
 <text x="814.4" y="327.5" fill="#f3ebd6" font-weight="700" textLength="42.0" lengthAdjust="spacing">WATCH</text>
@@ -1344,7 +1334,7 @@
 <text x="881.6" y="327.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">3</text>
 <text x="1100.0" y="327.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">↻</text>
 <text x="1116.8" y="327.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="1184.0" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">17:39:19</text>
+<text x="1184.0" y="327.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">17:43:27</text>
 <text x="33.2" y="345.5" fill="#f3ebd6" font-weight="700" textLength="42.0" lengthAdjust="spacing">docs:</text>
 <text x="83.6" y="345.5" fill="#f3ebd6" font-weight="700" textLength="58.8" lengthAdjust="spacing">explain</text>
 <text x="150.8" y="345.5" fill="#f3ebd6" font-weight="700" textLength="25.2" lengthAdjust="spacing">the</text>
@@ -1429,14 +1419,13 @@
 <text x="150.8" y="453.5" fill="#ffd24a" textLength="8.4" lengthAdjust="spacing">1</text>
 <text x="176.0" y="453.5" fill="#ff9a3c" textLength="8.4" lengthAdjust="spacing">●</text>
 <text x="192.8" y="453.5" fill="#ff9a3c" textLength="8.4" lengthAdjust="spacing">1</text>
-<text x="218.0" y="453.5" fill="#ff9a3c" textLength="58.8" lengthAdjust="spacing">copilot</text>
-<text x="285.2" y="453.5" fill="#ff9a3c" textLength="8.4" lengthAdjust="spacing">…</text>
-<text x="302.0" y="453.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
-<text x="318.8" y="453.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
-<text x="335.6" y="453.5" fill="#8cc2ff" textLength="67.2" lengthAdjust="spacing">auto-fix</text>
-<text x="411.2" y="453.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
-<text x="428.0" y="453.5" fill="#8cc2ff" textLength="25.2" lengthAdjust="spacing">fix</text>
-<text x="461.6" y="453.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
+<text x="218.0" y="453.5" fill="#ff9a3c" textLength="8.4" lengthAdjust="spacing">…</text>
+<text x="234.8" y="453.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
+<text x="251.6" y="453.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
+<text x="268.4" y="453.5" fill="#8cc2ff" textLength="67.2" lengthAdjust="spacing">auto-fix</text>
+<text x="344.0" y="453.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
+<text x="360.8" y="453.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
+<text x="377.6" y="453.5" fill="#8cc2ff" textLength="92.4" lengthAdjust="spacing">auto-review</text>
 <text x="478.4" y="453.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
 <text x="495.2" y="453.5" fill="#8cc2ff" textLength="42.0" lengthAdjust="spacing">agent</text>
 <text x="545.6" y="453.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
@@ -1500,9 +1489,12 @@
 <text x="268.4" y="525.5" fill="#b8ae94" textLength="25.2" lengthAdjust="spacing">(F)</text>
 <text x="318.8" y="525.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">[</text>
 <text x="335.6" y="525.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">]</text>
-<text x="352.4" y="525.5" fill="#b8ae94" textLength="100.8" lengthAdjust="spacing">auto-request</text>
-<text x="461.6" y="525.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">Copilot</text>
-<text x="528.8" y="525.5" fill="#b8ae94" textLength="25.2" lengthAdjust="spacing">(C)</text>
+<text x="352.4" y="525.5" fill="#b8ae94" textLength="92.4" lengthAdjust="spacing">auto-review</text>
+<text x="453.2" y="525.5" fill="#b8ae94" textLength="25.2" lengthAdjust="spacing">new</text>
+<text x="486.8" y="525.5" fill="#b8ae94" textLength="25.2" lengthAdjust="spacing">PRs</text>
+<text x="520.4" y="525.5" fill="#b8ae94" textLength="16.8" lengthAdjust="spacing">by</text>
+<text x="545.6" y="525.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">default</text>
+<text x="612.8" y="525.5" fill="#b8ae94" textLength="25.2" lengthAdjust="spacing">(C)</text>
 <text x="8.0" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">[</text>
 <text x="24.8" y="543.5" fill="#b8ae94" textLength="33.6" lengthAdjust="spacing">←→↑↓</text>
 <text x="66.8" y="543.5" fill="#b8ae94" textLength="33.6" lengthAdjust="spacing">move</text>
@@ -1536,6 +1528,6 @@
 <text x="772.4" y="543.5" fill="#b8ae94" textLength="33.6" lengthAdjust="spacing">quit</text>
 <text x="814.4" y="543.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">]</text>
 <text x="1133.6" y="543.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="1200.8" y="543.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">17:39:19</text>
+<text x="1200.8" y="543.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">17:43:27</text>
 </g>
 </svg>
