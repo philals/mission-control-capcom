@@ -1,11 +1,11 @@
 # Story → Task workflow: design
 
 Date: 2026-10-02
-Status: draft, awaiting review
+Status: the original design notes. Some parts have moved on (the terminal board and the Herdr plugin now exist, see `reference.md` and `tui.md` for current behaviour).
 
 ## Goal
 
-Replace `investigate-ticket` and `implement-plan-checklist` with a three-skill workflow that takes a Jira story to draft PRs, tracked on a local kanban board that a Herdr plugin can display and drive.
+Replace an ad-hoc, one-skill-per-ticket habit with a skill workflow that takes a Jira story to draft PRs, tracked on a local kanban board that a Herdr plugin can display and drive.
 
 Success: for any story, you can see every task, its status, its dependencies and its PRs on one board. You can launch the right agent for the next step from that board, and no state exists only in a chat session.
 
@@ -18,7 +18,7 @@ Success: for any story, you can see every task, its status, its dependencies and
 - A task may have several PRs, across several repos.
 - No stacked PRs. A task starts only after its dependencies are merged.
 - All PRs are created as drafts. The user marks them ready in GitHub.
-- PR titles and commits go through the existing `git-commit-push` agent, which owns the title format `feat: TICKET-1234 <description> (T1)`, where `T1` is the board task id.
+- PR titles follow `feat: TICKET-1234 <description> (T1)`, where `T1` is the board task id. The skill uses a commit-and-push helper if the user has one, and plain `git` and `gh` otherwise.
 - The board UI ships as a new Herdr plugin, planned and built as a separate sub-project.
 - The Jira key in PR titles is the subtask key when subtasks exist, otherwise the story key.
 - Delivery is split into two plans. **Plan 1** (schema, board tool, three skills) is useful on its own and ships first. **Plan 2** (the Herdr plugin) sits over `board.json` and triggers the skills, and is iterated separately.
@@ -128,9 +128,9 @@ Input: story key and task id.
 1. Check the gate: status `planned`, all dependencies `done`. Otherwise stop and ask.
 2. Set status `implementing`. Ask the user whether to work in the main repo checkout or a git worktree. Then create a branch per repo from the up-to-date default branch, since there are no stacked PRs.
 3. Follow the plan, stopping to update the plan with the user if it proves wrong. Record new answers under **Decisions**.
-4. Commit and open each PR as a **draft** through the `git-commit-push` agent, supplying the task's `jiraSubtask` key (or the story key if there is none) so the title follows `feat: TICKET-1234 <description>`. Draft means that agent skips auto-merge and labelling.
+4. Commit and open each PR as a **draft** through the user's commit-and-push helper (or plain `git` and `gh`), supplying the task's `jiraSubtask` key (or the story key if there is none) so the title follows `feat: TICKET-1234 <description>`. Draft means that agent skips auto-merge and labelling.
 5. Record each PR in `prs` with state `draft`. Stop. The user marks PRs ready in GitHub, and board refresh marks the task `done` once every PR is merged. CI fixes and review comments are handled in the task while it stays `implementing`.
-6. Review rounds (CI fixes and comments) reuse the existing `pr-looper` skill and leave status unchanged.
+6. Review rounds (CI fixes and comments) can use a looping CI-and-review skill if the user has one, and leave status unchanged.
 
 ## Herdr plugin (separate sub-project)
 
@@ -139,16 +139,11 @@ Herdr plugins are a directory with `herdr-plugin.toml` declaring panes and actio
 The plugin provides:
 
 - A board pane showing `board.json` as columns (`todo`, `planning`, `planned`, `implementing`, `done`), with dependency, blocked, stale-agent and PR-state indicators.
-- Next-action launching per task: `todo` runs plan-task, `planned` and ready runs implement-task, `implementing` offers pr-looper and resume. It opens a Herdr pane, starts a Claude agent with the skill command, records the pane in `agent`, and lets the user answer the skill's questions in that pane.
+- Next-action launching per task: `todo` runs plan-task, `planned` and ready runs implement-task, `implementing` offers resume. It opens a Herdr pane, starts a Claude agent with the skill command, records the pane in `agent`, and lets the user answer the skill's questions in that pane.
 - Jump to a task's agent pane, and timed and on-demand `refresh`.
 - Read-only for anything the skills own. All writes go through the board tool.
 
 This is a new plugin, not an extension of `herdr-board`. It reads `board.json` directly through the shared library crate, so local files stay the only source of truth. Its detailed design belongs to Plan 2.
-
-## Migration
-
-- Retire `investigate-ticket` and `implement-plan-checklist` once the new skills work.
-- Fixes the old path mismatch: plans and checklists were saved to different locations by the two old skills.
 
 ## Out of scope
 

@@ -67,7 +67,7 @@ Schema: `../schemas/board.schema.json`.
 
 ## capcom-tui
 
-    capcom-tui [KEY] [--root DIR] [--pr-query QUERY] [--no-prs] [--deploy-repos REPOS] [--no-runs] [--workdir DIR]
+    capcom-tui [KEY] [--root DIR] [--pr-query QUERY] [--no-prs] [--deploy-repos REPOS] [--no-runs] [--workdir DIR] [--demo]
 
 A live kanban view with a story list (completed stories hidden by default, `d` or the header
 button toggles them), a board per story, and a pull requests panel. Keyboard and mouse. With `KEY`

@@ -2,7 +2,13 @@
 name = "capcom"
 version = "0.1.0"
 edition = "2021"
-description = "Local kanban boards for Jira stories"
+description = "Mission control for story-driven work: local kanban boards, Claude Code skills and a live terminal board for tasks, draft PRs, CI and manual runs"
+license = "MIT"
+repository = "https://github.com/philals/capcom"
+readme = "README.md"
+keywords = ["kanban", "tui", "jira", "github", "claude-code"]
+categories = ["command-line-utilities", "development-tools"]
+rust-version = "1.89"
 
 [dependencies]
 anyhow = "1"

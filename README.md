@@ -1,207 +1,150 @@
 # capcom
 
-A local kanban workflow for Jira stories: a Rust tool (`capcom`) that is the only writer of each story's `board.json`, plus four Claude Code skills that break a story down, plan and implement its tasks as draft PRs, and review the finished story. Your story data lives in a separate folder you choose, so this repo contains no project data.
+**Mission control for story-driven work.** Break a Jira story into PR-sized tasks, plan and implement each one with [Claude Code](https://claude.com/claude-code) skills, and watch all of it (tasks, draft PRs, CI stages, manual deploys) on one live board in your terminal.
 
-## The story workflow
+[![CI](https://github.com/philals/capcom/actions/workflows/ci.yml/badge.svg)](https://github.com/philals/capcom/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Take a Jira story, break it into PR-sized tasks, plan each task, implement each task as draft PRs. Progress for every story lives in one local file, `<root>/<KEY>/board.json`, shown as a kanban.
+<p align="center">
+  <img src="docs/img/board.svg" alt="capcom-tui showing a story board with tasks in the TODO, PLANNING, PLANNED, IMPLEMENTING and DONE columns, above panels of open pull requests with their CI stages and of manual workflow runs" width="100%">
+</p>
+
+> The picture is drawn from invented demo data. Try it yourself with no setup: `capcom-tui --demo`.
+
+## Read this first: it is one person's workflow
+
+capcom is built around **how its author works**, not around a general idea of project management. The author takes a Jira story, splits it into tasks that each become one or more *draft* pull requests (often in several repositories), reviews and merges them by hand, and likes to keep the real state in plain local files rather than in a tool. The statuses, the "no stacked PRs" rule, the draft-only PRs, the 1960s space-programme look and the Herdr integration all come from that mental model.
+
+If that sounds like you, great. If not, treat this as a worked example: fork it, delete what you do not need, change the statuses and skills to fit how you work. Issues and ideas are welcome, but changes that pull it away from this model may be politely declined. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## What is in the box
+
+| Part | What it does |
+|---|---|
+| **`capcom`** (command) | The only writer of each story's `board.json`: tasks, statuses, dependencies, PRs. Refuses illegal moves. Everything it prints is JSON. |
+| **Four Claude Code skills** | `/story-break-down`, `/story-plan-task`, `/story-implement-task`, `/story-review`. They talk to you, Jira and `git`/`gh`, and change the board only through `capcom`. |
+| **`capcom-tui`** | A live terminal board (keyboard and mouse): your stories, your open PRs with their CI stages, and the GitHub Actions runs you started by hand. It can start the skills for you and finish tasks when their PRs merge. |
+| **Herdr plugin** (optional) | Opens `capcom-tui` from a keyboard shortcut in [Herdr](https://herdr.dev), and lets the board launch agents in Herdr panes. |
+
+## How it works
 
 ```
  story ──► break down ──► board.json (tasks, deps) ──► plan task ──► implement task ──► draft PRs
  (Jira)   /story-break-down                            /story-plan-task  /story-implement-task
 ```
 
-Local files are the source of truth. Jira is written only once: `story-break-down` can create subtasks, and never updates them afterwards.
+- **Local files are the source of truth.** Each story is a folder with a `board.json`, a `story.md` and one markdown file per task. Jira only ever receives the subtasks, once, if you say yes.
+- **Task statuses:** `todo → planning → planned → implementing → done`, plus `dropped`, and a `blocked` flag. A task can skip planning (`todo → implementing`) for spikes and manual testing. `done` means every expected PR is merged.
+- **Story statuses:** `in_progress → in_review → done`, moved by `/story-review` once every task is finished.
+- **PRs are always drafts, and never stacked.** You mark them ready and merge them yourself; nothing is merged for you.
+- **A task can need several PRs.** List a repo once per expected PR (`--repos api,api,ui` means two PRs in `api` and one in `ui`); the task cannot finish until all of them exist and are merged.
 
-### Triggering the skills
+Design notes: [docs/design.md](docs/design.md). Command reference: [docs/reference.md](docs/reference.md).
 
-Type these in Claude Code (they are also picked up when you ask for the same thing in plain words):
+## Quick start
+
+### 1. Look around (no setup)
+
+```bash
+cargo install --path . --locked      # installs `capcom` and `capcom-tui` into ~/.cargo/bin
+capcom-tui --demo                    # invented stories, PRs and runs; nothing is read or written
+```
+
+### 2. Use it for real
+
+You need: [Rust](https://rustup.rs) 1.89 or newer, the [GitHub CLI](https://cli.github.com) (`gh auth login`), and [Claude Code](https://claude.com/claude-code) with the Atlassian MCP server if you want the skills to read Jira.
+
+```bash
+# a folder for your story data (keep it in its own repo if you like; capcom never needs it inside this one)
+mkdir -p ~/stories
+export CAPCOM_ROOT=~/stories         # also add this to your shell profile and to `env` in ~/.claude/settings.json
+
+# make the skills visible to Claude Code
+for s in story-break-down story-plan-task story-implement-task story-review; do
+  ln -s "$PWD/skills/$s" ~/.claude/skills/$s
+done
+```
+
+Then, in Claude Code:
 
 | Step | Command | What it does |
 |---|---|---|
-| 1 | `/story-break-down PROJ-123` | Reads the story, proposes tasks and dependencies, agrees them with you, writes `stories/PROJ-123/`. Offers to create Jira subtasks once. |
+| 1 | `/story-break-down PROJ-123` | Reads the story, proposes tasks and dependencies, agrees them with you, writes `$CAPCOM_ROOT/PROJ-123/`. Offers to create Jira subtasks once. |
 | 2 | `/story-plan-task PROJ-123 T1` | Researches one task, asks you questions, writes the plan into the task file. Never changes code. |
-| 3 | `/story-implement-task PROJ-123 T1` | Asks main checkout or worktree, implements the plan, opens draft PRs through the `git-commit-push` agent. PR titles end with the task id, for example `feat: PROJ-124 add notice endpoint (T1)`. |
-| 4 | `/story-review PROJ-123` | When every task is done: checks the subtasks are complete, reviews the story's acceptance criteria and intent against what was built, and gives you feedback. |
+| 3 | `/story-implement-task PROJ-123 T1` | Asks main checkout or worktree, implements the plan, opens **draft** PRs titled like `feat: PROJ-124 add notice endpoint (T1)`. |
+| 4 | `/story-review PROJ-123` | When every task is done: checks the subtasks, reviews the story's acceptance criteria and intent against what was built, and tells you what it found. |
 
-Task ids (`T1`, `T2`, ...) come from the board. `capcom show PROJ-123` lists them. `capcom root` prints the stories folder in use.
+And in another terminal, `capcom-tui` shows it all and updates as the files change.
 
-### Typical run
+A typical run, in order: break the story down and approve the table; plan each task in dependency order; implement it; review and mark the draft PRs ready on GitHub yourself; when they merge, drag the card to DONE in the TUI (or run `capcom refresh PROJ-123`); repeat; finish with `/story-review`. More detail on resuming tasks and cleaning up worktrees is in the skills themselves (`skills/*/SKILL.md`).
 
-1. `/story-break-down PROJ-123`, then approve the task table.
-2. For each task, in dependency order: `/story-plan-task PROJ-123 T1`, answer the questions, approve the plan.
-3. `/story-implement-task PROJ-123 T1`. It only starts when the task is `planned` and every dependency is `done`. Choose main repo or worktree when asked.
-4. In GitHub, review the draft PRs and mark them **ready** yourself. Nothing is marked ready or merged for you. CI fixes and review comments are handled inside the task (the `pr-looper` skill, or resume `/story-implement-task`); the task stays `implementing` throughout.
-5. Once the PRs are merged, run `capcom refresh PROJ-123` (needs `gh` logged in). It marks the task `done` when every PR is merged.
-6. Dependent tasks unblock once their dependencies are `done`. Repeat from step 2 for the next task.
-7. When every task is `done`, run `/story-review PROJ-123`. It reviews the whole story against its acceptance criteria and intent and reports back. Accept it to mark the story `done`, or add follow-up tasks with `/story-break-down PROJ-123` to reopen it.
+## The terminal board
 
-Tasks that are spikes or decisions have no PR. Their result is written into the task file and they are marked `done` when you accept it.
+<p align="center">
+  <img src="docs/img/list.svg" alt="capcom-tui story list: three demo stories with progress bars and task counts, above the pull requests and manual runs panels" width="100%">
+</p>
 
-To resume a task that is already `implementing` (after a pause, or for CI failures and review comments on its PRs), run `/story-implement-task PROJ-123 T1` again and confirm you want to resume.
+- **Stories and boards:** a list of stories, and a kanban per story with a card for each task (ready to implement, waits on dependencies, blocked, PRs merged).
+- **Your PRs, with CI:** every open PR from a GitHub search you control, `[DRAFT]` or `[READY]`, with the CI stages that are running, queued or failed listed one per line. Click to open, copy the link, or mark a draft ready (it asks first).
+- **Your manual runs:** the "Run workflow" runs you started, such as a nonprod deploy, with their stages and a link to each.
+- **Finishing tasks:** drag an IMPLEMENTING card to DONE (or press `x`) and capcom checks its PRs on GitHub, and only finishes the task if every one is merged.
+- **Resizable and remembered:** drag any divider; sizes are saved.
+- **Accessible by design:** a fixed theme with at least 4.5:1 text contrast on every screen (a test checks it), state shown with words and icons as well as colour, and focus shown by a double border.
 
-Worktrees are not removed automatically. Once a task is `done` (its PRs merged), run `/story-implement-task PROJ-123 T1` again to clean up: it removes only the worktrees recorded in the task file, only if their PRs are merged and the tree is clean, and asks you before touching anything else.
+Everything it does, every key and every setting is in [docs/tui.md](docs/tui.md).
 
-### Statuses
+## Configuration
 
-```
-todo ─► planning ─► planned ─► implementing ─► done      (task: done = every PR merged)
-                          dropped = cancelled, from any unfinished status
-          todo ─► implementing is also allowed (skip planning, e.g. spikes and manual testing)
+| Setting | Flag | What it is | Default |
+|---|---|---|---|
+| `CAPCOM_ROOT` | `--root` | Folder holding one folder per story | required (not with `--demo`) |
+| `CAPCOM_PR_QUERY` | `--pr-query` | GitHub search for the PR panel (`@me` is resolved by GitHub) | `is:pr author:@me state:open archived:false sort:updated-desc -label:icebox` |
+| `CAPCOM_DEPLOY_REPOS` | `--deploy-repos` | Extra `owner/name` repos (comma separated) to look for your manual runs in | repos of your PRs and stories |
+| `CAPCOM_WORKDIR` | `--workdir` | Where new Herdr workspaces start | the current folder |
+| `CAPCOM_TUI_SETTINGS` | | File for the saved panel sizes | `~/.config/capcom/tui.json` |
+| `CAPCOM_CACHE_DIR` | | Shared GitHub cache | `~/.cache/capcom` |
+| | `--no-prs`, `--no-runs` | Turn the PR or runs panel off | |
 
-in_progress ─► in_review ─► done                          (story, via /story-review)
-```
+## Herdr
 
-`blocked` is a flag with a reason, not a status. No stacked PRs: a task cannot start until its dependencies are merged. There is no per-task review status; review happens on the story. A story can only go `in_review` when every task is `done` or `dropped`. Adding a task reopens it.
+If you use [Herdr](https://herdr.dev), `capcom-tui` run inside a Herdr pane can start the skills for you: paste a Jira key to start a breakdown, or drag a card onto PLANNING or IMPLEMENTING. The repo is also a Herdr plugin with an `open` action, so a key such as `prefix+y` opens the board as an overlay. Setup is in [docs/tui.md](docs/tui.md#herdr). Nothing here needs Herdr; outside it those features are simply off.
 
-## Viewing the board
+## Privacy and security
 
-`capcom-tui` is a live kanban view of your stories.  The header carries the 🚀 CAPCOM brand, a mission clock (`T+` since you started it) and a go/no-go light: `● NO-GO` while any of your open PRs has a failed check, otherwise `● GO`. It is read-only, and it reloads on its own whenever a `board.json` changes, so you can leave it open next to the agents that are updating the board. It works with the keyboard and the mouse.
+- **No project data in this repo.** Your stories live in the folder you choose. The examples and tests use invented names (`acme/widgets`, `PROJ-123`, `DEMO-101`).
+- **No tokens.** All GitHub access goes through your existing `gh` login; capcom never reads or stores a credential.
+- **No telemetry, no network of its own.** The only calls are `gh` to GitHub and, when you ask the skills to, your Atlassian MCP server to Jira.
+- **What is written to disk:** the boards (only by `capcom`, under a lock), your panel sizes, and a small cache of GitHub results that is readable only by you and tidied after a day.
+- **Found a vulnerability?** See [SECURITY.md](SECURITY.md).
 
-```bash
-capcom-tui              # the story list; click or press Enter to open one
-capcom-tui PROJ-123     # open a story's board straight away
-```
-
-**Story list.** One row per story with its key, title, story status, `done/total` tasks, a progress bar and a count per task status. Completed stories (story status `done`) are hidden by default; click `[ Show done ]` in the header or press `d` to show them, and again to hide them.
-
-**Board.** One column per task status (a Dropped column appears only if something was dropped), boxed cards with a status line (ready to implement, waits on dependencies, blocked, PRs merged), the story status in the header, and a detail sheet for the selected card. Narrow terminals (under 60 columns) show one column at a time.
-
-| Where | Mouse | Keys |
-|---|---|---|
-| List | click a row to open it; click `[ Show done ]` / `[ Hide done ]`; wheel moves the selection | `↑↓`/`jk` select, `Enter`/`→` open, `d` show or hide done |
-| Board | click `‹ Stories` to go back; click a column or card to select it; click the selected card again for its detail; click outside a sheet to close it; wheel scrolls a column | `←→`/`hl` column, `↑↓`/`jk` card, `[` `]` switch story, `Tab` PR panel, `Enter` detail, `Esc`/`b` back to the list |
-| PR panel | click a PR to open it on GitHub, a CI stage line to open that check, `[ details ]` for its sheet (each check there has `[ open ]`); wheel scrolls | `Tab` focus, `↑↓` select, `Enter` sheet, `o` open on GitHub, `c` copy link, `m` mark draft ready, `r` refresh (or click the `↻ updated` label) |
-| Runs panel | click a run to open it on GitHub, a stage line to open that stage, `[ details ]` for the sheet (each stage there has `[ open ]`); click a tab when narrow; wheel scrolls | `Tab` focus, `↑↓` select, `Enter` sheet, `o` open run, `r` refresh |
-| Layout | drag the divider, the top edge of the bottom area, or a kanban column border | `< >` PR panel narrower or wider, `+ -` bottom area taller or shorter, `, .` selected column narrower or wider, `=` reset |
-| Anywhere | | `r` reload, `?` help, `q` or Ctrl-C quit |
-
-**Pull requests panel.** A bottom panel lists your open pull requests with their CI stages, refreshed from GitHub in the background:
-
-- **Main screen:** *all* your open PRs from the query, including ones unrelated to any story. PRs recorded on a capcom task are tagged `PROJ-123 · T2`.
-- **Inside a story:** only that story's PRs (the ones recorded on its tasks), tagged with the task id. A PR that GitHub no longer lists as open (for example a merged one) still shows from the board data.
-- **Each row:** the **title on its own full-width line** (it wraps over up to three lines rather than being cut off), then a line with the `[READY]` (green) or `[DRAFT]` (grey) badge, the repo and number, labels, review state, comment count and time since update. A PR that is only known from the board shows `[MERGED]` or `[CLOSED]` instead. Under it a CI summary such as `✓ 12  ✗ 1  ◔ 2  ● 1` (the orange filled circle is pending/queued), then every stage that is still running, queued or failed on its own line, in that order (`◔ CI / build  running 2m 05s`, `● CI / deploy  queued`, `✗ CI / unit  failed 1m 10s`). Passed and skipped stages are only counted; a long list is capped with `… +N more`. A thin line separates one PR from the next.
-- **Click and details:** clicking a PR opens it on GitHub, and clicking one of its CI stage lines opens that check. The `[ details ]` button at the right of its CI line (or Enter on the selected row) opens the full sheet, where every check that has a link has its own `[ open ]` button: draft or ready for review, every check grouped running, queued, failed, passed, with durations. `o` (or the button) opens the PR in your browser.
-- **Copy and ready:** `[ copy ]` (or `c`) puts the PR link on your clipboard (through the terminal and, when installed, `wl-copy`, `xclip` or `pbcopy`). Clicking a `[DRAFT]` badge (or `m`) asks "Mark ready for review?" and, on yes, runs `gh pr ready` for that PR; the panel then refreshes.
-- **Keys:** `Tab` moves focus to the panel and back, `↑↓` select a PR, `Enter` opens the sheet, `o` opens it on GitHub, `r` refreshes now, and so does clicking the `↻ updated` label in a panel title. The mouse works too: click a row, click it again for the sheet, scroll over the panel.
-
-The PR panel fetches with one `gh api graphql` call (it uses your existing `gh` login, so no token is handled by this tool). It polls about every 5 seconds while any check is running or queued and about every 30 seconds otherwise, and costs roughly one GraphQL rate-limit point per poll. Nothing from GitHub is written to disk: PR data lives in memory only. If a fetch fails, the last data stays and the error shows in the panel.
-
-The query defaults to `is:pr author:@me state:open archived:false sort:updated-desc -label:icebox`. Change it with `--pr-query "..."` or `CAPCOM_PR_QUERY`. `--no-prs` turns the panel off (for example when `gh` is not installed). On a short terminal (under about 16 rows) the panel is hidden.
-
-**Manual runs panel.** Next to the pull requests panel (side by side when the terminal is about 150 columns wide or more, otherwise as a second tab, `[ Pull requests · 3 ]  [ Manual runs · 2 (1 active) ]`, with a live count of active runs) is a panel of the GitHub Actions runs *you* started by hand (the "Run workflow" button, `workflow_dispatch`), whatever each repo calls its workflow. This is where a manual nonprod deploy shows up.
-
-- **Which repos:** GitHub cannot list your runs across repos, so the tool asks each repo in turn. The repos are the ones from your open PRs, the PRs recorded on your stories' tasks, and any you add with `CAPCOM_DEPLOY_REPOS=org/a,org/b` (or `--deploy-repos`). Inside a story it shows only runs in that story's repos.
-- **Each run:** a `[RUNNING]`, `[WAITING]` (needs approval), `[QUEUED]`, `[SUCCESS]`, `[FAILED]` or `[CANCELLED]` badge, the repo, the workflow name, the run's title, branch, time since it started and how long it ran. Stages that are running, waiting, queued or failed are listed one per line underneath (running first), like the CI stages on a PR. Successful runs show no stages.
-- **Click through (same as the PR panel):** click a run to open it on GitHub, click any stage line to open that stage, and click `[ details ]` (or press Enter) for the full sheet. Every stage in the sheet has its own `[ open ]` button, and `o` opens the selected run.
-- **Timeliness:** one REST call per repo (run in parallel) about every 10 seconds while any of your runs is active and about every 30 seconds otherwise, plus one call per active or failed run for its stages (finished runs are cached). A finished run (success, failed or cancelled) drops off 3 hours after it finished; anything still active always stays. `r` refreshes now, and so does clicking the `↻ updated` label in a panel title.
-- **Off switch and keys:** `--no-runs` turns it off. `Tab` moves focus main, pull requests, runs; `↑↓` select; the wheel scrolls.
-
-**Sizing.** When there are no manual runs (or the panel is switched off), the runs panel shrinks to a narrow strip and the PRs get the room; it grows back as soon as there is a run, an error or a warning to show. Every panel can be resized, by mouse or keys: drag the divider between the PR and runs panels (also when the runs panel has shrunk; a size you choose is then respected even when it is empty), drag the top edge of the bottom area up or down, and on a board drag the border between two kanban columns. With the keys, `<` `>` make the PR panel narrower or wider, `+` `-` make the bottom area taller or shorter, and `,` `.` make the selected kanban column narrower or wider; `=` resets everything to automatic. **The sizes are saved** and restored the next time you start, in `~/.config/capcom/tui.json` (or `$XDG_CONFIG_HOME/capcom/tui.json`; set `CAPCOM_TUI_SETTINGS` to use another file). The file holds only those numbers, lives outside any repo, and a missing or damaged file just means the defaults.
-
-**Herdr.** Started inside a Herdr pane, `capcom-tui` can launch the skills for you (outside Herdr these are off and say so):
-
-- **New story:** press `n` (or click `[ n + new story ]`) on the story list, paste a Jira key or link and press Enter. A Herdr workspace named after the key is created and `/story-break-down KEY` starts in it.
-- **Drag to start:** drag a TODO card onto PLANNING to start `/story-plan-task KEY T2`, or a TODO or PLANNED card onto IMPLEMENTING for `/story-implement-task KEY T2` (it must have its dependencies done; a TODO card skips planning, handy for spikes and manual testing, and first asks "Does an agent need to implement this?": yes starts the agent, no just moves the card to IMPLEMENTING and opens nothing, for work you do yourself). `p` and `i` do the same for the selected card. Each runs in a new tab of the story's workspace; the drag itself changes nothing, the skill moves the card as its first step. Dropping on any other column explains why nothing started.
-- **No double starts:** agents are named like `proj-123-t2-plan`; if one is already running it is brought to the front instead.
-- **Where they run:** the current folder of `capcom-tui`, or `--workdir` / `CAPCOM_WORKDIR`. Nothing about Herdr is stored: workspaces are found again by their label.
-
-**Finishing tasks.** A merged PR does not update `board.json` by itself, so the TUI helps:
-
-- **Drag to DONE (or `x`):** an IMPLEMENTING card dropped on DONE looks up its recorded PRs on GitHub, records what it found, and moves the task to done only if every PR is merged (a spike or decision with no PRs just finishes). Otherwise it says which PR is still open, for example `T2 is not done: #1294 is still open`. No agent starts. When it was the story's last task, the message points at `/story-review KEY`.
-- **Hint on the card:** an IMPLEMENTING card whose PRs are all merged on GitHub shows `✓ all PRs merged · drag to DONE`. The TUI checks recorded PRs that are not in your open list every minute, in the background (one `gh pr view` per PR, shared between open copies through the cache), and only writes when you ask.
-- **Cleanup question:** if the task's `## Progress` notes record a worktree path, finishing asks "Does an agent need to clean up its worktrees?": yes starts `/story-implement-task KEY T2` (its cleanup step), no does nothing.
-- **`R`:** syncs the whole open story, the same as `capcom refresh KEY`: every PR's state is recorded and tasks whose PRs are all merged finish.
-- **`S`, auto-sync (off by default, remembered):** turns on writing what the background check finds to the board by itself, so a merged PR finishes its task without you doing anything. `⟳ AUTO-SYNC` shows in the header while it is on.
-
-**More than one PR per task.** A task's `repos` list says which PRs it expects: list a repo once per PR. `--repos api,api,ui` means two PRs in `api` and one in `ui`. The task cannot finish until every expected PR exists and is merged, so the card reads `● merged · needs a PR in api` and drag-to-DONE refuses with `waiting for PRs in: api` until the second one is recorded (`capcom add-pr`, which the implement skill does for each PR it opens). Cards show `api ×2`.
-
-**Several copies, one poll.** Every open `capcom-tui` (a terminal and the Herdr plugin, say) shares one cache in `~/.cache/capcom/` (`$XDG_CACHE_HOME/capcom`, or `CAPCOM_CACHE_DIR`). A copy fetches from GitHub only when the cached data is older than the polling interval (5 s busy / 30 s idle for PRs, 10 s / 30 s for runs); a lock makes sure only one copy fetches at a time and the others reuse the result. A manual refresh (`r` or the `↻ updated` label) fetches at once, unless some copy fetched in the last 3 seconds. There is no daemon: when every copy is closed, nothing polls. Copies with a different `--pr-query` or repo list keep separate entries. Cache files are private to your user and are tidied after a day.
-
-**Herdr plugin.** The repo is also a Herdr plugin (`herdr-plugin.toml`) with one action, `capcom.open`: it opens the TUI as an overlay, or focuses the copy already open in the current workspace.
-
-```
-cargo install --path .                      # puts capcom-tui on your PATH
-herdr plugin link /path/to/capcom           # installs the plugin from this folder
-```
-
-Then bind a key in Herdr's `config.toml`:
-
-```toml
-[[keys.command]]
-key = "prefix+y"
-type = "plugin_action"
-command = "capcom.open"
-description = "open capcom"
-```
-
-Put the TUI's settings in the plugin's own config folder (`herdr plugin config-dir capcom`), in a file called `env` with one `KEY=VALUE` per line, for example `CAPCOM_ROOT=...` and `CAPCOM_WORKDIR=...` (Herdr's own environment is not your shell's).
-
-**Colours.** `capcom-tui` paints its own fixed dark theme in 1960s space-programme colours (console charcoal, cream text, a NASA-blue title and key strip, amber and orange lamps, phosphor green), so it looks the same whatever your terminal background or colour scheme is, for example a background that changes per folder. Every text colour keeps at least a 4.5:1 contrast ratio against its background, which a test checks on every screen and dialog. State is never shown by colour alone: pull requests say `[READY]` or `[DRAFT]`, and every CI stage has an icon and a word. The focused panel (or selected column) also gets a double-line border, so focus is not shown by colour alone.
-
-It needs `CAPCOM_ROOT` or `--root` like the tool. While it runs, the terminal's own text selection is replaced by mouse clicks (hold Shift to select text in most terminals).
-
-## Requirements
-
-Rust (to build the tool), `gh` authenticated (for `capcom refresh`, PR work and the pull requests panel), the Atlassian MCP server (the skills read Jira and `story-break-down` can create subtasks), a `git-commit-push` agent that opens the PRs, and the `pr-looper` skill for CI and review rounds.
-
-## Layout
-
-```
-<root>/<KEY>/             # <root> = your stories folder (CAPCOM_ROOT), kept in a separate repo
-  board.json               # tasks, statuses, dependencies, PRs (never edit by hand)
-  story.md                 # summary, acceptance criteria, breakdown notes
-  tasks/T1-<slug>.md       # one file per task: Description, Plan, Decisions, Progress
-```
-
-This repo:
-
-```
-src/, tests/, Cargo.toml   # the capcom tool, the only writer of board.json
-skills/                    # story-break-down, story-plan-task, story-implement-task, story-review
-schemas/board.schema.json  # JSON Schema for board.json
-docs/design.md             # design spec
-docs/reference.md          # command reference
-```
-
-Choose where stories live and tell the tool, in your shell profile and in Claude Code's settings (`env` in `~/.claude/settings.json`) so the skills see it too:
+## Development
 
 ```bash
-export CAPCOM_ROOT=~/path/to/your/stories
+cargo build
+cargo test                                   # the whole suite (it is quick)
+cargo test --bin capcom-tui <name>           # one test
+capcom-tui --demo                            # a quick look at UI changes
+capcom-tui --screenshot docs/img/board.svg --screen board --size 150x34   # regenerate the README pictures
+capcom-tui --screenshot docs/img/list.svg  --screen list  --size 150x30
 ```
 
-From the root of this repo, symlink the skills into `~/.claude/skills/` so Claude Code can find them:
-
-```bash
-ln -s "$PWD/skills/story-break-down" ~/.claude/skills/story-break-down
-ln -s "$PWD/skills/story-plan-task" ~/.claude/skills/story-plan-task
-ln -s "$PWD/skills/story-implement-task" ~/.claude/skills/story-implement-task
-ln -s "$PWD/skills/story-review" ~/.claude/skills/story-review
+```
+src/                      the capcom command and its library (board model, rules, store, refresh)
+src/bin/capcom-tui/       the terminal board (app state, drawing, GitHub polling, Herdr, cache, demo data)
+skills/                   the four Claude Code skills
+schemas/board.schema.json JSON Schema for board.json
+herdr-plugin.toml         the Herdr plugin manifest (scripts/open.sh is its action)
+docs/                     design notes, command reference, TUI guide, README pictures
 ```
 
-## The capcom tool
+## Contributing
 
-Install (Rust required), then check it is on your `PATH`:
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) first, especially the note at the top of this page about whose workflow this is.
 
-```bash
-cargo install --path . --root ~/.local --locked
-capcom --help
-```
+## Credits
 
-Everyday commands (`capcom-tui` is installed alongside it):
+The look of the original board owes a debt to [herdr-board](https://github.com/nelsonPires5/herdr-board), and the whole thing to Herdr and Claude Code. The 1960s space-programme theme is a nod to the people who actually did mission control.
 
-```bash
-capcom list                      # all stories with task counts
-capcom show PROJ-123             # full board as JSON
-capcom ready PROJ-123            # tasks whose dependencies are done
-capcom status PROJ-123 T2 done   # change a task status (illegal moves are refused)
-capcom story-status PROJ-123 in_review   # story status (refused until every task is done)
-capcom block PROJ-123 T3 --reason "waiting on schema change"
-capcom refresh PROJ-123          # sync PR states from GitHub
-```
+## License
 
-All commands print JSON, and errors exit non-zero. `ready` also lists tasks already `implementing`, so check a task's own status as well. Full command reference: [`docs/reference.md`](docs/reference.md).
-
-## What is not built yet
-
-A Herdr plugin that shows `board.json` as a kanban and launches the skills from it is planned separately. Until then, use `capcom show` and `capcom list`.
+[MIT](LICENSE)
