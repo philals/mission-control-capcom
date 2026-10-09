@@ -1,5 +1,6 @@
 use crate::theme;
 use crate::app::{App, AskKind, BottomTab, Column, Focus, Geometry, Screen, StorySummary, Target, STATUS_ORDER};
+use crate::prs::PullRequest;
 use crate::{panel, runs_ui};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -668,13 +669,13 @@ fn draw_board(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         let half = area.width / 2;
         hits.push((Rect::new(area.x, area.y, half, 1), Target::PrevColumn));
         hits.push((Rect::new(area.x + half, area.y, area.width - half, 1), Target::NextColumn));
-        draw_column(f, area, &cols[i], i, true, false, app.row[i], board, &app.pr_states, Some(title), hits);
+        draw_column(f, area, &cols[i], i, true, false, app.row[i], board, &app.pr_states, &app.prs.items, Some(title), hits);
         return;
     }
     let rects = Layout::horizontal((0..cols.len()).map(|i| Constraint::Fill(app.col_weights[i]))).split(area);
     for (i, col) in cols.iter().enumerate() {
         hits.push((rects[i], Target::Column(i)));
-        draw_column(f, rects[i], col, i, i == app.col, app.drop_column() == Some(i), app.row[i], board, &app.pr_states, None, hits);
+        draw_column(f, rects[i], col, i, i == app.col, app.drop_column() == Some(i), app.row[i], board, &app.pr_states, &app.prs.items, None, hits);
     }
     for i in 0..cols.len().saturating_sub(1) {
         let strip = Rect::new(rects[i + 1].x.saturating_sub(1), rects[i + 1].y + 1, 2, rects[i + 1].height.saturating_sub(1));
@@ -693,6 +694,7 @@ fn draw_column(
     sel_row: usize,
     board: &Board,
     known: &HashMap<String, PrState>,
+    prs: &[PullRequest],
     title: Option<String>,
     hits: &mut Hits,
 ) {
@@ -724,7 +726,7 @@ fn draw_column(
             break;
         }
         let rect = Rect::new(inner.x, y, inner.width, CARD_HEIGHT);
-        draw_card(f, rect, task, board, known, selected && n == sel_row);
+        draw_card(f, rect, task, board, known, prs, selected && n == sel_row);
         hits.push((rect, Target::Card { col: index, row: n }));
     }
 }
@@ -770,7 +772,29 @@ fn status_line(task: &Task, board: &Board, known: &HashMap<String, PrState>) -> 
     }
 }
 
-fn draw_card(f: &mut Frame, area: Rect, task: &Task, board: &Board, known: &HashMap<String, PrState>, selected: bool) {
+/// What a card says about its pull requests: the worst state among the live ones, as a short chip.
+fn pr_chip(task: &Task, prs: &[PullRequest]) -> Option<(&'static str, Color)> {
+    if matches!(task.status, Status::Done | Status::Dropped) {
+        return None;
+    }
+    let live: Vec<&PullRequest> = task
+        .prs
+        .iter()
+        .filter_map(|p| prs.iter().find(|l| l.url.trim_end_matches('/') == p.url.trim_end_matches('/')))
+        .collect();
+    let worst = live.iter().min_by_key(|p| p.urgency())?;
+    match worst.urgency() {
+        0 if !worst.real_failures().is_empty() => Some(("✗ CI", theme::RED)),
+        0 => Some(("⚠ conflict", theme::RED)),
+        1 => Some(("✎ answer", theme::ORANGE)),
+        2 => Some(("◉ review", theme::CYAN)),
+        3 => Some(("✔ to merge", theme::GREEN)),
+        4 => Some(("◔ CI", theme::YELLOW)),
+        _ => live.iter().any(|p| p.counts().passed > 0).then_some(("✓ CI", theme::GREEN)),
+    }
+}
+
+fn draw_card(f: &mut Frame, area: Rect, task: &Task, board: &Board, known: &HashMap<String, PrState>, prs: &[PullRequest], selected: bool) {
     let (status, tone) = status_line(task, board, known);
     let ready_planned = task.status == Status::Planned && rules::is_ready(board, task);
     let border = if selected {
@@ -803,7 +827,17 @@ fn draw_card(f: &mut Frame, area: Rect, task: &Task, board: &Board, known: &Hash
             Span::styled(format!("{} ", task.id), Style::new().add_modifier(Modifier::BOLD)),
             Span::raw(trunc(&task.title, width.saturating_sub(task.id.len() + 1))),
         ]),
-        Line::from(Span::styled(trunc(&status, width), Style::new().fg(tone))),
+        match pr_chip(task, prs) {
+            Some((chip, color)) => {
+                let room = width.saturating_sub(chip.chars().count() + 2);
+                Line::from(vec![
+                    Span::styled(trunc(&status, room), Style::new().fg(tone)),
+                    Span::raw("  "),
+                    Span::styled(chip, Style::new().fg(color).add_modifier(Modifier::BOLD)),
+                ])
+            }
+            None => Line::from(Span::styled(trunc(&status, width), Style::new().fg(tone))),
+        },
         Line::from(Span::styled(trunc(&meta, width), Style::new().fg(theme::DIM))),
     ];
     f.render_widget(Paragraph::new(lines), inner);
@@ -1357,6 +1391,33 @@ mod tests {
         app.open_story("PROJ-1");
         let out = render(&app, 170, 44);
         assert!(out.contains("No pull requests recorded"), "{out}");
+    }
+
+    #[test]
+    fn a_task_card_carries_a_chip_for_the_worst_state_of_its_prs() {
+        let (_root, mut app) = with_prs();
+        app.open_story("PROJ-2");
+        let out = render(&app, 170, 44);
+        assert!(out.contains("✗ CI"), "the recorded PR #12 has a failing check:\n{out}");
+        let chip = |app: &App| render(app, 170, 44);
+        let mut pr = feed().remove(0);
+        pr.checks = vec![check("build", CheckState::Passed)];
+        pr.review = Review::Required;
+        pr.is_draft = false;
+        app.apply_prs(Ok(vec![pr.clone()]));
+        assert!(chip(&app).contains("◉ review"), "green and waiting for a reviewer");
+        pr.feedback.merge = crate::prs::MergeState::Conflicting;
+        app.apply_prs(Ok(vec![pr.clone()]));
+        assert!(chip(&app).contains("⚠ conflict"), "a conflict outranks everything else");
+        pr.feedback.merge = crate::prs::MergeState::Clean;
+        pr.checks = vec![check("build", CheckState::Running)];
+        app.apply_prs(Ok(vec![pr.clone()]));
+        let out = chip(&app);
+        assert!(out.contains("◔ CI") && !out.contains("◉ review"), "{out}");
+        app.apply_prs(Ok(vec![]));
+        let out = chip(&app);
+        assert!(!out.contains("◔ CI") && !out.contains("✗ CI") && !out.contains("◉ review"), "no live data, no chip:\n{out}");
+        assert_readable(&app, 170, 44, "cards with chips");
     }
 
     #[test]

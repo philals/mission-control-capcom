@@ -30,7 +30,7 @@ Drag a card to another column:
 
 ## Board
 
-One column per task status (a Dropped column appears only if something was dropped), boxed cards with a status line (ready to implement, waits on dependencies, blocked, PRs merged), the story status in the header, and a detail sheet for the selected card. Narrow terminals (under 60 columns) show one column at a time.
+One column per task status (a Dropped column appears only if something was dropped), boxed cards with a status line (ready to implement, waits on dependencies, blocked, PRs merged), the story status in the header, and a detail sheet for the selected card. A card whose task has live pull requests ends its status line with a chip for the worst state among them, so you need not open the panel below: `✗ CI` (a failing check), `⚠ conflict`, `✎ answer` (comments or changes to answer), `◉ review` (green, waiting for a reviewer), `✔ to merge`, `◔ CI` (running) or `✓ CI` (green). Narrow terminals (under 60 columns) show one column at a time.
 
 | Where | Mouse | Keys |
 |---|---|---|
