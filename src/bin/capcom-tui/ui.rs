@@ -2863,6 +2863,50 @@ mod tests {
     }
 
     #[test]
+    fn a_running_check_says_how_long_it_usually_takes_once_it_has_a_history() {
+        let (_root, mut app) = two_stories();
+        let minutes_ago = |m: i64| (chrono::Utc::now() - chrono::Duration::minutes(m)).to_rfc3339();
+        let timed = |name: &str, state: CheckState, started: String, ended: Option<String>| Check {
+            name: name.into(),
+            workflow: Some("CI".into()),
+            state,
+            started_at: Some(started),
+            completed_at: ended,
+            url: None,
+            external: false,
+        };
+        // history: "e2e" passed in four minutes on another PR
+        let mut other = pr_with(9, "History", Review::None, false, CheckState::Passed);
+        other.checks = vec![timed("e2e", CheckState::Passed, minutes_ago(30), Some(minutes_ago(26)))];
+        let mut running = pr_with(1, "Runs now", Review::None, false, CheckState::Running);
+        running.checks = vec![timed("e2e", CheckState::Running, minutes_ago(2), None)];
+        app.apply_prs(Ok(vec![other, running.clone()]));
+        let out = render(&app, 170, 44);
+        assert!(out.contains("running 2m 00s of ~4m") || out.contains("running 2m 01s of ~4m"), "{out}");
+        running.checks = vec![timed("e2e", CheckState::Running, minutes_ago(9), None)];
+        app.apply_prs(Ok(vec![running.clone()]));
+        assert!(render(&app, 170, 44).contains("· usually ~4m"), "past its usual time it says so");
+        let mut fresh = running;
+        fresh.checks = vec![timed("other", CheckState::Running, minutes_ago(1), None)];
+        app.apply_prs(Ok(vec![fresh]));
+        let out = render(&app, 170, 44);
+        assert!(out.contains("running 1m") && !out.contains(" of ~") && !out.contains("usually"), "no history, no estimate:\n{out}");
+    }
+
+    #[test]
+    fn what_checks_usually_take_is_remembered_in_a_file_between_runs() {
+        let (root, mut app) = two_stories();
+        let file = root.path().join("durations.json");
+        app.durations_path = Some(file.clone());
+        let minutes_ago = |m: i64| (chrono::Utc::now() - chrono::Duration::minutes(m)).to_rfc3339();
+        let mut done = pr_with(9, "History", Review::None, false, CheckState::Passed);
+        done.checks = vec![Check { name: "e2e".into(), workflow: None, state: CheckState::Passed, started_at: Some(minutes_ago(30)), completed_at: Some(minutes_ago(27)), url: None, external: false }];
+        app.apply_prs(Ok(vec![done]));
+        assert!(file.exists(), "learning something writes the file");
+        assert!(!crate::durations::Durations::load(&file).estimate("acme/api", &Check { name: "e2e".into(), workflow: None, state: CheckState::Running, started_at: None, completed_at: None, url: None, external: false }).is_none());
+    }
+
+    #[test]
     fn an_all_green_pr_waiting_for_a_reviewer_is_highlighted_and_counted_in_the_title() {
         let (_root, mut app) = two_stories();
         app.apply_prs(Ok(vec![
