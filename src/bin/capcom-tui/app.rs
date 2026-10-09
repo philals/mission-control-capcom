@@ -250,6 +250,9 @@ pub struct RunData {
     pub disabled: bool,
 }
 
+/// Rows with nothing to do (this rank and below) are shown as one line unless selected.
+pub const QUIET_FROM: u8 = 5;
+
 /// One line of the pull request panel: a live GitHub PR, or a PR known only from the board.
 pub struct PrRow<'a> {
     pub live: Option<&'a PullRequest>,
@@ -269,6 +272,17 @@ pub struct PrRow<'a> {
     pub auto_review: Option<bool>,
     /// What capcom has asked the agent so far, such as `⟳ fix round 2/5 sent 3m ago`.
     pub fix: Option<String>,
+}
+
+impl PrRow<'_> {
+    /// How much it needs you (see `PullRequest::urgency`); a PR known only from the board is the quietest.
+    pub fn urgency(&self) -> u8 {
+        self.live.map_or(7, PullRequest::urgency)
+    }
+
+    pub fn quiet(&self) -> bool {
+        self.urgency() >= QUIET_FROM
+    }
 }
 
 fn pr_id(row: &PrRow) -> String {
@@ -1020,12 +1034,23 @@ impl App {
                 if self.autofix_prs.len() + self.autocopilot_prs.len() != before {
                     self.save_settings();
                 }
+                let following = if self.focus == Focus::Prs { self.pr_rows().get(self.pr_sel).map(|r| r.url.clone()) } else { None };
                 if self.durations.learn(&items) {
                     if let Some(path) = &self.durations_path {
                         self.durations.save(path);
                     }
                 }
                 self.prs.items = items;
+                // the row you are on stays under you when the order changes; with the panel not in use, the most urgent is selected
+                match following {
+                    Some(url) => {
+                        if let Some(i) = self.pr_rows().iter().position(|r| r.url == url) {
+                            self.pr_sel = i;
+                        }
+                    }
+                    None if self.screen == Screen::List => self.pr_sel = 0,
+                    None => {}
+                }
                 self.prs.error = None;
                 self.prs.updated = Some(now());
             }
@@ -1866,8 +1891,9 @@ impl App {
                         fix: self.fix_label(&p.url),
                     })
                     .collect();
-                // PRs that are green and only waiting for a reviewer come first (the order is otherwise kept)
-                rows.sort_by_key(|r| r.live.and_then(PullRequest::waiting_for) != Some(crate::prs::Waiting::Reviewer));
+                // what needs you comes first (red, then answers owed, then waiting for review, ...); the
+                // order GitHub gave is otherwise kept
+                rows.sort_by_key(PrRow::urgency);
                 rows
             }
             Screen::Board => {
@@ -2651,8 +2677,12 @@ impl App {
             }
             Some(Target::Pr(i)) => {
                 self.set_focus(Focus::Prs);
+                // a quiet PR is one line until selected: the first click opens it up, the next opens it on GitHub
+                let collapsed = i != self.pr_sel && self.pr_rows().get(i).is_some_and(PrRow::quiet);
                 self.pr_sel = i;
-                self.open_pr(i);
+                if !collapsed {
+                    self.open_pr(i);
+                }
                 return;
             }
             Some(Target::PrCopy(i)) => {

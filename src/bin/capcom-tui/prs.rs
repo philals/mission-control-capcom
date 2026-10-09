@@ -169,6 +169,25 @@ impl PullRequest {
         !self.real_failures().is_empty() || self.feedback.merge == MergeState::Conflicting
     }
 
+    /// How much the PR needs its author, most first: 0 red (a failing check or a conflict), 1 something
+    /// to answer (Copilot's comments, changes requested), 2 waiting for a reviewer, 3 ready to merge,
+    /// 4 checks running, 5 nothing to do, 6 a draft with nothing to do.
+    pub fn urgency(&self) -> u8 {
+        if self.is_red() {
+            0
+        } else if !self.copilot_open().is_empty() || self.review == Review::ChangesRequested {
+            1
+        } else {
+            match self.waiting_for() {
+                Some(Waiting::Reviewer) => 2,
+                Some(Waiting::Merge) => 3,
+                _ if self.is_busy() => 4,
+                _ if self.is_draft => 6,
+                _ => 5,
+            }
+        }
+    }
+
     /// No GitHub Actions check is still running or queued. A status that another service leaves
     /// pending (such as a visual review waiting for someone to accept it) does not count.
     pub fn settled(&self) -> bool {
@@ -987,6 +1006,43 @@ mod tests {
         assert!(pr.is_red(), "a conflict is red even when every check is green");
         pr.feedback.merge = MergeState::Behind;
         assert!(!pr.is_red(), "behind is only a nudge");
+    }
+
+    #[test]
+    fn urgency_ranks_what_needs_the_author_most_first() {
+        let rank = |pr: &PullRequest| pr.urgency();
+        let ok = |state| check_of("build", state, false);
+        let mut red = pr_with(vec![ok(CheckState::Failed)]);
+        assert_eq!(rank(&red), 0);
+        red.is_draft = true;
+        assert_eq!(rank(&red), 0, "a draft that is red is still red");
+        let mut conflict = pr_with(vec![ok(CheckState::Passed)]);
+        conflict.feedback.merge = MergeState::Conflicting;
+        assert_eq!(rank(&conflict), 0, "a conflict is red");
+        let mut comments = pr_with(vec![ok(CheckState::Passed)]);
+        comments.feedback.copilot = CopilotState::Reviewed;
+        comments.feedback.threads = vec![Thread { id: "t".into(), resolved: false, outdated: false, by_copilot: true }];
+        assert_eq!(rank(&comments), 1);
+        let mut changes = pr_with(vec![ok(CheckState::Passed)]);
+        changes.review = Review::ChangesRequested;
+        assert_eq!(rank(&changes), 1, "changes requested is something to answer");
+        let mut waiting = pr_with(vec![ok(CheckState::Passed)]);
+        waiting.review = Review::Required;
+        waiting.is_draft = false;
+        assert_eq!(rank(&waiting), 2);
+        waiting.review = Review::Approved;
+        assert_eq!(rank(&waiting), 3);
+        let mut running = pr_with(vec![ok(CheckState::Running)]);
+        running.is_draft = false;
+        assert_eq!(rank(&running), 4);
+        let mut quiet = pr_with(vec![ok(CheckState::Passed)]);
+        quiet.is_draft = false;
+        quiet.review = Review::None;
+        assert_eq!(rank(&quiet), 5);
+        quiet.is_draft = true;
+        assert_eq!(rank(&quiet), 6);
+        let pending_elsewhere = pr_with(vec![ok(CheckState::Passed), check_of("UI Tests", CheckState::Queued, true)]);
+        assert_eq!(rank(&pending_elsewhere), 6, "a status waiting on a person is not 'running'");
     }
 
     #[test]

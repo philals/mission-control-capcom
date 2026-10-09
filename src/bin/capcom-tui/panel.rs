@@ -69,7 +69,7 @@ pub const ORANGE: Color = theme::ORANGE;
 /// Lines the PR rows need (rows plus the dividers between them).
 pub fn content_height(app: &App, width: usize) -> u16 {
     let rows = app.pr_rows();
-    rows.iter().map(|r| row_height(r, width) + 1).sum::<u16>().saturating_sub(1)
+    rows.iter().enumerate().map(|(i, r)| row_height(r, width, is_expanded(r, i, app.pr_sel)) + 1).sum::<u16>().saturating_sub(1)
 }
 
 /// Break text over lines on word boundaries (a word longer than a line is split), cutting after
@@ -300,12 +300,25 @@ fn stage_count(row: &PrRow) -> usize {
     row.live.map_or(0, |pr| pr.open_checks().len())
 }
 
-/// Lines a row takes (not counting the divider below it): the title, the badge and repo line,
-/// the CI summary, then the stages.
-fn row_height(row: &PrRow, width: usize) -> u16 {
+/// Lines a row takes (not counting the divider below it): one when collapsed, else the title, the
+/// badge and repo line, the pipeline rail (live PRs), the CI summary, then the stages.
+fn row_height(row: &PrRow, width: usize, expanded: bool) -> u16 {
+    if !expanded {
+        return 1;
+    }
     let stages = stage_count(row);
     let shown = stages.min(MAX_STAGE_LINES) + usize::from(stages > MAX_STAGE_LINES);
-    (title_lines(row, width).len() + 2 + shown) as u16
+    (title_lines(row, width).len() + 2 + rail_lines(row) + shown) as u16
+}
+
+/// The pipeline rail takes a line on every live PR.
+fn rail_lines(row: &PrRow) -> usize {
+    usize::from(row.live.is_some())
+}
+
+/// A row is shown in full when it needs you or is the selected one; quiet rows take one line.
+pub fn is_expanded(row: &PrRow, index: usize, selected: usize) -> bool {
+    index == selected || !row.quiet()
 }
 
 /// What a running check has taken so far, against what it usually takes: `2m 05s of ~4m`, or
@@ -339,7 +352,137 @@ fn stage_line(
     ]
 }
 
-fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>, durations: &Durations) -> Vec<Line<'static>> {
+/// One stage of a PR's way to being merged: done, in progress, wrong, or not yet. Each is a word and
+/// an icon, so it reads without colour.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Step {
+    Done,
+    Going,
+    Wrong,
+    Pending,
+}
+
+fn step_span(step: Step, text: String) -> Span<'static> {
+    let (icon, color) = match step {
+        Step::Done => ("●", theme::GREEN),
+        Step::Going => ("◔", theme::YELLOW),
+        Step::Wrong => ("✗", theme::RED),
+        Step::Pending => ("○", theme::DIM),
+    };
+    Span::styled(format!("{text} {icon}"), Style::new().fg(color))
+}
+
+/// How long the running checks have left, the longest of them, when they have a usual time.
+fn time_left(pr: &PullRequest, now: DateTime<Utc>, durations: &Durations) -> Option<i64> {
+    pr.checks
+        .iter()
+        .filter(|c| !c.external && c.state == CheckState::Running)
+        .filter_map(|c| Some(durations.estimate(&pr.repo, c)? - check_seconds(c, now)?))
+        .filter(|left| *left > 0)
+        .max()
+}
+
+/// A PR's way to a merge in one line: ready, CI, Copilot, its conversations, approval, the merge.
+/// When it is too wide, the steps already done go first: what is left is what still needs something.
+fn rail(pr: &PullRequest, now: DateTime<Utc>, durations: &Durations, width: usize) -> Vec<Span<'static>> {
+    use crate::prs::CopilotState;
+    let c = pr.counts();
+    let failed = pr.real_failures().len();
+    let ci = if failed > 0 {
+        (Step::Wrong, format!("CI {failed} failed"))
+    } else if pr.is_busy() {
+        (Step::Going, time_left(pr, now, durations).map_or("CI running".to_string(), |s| format!("CI {} left", approx(s))))
+    } else if c.passed > 0 {
+        (Step::Done, "CI".to_string())
+    } else {
+        (Step::Pending, "CI no checks".to_string())
+    };
+    let (copilot, threads) = match pr.feedback.copilot {
+        CopilotState::None => ((Step::Pending, "copilot".to_string()), (Step::Pending, "threads".to_string())),
+        CopilotState::Requested => ((Step::Going, "copilot".to_string()), (Step::Pending, "threads".to_string())),
+        CopilotState::Reviewed => (
+            (Step::Done, "copilot".to_string()),
+            match pr.copilot_open().len() {
+                0 => (Step::Done, "threads".to_string()),
+                n => (Step::Wrong, format!("threads {n}")),
+            },
+        ),
+    };
+    let approval = match pr.review {
+        Review::Approved => (Step::Done, "approved".to_string()),
+        Review::ChangesRequested => (Step::Wrong, "changes requested".to_string()),
+        Review::Required | Review::None => (Step::Pending, "approved".to_string()),
+    };
+    let merge = match pr.feedback.merge {
+        MergeState::Conflicting => (Step::Wrong, "conflicts".to_string()),
+        MergeState::Behind => (Step::Going, "behind".to_string()),
+        MergeState::Clean => (Step::Done, "merge".to_string()),
+        MergeState::Unknown => (Step::Pending, "merge".to_string()),
+    };
+    let ready = if pr.is_draft { (Step::Pending, "draft".to_string()) } else { (Step::Done, "ready".to_string()) };
+    let mut steps = vec![ready, ci, copilot, threads, approval, merge];
+    let wide = |steps: &[(Step, String)]| steps.iter().map(|(_, t)| t.chars().count() + 2).sum::<usize>() + steps.len().saturating_sub(1) * 3;
+    while wide(&steps) + 4 > width {
+        // done steps are old news; steps not reached yet come next; what is wrong or going stays
+        let droppable = steps.iter().position(|(step, _)| *step == Step::Done).or_else(|| steps.iter().position(|(step, _)| *step == Step::Pending));
+        let Some(index) = droppable else {
+            break;
+        };
+        steps.remove(index);
+    }
+    let mut spans = Vec::new();
+    for (n, (step, text)) in steps.into_iter().enumerate() {
+        if n > 0 {
+            spans.push(Span::styled(" · ", dim()));
+        }
+        spans.push(step_span(step, text));
+    }
+    spans
+}
+
+/// A quiet PR on one line: badge, id, title, and the little that matters.
+fn collapsed_line(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> Line<'static> {
+    let marker = if selected { Span::styled("▌ ", Style::new().fg(theme::CYAN)) } else { Span::raw("  ") };
+    let id = match row.number {
+        Some(n) => format!("{}#{n}", row.repo),
+        None => row.repo.clone(),
+    };
+    let mut left: Vec<Span<'static>> = vec![marker, badge(row)];
+    match &row.tag {
+        Some(tag) => left.push(Span::styled(format!(" {tag}  "), Style::new().add_modifier(Modifier::BOLD).fg(theme::MAGENTA))),
+        None => left.push(Span::raw(" ")),
+    }
+    left.push(Span::styled(id, Style::new().fg(theme::CYAN)));
+    let mut right: Vec<Span<'static>> = Vec::new();
+    if let Some(pr) = row.live {
+        let passed = pr.counts().passed;
+        if passed > 0 {
+            right.push(Span::styled(format!("✓ {passed}  "), Style::new().fg(theme::GREEN)));
+        }
+        if let Some((text, color)) = copilot_label(pr) {
+            right.push(Span::styled(format!("{text}  "), Style::new().fg(color)));
+        }
+        right.push(Span::styled(relative(&pr.updated_at, now), dim()));
+    }
+    let room = width.saturating_sub(width_of(&left) + width_of(&right) + 3);
+    let title = trunc(&title_of(row), room);
+    let mut spans = left;
+    spans.push(Span::raw(format!("  {title}")));
+    let used = width_of(&spans) + width_of(&right);
+    spans.push(Span::raw(" ".repeat(width.saturating_sub(used))));
+    spans.extend(right);
+    let line = Line::from(fit(spans, width));
+    if selected {
+        line.style(Style::new().bg(theme::SELECT))
+    } else {
+        line
+    }
+}
+
+fn row_lines(row: &PrRow, width: usize, selected: bool, expanded: bool, now: DateTime<Utc>, durations: &Durations) -> Vec<Line<'static>> {
+    if !expanded {
+        return vec![collapsed_line(row, width, selected, now)];
+    }
     let go = row.live.and_then(PullRequest::waiting_for) == Some(Waiting::Reviewer);
     let marker = match (selected, go) {
         (true, _) => Span::styled("▌ ", Style::new().fg(theme::CYAN)),
@@ -432,6 +575,11 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>, dura
         .map(|t| Line::from(vec![marker.clone(), Span::styled(t, bold)]).style(style))
         .collect();
     lines.push(Line::from(first).style(style));
+    if let Some(pr) = row.live {
+        let mut spans = vec![marker.clone(), Span::raw("  ")];
+        spans.extend(rail(pr, now, durations, width));
+        lines.push(Line::from(fit(spans, width)).style(style));
+    }
     lines.push(Line::from(second).style(style));
     lines.extend(stages.into_iter().map(|s| Line::from(fit(s, width)).style(style)));
     lines
@@ -512,8 +660,9 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         return;
     }
     let width = body.width as usize;
-    let heights: Vec<u16> = rows.iter().map(|r| row_height(r, width) + 1).collect();
     let selected = app.pr_sel.min(rows.len() - 1);
+    let expanded: Vec<bool> = rows.iter().enumerate().map(|(i, r)| is_expanded(r, i, selected)).collect();
+    let heights: Vec<u16> = rows.iter().enumerate().map(|(i, r)| row_height(r, width, expanded[i]) + 1).collect();
     let offset = window_offset(&heights, selected, body.height);
     let now = Utc::now();
     let mut y = body.y;
@@ -524,14 +673,15 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         }
         let h = (heights[i] - 1).min(bottom - y);
         let rect = Rect::new(body.x, y, body.width, h);
-        let lines = row_lines(row, body.width as usize, focused && i == selected, now, &app.durations);
+        let lines = row_lines(row, body.width as usize, focused && i == selected, expanded[i], now, &app.durations);
         f.render_widget(Paragraph::new(lines), rect);
         hits.push((rect, Target::Pr(i)));
-        let title_n = title_lines(row, width).len() as u16;
-        let list = buttons(row);
+        let title_n = if expanded[i] { title_lines(row, width).len() as u16 } else { 0 };
+        let rail_n = rail_lines(row) as u16;
+        let list = if expanded[i] { buttons(row) } else { Vec::new() };
         let total = buttons_width(&list) as u16;
-        if body.width > total + 1 && h > title_n + 1 {
-            let line = y + title_n + 1;
+        if expanded[i] && body.width > total + 1 && h > title_n + 1 + rail_n {
+            let line = y + title_n + 1 + rail_n;
             let mut x = body.x + body.width - total;
             for (which, text, _) in &list {
                 let w = text.chars().count() as u16;
@@ -549,8 +699,8 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         if row.live.is_some_and(|pr| pr.is_draft) && h > title_n {
             hits.push((Rect::new(body.x + 2, y + title_n, BADGE_CLICK_WIDTH.min(body.width), 1), Target::PrBadge(i)));
         }
-        for j in 0..stage_count(row).min(MAX_STAGE_LINES) {
-            let line_y = y + title_n + 2 + j as u16;
+        for j in 0..if expanded[i] { stage_count(row).min(MAX_STAGE_LINES) } else { 0 } {
+            let line_y = y + title_n + 2 + rail_n + j as u16;
             if line_y < y + h {
                 hits.push((Rect::new(body.x, line_y, body.width, 1), Target::OpenCheck(i, j)));
             }
