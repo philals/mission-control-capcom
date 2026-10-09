@@ -112,7 +112,7 @@ Everything it does, every key and every setting is in [docs/tui.md](docs/tui.md)
 
 ## Herdr
 
-If you use [Herdr](https://herdr.dev), `capcom-tui` run inside a Herdr pane can start the skills for you: paste a Jira key to start a breakdown, or drag a card onto PLANNING or IMPLEMENTING. The repo is also a Herdr plugin with an `open` action, so a key such as `prefix+y` opens the board as an overlay. Install it with `herdr plugin install philals/mission-control` (it builds the binaries, so it needs Rust; read [Herdr's trust note](https://herdr.dev/docs/plugins/#trust-and-security) first, since a plugin is ordinary code), then bind a key as described in [docs/tui.md](docs/tui.md#herdr-plugin). Nothing here needs Herdr; outside it those features are simply off.
+If you use [Herdr](https://herdr.dev), `capcom-tui` run inside a Herdr pane can start the skills for you: paste a Jira key to start a breakdown, or drag a card onto PLANNING or IMPLEMENTING. The repo is also a Herdr plugin with an `open` action, so a key such as `prefix+y` opens the board as an overlay. Install it with `herdr plugin install philals/mission-control-capcom` (it builds the binaries, so it needs Rust; read [Herdr's trust note](https://herdr.dev/docs/plugins/#trust-and-security) first, since a plugin is ordinary code), then bind a key as described in [docs/tui.md](docs/tui.md#herdr-plugin). Nothing here needs Herdr; outside it those features are simply off.
 
 ## Privacy and security
 
