@@ -20,6 +20,8 @@ pub struct Settings {
     pub auto_sync: bool,
     pub watched: Vec<crate::runs::Watch>,
     pub autofix: bool,
+    /// Per-PR auto-fix choices that override `autofix`.
+    pub autofix_prs: Vec<(String, bool)>,
     pub autocopilot: bool,
 }
 
@@ -33,6 +35,7 @@ impl Default for Settings {
             auto_sync: false,
             watched: Vec::new(),
             autofix: false,
+            autofix_prs: Vec::new(),
             autocopilot: false,
         }
     }
@@ -108,7 +111,7 @@ mod tests {
     fn settings_survive_a_save_and_a_load() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("tui.json");
-        let saved = Settings { split_pct: 63, bottom_pct: Some(50), split_pinned: true, columns: vec![120, 80, 100, 100, 100, 100], auto_sync: true, watched: vec![], autofix: true, autocopilot: true };
+        let saved = Settings { split_pct: 63, bottom_pct: Some(50), split_pinned: true, columns: vec![120, 80, 100, 100, 100, 100], auto_sync: true, watched: vec![], autofix: true, autofix_prs: vec![("https://github.com/acme/api/pull/1".into(), false)], autocopilot: true };
         save(&path, &saved).unwrap();
         assert_eq!(load(&path), saved);
     }

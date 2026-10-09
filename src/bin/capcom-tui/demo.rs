@@ -1,7 +1,7 @@
 //! Invented stories, pull requests and runs, so capcom-tui can be tried (and photographed for the
 //! README) without a stories folder, GitHub or Herdr. Nothing here is real data.
 use crate::app::App;
-use crate::prs::{Check, CheckState, PullRequest, Review};
+use crate::prs::{Check, CheckState, CopilotState, Feedback, PullRequest, Review, Thread};
 use crate::runs::{Batch, Job, Run, RunState};
 use capcom::model::{PrState, Status, StoryStatus, TaskType};
 use capcom::{ops, rules, store};
@@ -103,7 +103,14 @@ fn check(workflow: &str, name: &str, state: CheckState, minutes_ago: i64, minute
 fn pull_requests() -> Vec<PullRequest> {
     vec![
         PullRequest {
-            feedback: Default::default(),
+            feedback: Feedback {
+                mine: true,
+                head: "9f2c1ab".into(),
+                copilot: CopilotState::Reviewed,
+                copilot_reviewed_at: Some(ago(20)),
+                threads: ["a", "b"].iter().map(|id| Thread { id: id.to_string(), resolved: false, outdated: false, by_copilot: true }).collect(),
+                cancelled: vec![],
+            },
             repo: "acme/web".into(),
             number: 212,
             title: "feat: DEMO-101 build the notification preferences screen (T2)".into(),
@@ -122,7 +129,7 @@ fn pull_requests() -> Vec<PullRequest> {
             ],
         },
         PullRequest {
-            feedback: Default::default(),
+            feedback: Feedback { mine: true, head: "4be7710".into(), copilot: CopilotState::Requested, ..Feedback::default() },
             repo: "acme/worker".into(),
             number: 41,
             title: "feat: DEMO-102 add the audit log export job (T1)".into(),
