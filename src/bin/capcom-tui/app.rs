@@ -455,6 +455,8 @@ pub struct App {
     watched_shared: Option<Arc<Mutex<Vec<(String, u64)>>>>,
     run_states: std::collections::HashMap<(String, u64), RunState>,
     bell: bool,
+    /// PRs that were green and waiting for a reviewer at the last look (None until the first look).
+    awaiting: Option<std::collections::HashSet<String>>,
     /// Tells you outside the terminal that a run finished (title, text).
     pub notify: Arc<dyn Fn(&str, &str) + Send + Sync>,
     /// Width of the PR panel, as a percentage of the bottom area, when both panels are side by side.
@@ -533,6 +535,7 @@ impl App {
             watched_shared: None,
             run_states: std::collections::HashMap::new(),
             bell: false,
+            awaiting: None,
             notify: Arc::new(|_, _| {}),
             split_pct: DEFAULT_SPLIT,
             bottom_pct: None,
@@ -884,6 +887,7 @@ impl App {
         self.prs.loaded = true;
         match result {
             Ok(items) => {
+                self.alert_awaiting_review(&items);
                 self.prs.items = items;
                 self.prs.error = None;
                 self.prs.updated = Some(now());
@@ -892,6 +896,28 @@ impl App {
         }
         self.pr_clamp();
         self.sync_run_repos();
+    }
+
+    /// Tell the user about each PR that has just turned green with no review yet. The first look only
+    /// remembers what is already waiting, so starting the TUI does not announce old PRs.
+    fn alert_awaiting_review(&mut self, items: &[PullRequest]) {
+        let now: std::collections::HashSet<String> = items
+            .iter()
+            .filter(|p| p.waiting_for() == Some(crate::prs::Waiting::Reviewer))
+            .map(|p| p.url.clone())
+            .collect();
+        let newly: Vec<&PullRequest> = match &self.awaiting {
+            Some(before) => items.iter().filter(|p| now.contains(&p.url) && !before.contains(&p.url)).collect(),
+            None => Vec::new(),
+        };
+        for pr in &newly {
+            (self.notify)("CAPCOM: PR green, needs a reviewer", &format!("{}#{} · {}", pr.repo, pr.number, pr.title));
+        }
+        if let Some(pr) = newly.first() {
+            let more = if newly.len() > 1 { format!(" (+{} more)", newly.len() - 1) } else { String::new() };
+            self.set_notice(format!("◉ {}#{} is green and waiting for a reviewer{more}", pr.repo, pr.number));
+        }
+        self.awaiting = Some(now);
     }
 
     pub fn attach_runs(
@@ -2914,6 +2940,37 @@ mod tests {
         assert_eq!(told.len(), 1);
         assert!(told[0].0.contains("GREEN") && told[0].1.contains("acme/web"), "{told:?}");
         assert!(app.notice.as_ref().unwrap().0.contains("acme/web run 1 is GREEN"), "{:?}", app.notice);
+    }
+
+    #[test]
+    fn a_pr_that_turns_green_with_no_review_sends_one_notification_and_old_ones_stay_quiet() {
+        let root = TempDir::new().unwrap();
+        let (mut app, _, told) = watching_app(&root);
+        let green = |n: u64, review: Review, draft: bool| {
+            let mut pr = live("acme/api", n, "Add thing");
+            pr.is_draft = draft;
+            pr.review = review;
+            pr.checks = vec![Check { name: "build".into(), workflow: Some("CI".into()), state: CheckState::Passed, started_at: None, completed_at: None, url: None }];
+            pr
+        };
+        app.apply_prs(Ok(vec![green(1, Review::Required, false)]));
+        assert!(told.lock().unwrap().is_empty(), "already waiting when the TUI started");
+        app.apply_prs(Ok(vec![green(1, Review::Required, false), green(2, Review::Required, true), green(3, Review::Approved, false)]));
+        assert!(told.lock().unwrap().is_empty(), "a draft and an approved PR need no reviewer, and PR 1 was already known");
+        app.apply_prs(Ok(vec![green(1, Review::Required, false), green(2, Review::Required, false)]));
+        {
+            let told = told.lock().unwrap();
+            assert_eq!(told.len(), 1, "{told:?}");
+            assert!(told[0].0.contains("needs a reviewer") && told[0].1.contains("acme/api#2"), "{told:?}");
+        }
+        assert!(app.notice.as_ref().unwrap().0.contains("acme/api#2 is green and waiting"));
+        app.apply_prs(Ok(vec![green(1, Review::Required, false), green(2, Review::Required, false)]));
+        assert_eq!(told.lock().unwrap().len(), 1, "not again on the next poll");
+        let mut failing = green(2, Review::Required, false);
+        failing.checks[0].state = CheckState::Failed;
+        app.apply_prs(Ok(vec![green(1, Review::Required, false), failing]));
+        app.apply_prs(Ok(vec![green(1, Review::Required, false), green(2, Review::Required, false)]));
+        assert_eq!(told.lock().unwrap().len(), 2, "green again after a failure is news again");
     }
 
     #[test]
