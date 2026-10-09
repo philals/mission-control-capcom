@@ -15,7 +15,7 @@ pub const DEFAULT_QUERY: &str =
 
 /// The PR list. `reviewThreads` is left out on purpose: GitHub charges for the largest result a
 /// connection could return, so 50 threads each with a comment, on up to 50 PRs, cost about 28 points a poll.
-const GRAPHQL: &str = r#"query($q: String!) { rateLimit { cost remaining resetAt } search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { id number title url isDraft viewerDidAuthor headRefOid updatedAt reviewDecision comments { totalCount } reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on Bot { login } } } } latestReviews(first: 20) { nodes { author { login } state submittedAt } } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { workflow { name } } } } ... on StatusContext { context state targetUrl } } } } } } } }"#;
+const GRAPHQL: &str = r#"query($q: String!) { rateLimit { cost remaining resetAt } search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { id number title url isDraft viewerDidAuthor headRefOid mergeable mergeStateStatus updatedAt reviewDecision comments { totalCount } reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on Bot { login } } } } latestReviews(first: 20) { nodes { author { login } state submittedAt } } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { workflow { name } } } } ... on StatusContext { context state targetUrl } } } } } } } }"#;
 
 /// The conversations, asked only for the few PRs Copilot has reviewed.
 const THREADS_GRAPHQL: &str = r#"query($ids: [ID!]!) { rateLimit { cost remaining resetAt } nodes(ids: $ids) { ... on PullRequest { id reviewThreads(first: 50) { nodes { id isResolved isOutdated comments(first: 1) { nodes { author { login } } } } } } } }"#;
@@ -111,6 +111,18 @@ pub enum CopilotState {
     Reviewed,
 }
 
+/// Whether the PR's branch can be merged into its base as it stands.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MergeState {
+    /// GitHub has not worked it out yet (it does so lazily).
+    #[default]
+    Unknown,
+    Clean,
+    /// The base has moved on; merging it in is needed but nothing conflicts.
+    Behind,
+    Conflicting,
+}
+
 /// One conversation on the PR's diff.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Thread {
@@ -130,6 +142,8 @@ pub struct Feedback {
     pub threads: Vec<Thread>,
     /// Checks that were cancelled or superseded rather than failed: they say nothing about the code.
     pub cancelled: Vec<String>,
+    #[serde(default)]
+    pub merge: MergeState,
 }
 
 pub fn is_copilot(login: &str) -> bool {
@@ -148,6 +162,11 @@ impl PullRequest {
             .iter()
             .filter(|c| c.state == CheckState::Failed && !self.feedback.cancelled.contains(&c.name))
             .collect()
+    }
+
+    /// Something is wrong with the PR that its author has to act on: a failing check or a merge conflict.
+    pub fn is_red(&self) -> bool {
+        !self.real_failures().is_empty() || self.feedback.merge == MergeState::Conflicting
     }
 
     /// No GitHub Actions check is still running or queued. A status that another service leaves
@@ -316,6 +335,12 @@ fn parse_feedback(node: &Value) -> Feedback {
         copilot_reviewed_at: reviewed_at,
         threads,
         cancelled,
+        merge: match (text(node, "/mergeable").as_deref(), text(node, "/mergeStateStatus").as_deref()) {
+            (Some("CONFLICTING"), _) | (_, Some("DIRTY")) => MergeState::Conflicting,
+            (_, Some("BEHIND")) => MergeState::Behind,
+            (Some("MERGEABLE"), _) | (_, Some("CLEAN" | "UNSTABLE" | "HAS_HOOKS" | "BLOCKED")) => MergeState::Clean,
+            _ => MergeState::Unknown,
+        },
     }
 }
 
@@ -941,6 +966,27 @@ mod tests {
         assert!(prs[0].1.feedback.threads.is_empty());
         assert_eq!(prs[1].1.feedback.threads, vec![thread]);
         assert!(prs[2].1.feedback.threads.is_empty());
+    }
+
+    #[test]
+    fn merge_conflicts_and_a_branch_behind_its_base_are_read_from_the_query() {
+        let merge = |mergeable: &str, status: &str| {
+            let json = format!(r#"{{"number":1,"title":"t","url":"https://github.com/acme/api/pull/1","repository":{{"nameWithOwner":"acme/api"}},"mergeable":"{mergeable}","mergeStateStatus":"{status}"}}"#);
+            parse_feedback(&serde_json::from_str::<Value>(&json).unwrap()).merge
+        };
+        assert_eq!(merge("CONFLICTING", "DIRTY"), MergeState::Conflicting);
+        assert_eq!(merge("MERGEABLE", "DIRTY"), MergeState::Conflicting, "a dirty state is a conflict whatever else is said");
+        assert_eq!(merge("MERGEABLE", "BEHIND"), MergeState::Behind);
+        assert_eq!(merge("MERGEABLE", "CLEAN"), MergeState::Clean);
+        assert_eq!(merge("MERGEABLE", "BLOCKED"), MergeState::Clean, "blocked on reviews is not a branch problem");
+        assert_eq!(merge("UNKNOWN", "UNKNOWN"), MergeState::Unknown, "GitHub works it out lazily");
+        assert!(GRAPHQL.contains("mergeable") && GRAPHQL.contains("mergeStateStatus"));
+        let mut pr = pr_with(vec![]);
+        assert!(!pr.is_red());
+        pr.feedback.merge = MergeState::Conflicting;
+        assert!(pr.is_red(), "a conflict is red even when every check is green");
+        pr.feedback.merge = MergeState::Behind;
+        assert!(!pr.is_red(), "behind is only a nudge");
     }
 
     #[test]

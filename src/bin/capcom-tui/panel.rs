@@ -1,7 +1,7 @@
 //! The pull request panel (bottom of the story list and of a board) and the PR detail sheet.
 use crate::theme;
 use crate::app::{App, Focus, PrRow, Screen, Target};
-use crate::prs::{check_seconds, duration_text, relative, Check, CheckState, PullRequest, Review, Waiting};
+use crate::prs::{check_seconds, duration_text, relative, Check, CheckState, MergeState, PullRequest, Review, Waiting};
 use chrono::{DateTime, Utc};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -271,6 +271,17 @@ fn summary_line(pr: &PullRequest) -> Vec<Span<'static>> {
         push(format!("⊘ {}", c.skipped), theme::DIM);
     }
     spans.extend(copilot);
+    match pr.feedback.merge {
+        MergeState::Conflicting => {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled("⚠ merge conflicts", Style::new().fg(theme::RED).add_modifier(Modifier::BOLD)));
+        }
+        MergeState::Behind => {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled("↓ behind the base", Style::new().fg(theme::YELLOW)));
+        }
+        _ => {}
+    }
     spans
 }
 

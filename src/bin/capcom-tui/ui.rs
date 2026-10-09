@@ -1849,6 +1849,36 @@ mod tests {
     }
 
     #[test]
+    fn a_merge_conflict_is_asked_about_once_per_state_even_when_every_check_is_green() {
+        let (_root, mut app, fake, _) = autopilot_app();
+        app.autofix = true;
+        let conflicting = |head: &str| {
+            let mut pr = mine(1, head);
+            pr.feedback.merge = crate::prs::MergeState::Conflicting;
+            pr
+        };
+        app.apply_prs(Ok(vec![conflicting("sha1")]));
+        settle(&mut app);
+        {
+            let asks = fake.resumes.lock().unwrap();
+            assert_eq!(asks.len(), 1, "a green PR with a conflict still needs fixing");
+            assert!(asks[0].prompt.clone().unwrap().contains("merge conflicts with the default branch"), "{:?}", asks[0].prompt);
+        }
+        app.apply_prs(Ok(vec![conflicting("sha1")]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 1, "nothing changed, so no second ask");
+        app.apply_prs(Ok(vec![mine(1, "sha2")]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 1, "resolved: nothing to ask");
+        let mut behind = mine(1, "sha3");
+        behind.feedback.merge = crate::prs::MergeState::Behind;
+        app.apply_prs(Ok(vec![behind]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 1, "merely behind the base is not worth an ask");
+        assert!(render(&app, 170, 44).contains("behind the base"));
+    }
+
+    #[test]
     fn a_pr_that_goes_green_starts_again_from_round_one_next_time() {
         let (_root, mut app, fake, _) = autopilot_app();
         app.autofix = true;
