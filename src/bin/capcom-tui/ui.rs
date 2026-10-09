@@ -649,8 +649,12 @@ fn status_line(task: &Task, board: &Board, known: &HashMap<String, PrState>) -> 
             let state = |p: &capcom::model::Pr| known.get(&p.url).copied().unwrap_or(p.state);
             let live = task.prs.iter().filter(|p| state(p) != PrState::Closed).count();
             let merged = task.prs.iter().filter(|p| state(p) == PrState::Merged).count();
+            let missing = rules::missing_repos(task);
             if live > 0 && merged == live {
-                return ("✓ all PRs merged · drag to DONE".into(), theme::GREEN);
+                if missing.is_empty() {
+                    return ("✓ all PRs merged · drag to DONE".into(), theme::GREEN);
+                }
+                return (format!("● merged · needs a PR in {}", missing.join(", ")), theme::YELLOW);
             }
             (format!("● implementing · PRs {merged}/{}", task.prs.len()), theme::CYAN)
         }
@@ -2076,6 +2080,20 @@ mod tests {
         assert!(app.agent_ask.is_none());
         assert!(launches_after(&mut app, &fake, 1).is_empty());
         assert_eq!(status_of(&app, "T1"), Status::Implementing, "a cleanup answer never moves a card");
+    }
+
+    #[test]
+    fn a_task_that_still_needs_a_pr_in_another_repo_is_not_offered_as_done() {
+        let (_root, mut app) = finishing();
+        store::update(&app.root.clone(), "PROJ-1", |b| ops::set_repos(b, "T1", vec!["api".into(), "ui".into()])).unwrap();
+        app.reload();
+        app.pr_states.insert(PR7.to_string(), PrState::Merged);
+        let out = render(&app, 200, 40);
+        assert!(!out.contains("drag to DONE"), "the ui repo has no PR yet:\n{out}");
+        assert!(out.contains("needs a PR in ui"), "{out}");
+        drag_card(&mut app, "T1 Add endpoint", "DONE");
+        wait_for_notice(&mut app, "waiting for PRs in: ui");
+        assert_eq!(status_of(&app, "T1"), Status::Implementing);
     }
 
     #[test]

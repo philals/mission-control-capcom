@@ -226,6 +226,19 @@ mod tests {
     }
 
     #[test]
+    fn a_merged_pr_is_not_enough_while_another_repo_still_needs_one() {
+        let root = board(TaskType::Pr, Some(PrState::Draft));
+        store::update(root.path(), "PROJ-1", |b| ops::set_repos(b, "T1", vec!["api".into(), "ui".into()])).unwrap();
+        let out = finish(root.path(), "PROJ-1", "T1", &Fake([(U.to_string(), PrState::Merged)].into()));
+        assert_eq!(status(&root), Status::Implementing);
+        assert!(notices(&out).contains("T1 is not done: waiting for PRs in: ui"), "{}", notices(&out));
+        store::update(root.path(), "PROJ-1", |b| ops::add_pr(b, "T1", "ui", "https://github.com/acme/ui/pull/3", PrState::Draft)).unwrap();
+        let both = Fake([(U.to_string(), PrState::Merged), ("https://github.com/acme/ui/pull/3".to_string(), PrState::Ready)].into());
+        let out = finish(root.path(), "PROJ-1", "T1", &both);
+        assert!(notices(&out).contains("#3 is still open"), "the second PR is named once it exists: {}", notices(&out));
+    }
+
+    #[test]
     fn worktree_detection_needs_a_path_on_the_line() {
         assert!(mentions_worktrees("- worktree: /work/x"));
         assert!(mentions_worktrees("Worktree at ~/code/x-t1"));
