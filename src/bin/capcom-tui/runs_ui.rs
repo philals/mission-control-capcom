@@ -142,12 +142,10 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let focused = app.focus == Focus::Runs;
     let name = if app.screen == Screen::List { "RUNS & WATCH" } else { "STORY RUNS & WATCH" };
     let compact = area.width < 40;
-    let status = if compact {
-        String::new()
-    } else if app.runs.loading {
-        " ↻ refreshing… ".to_string()
+    let (status, status_style) = if compact {
+        (String::new(), dim())
     } else {
-        app.runs.updated.as_ref().map_or(String::new(), |u| format!(" ↻ updated {u} "))
+        crate::panel::status_text(app.runs.loading, app.runs.error.is_some(), app.runs.updated.as_deref(), app.runs.fresh, app.animation_frame())
     };
     let status_width = status.chars().count() as u16;
     let block = Block::bordered()
@@ -157,7 +155,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
             format!(" {name} · {} ", runs.len()),
             Style::new().fg(if focused { theme::BLUE } else { theme::FG }).add_modifier(Modifier::BOLD),
         ))
-        .title(Line::from(Span::styled(status, dim())).right_aligned());
+        .title(Line::from(Span::styled(status, status_style)).right_aligned());
     let inner = block.inner(area);
     f.render_widget(block, area);
     hits.push((area, Target::RunPanel));

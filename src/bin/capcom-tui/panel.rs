@@ -595,17 +595,35 @@ fn title_text(name: &str, rows: &[PrRow]) -> String {
     }
 }
 
+const SPINNER: [&str; 6] = ["◜", "◠", "◝", "◞", "◡", "◟"];
+
+/// The status in a panel's title: a spinner while refreshing, how stale the data is when the feed is
+/// failing, else when it was last updated. The style is amber when it is stale.
+pub fn status_text(loading: bool, error: bool, updated: Option<&str>, fresh: Option<std::time::Instant>, frame: u64) -> (String, Style) {
+    if loading {
+        return (format!(" {} refreshing… ", SPINNER[(frame % SPINNER.len() as u64) as usize]), dim());
+    }
+    if let (true, Some(fresh), Some(updated)) = (error, fresh, updated) {
+        let secs = fresh.elapsed().as_secs();
+        let age = match secs {
+            0..=59 => format!("{secs}s"),
+            60..=3599 => format!("{}m", secs / 60),
+            _ => format!("{}h", secs / 3600),
+        };
+        return (format!(" ⚠ stale {age} · last good {updated} "), Style::new().fg(theme::ORANGE).add_modifier(Modifier::BOLD));
+    }
+    (updated.map_or(String::new(), |u| format!(" ↻ updated {u} ")), dim())
+}
+
 pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let rows = app.pr_rows();
     let focused = app.focus == Focus::Prs;
     let name = if app.screen == Screen::List { "PULL REQUESTS" } else { "STORY PULL REQUESTS" };
     let notice = app.current_notice().is_some();
-    let status = if let Some(notice) = app.current_notice() {
-        format!(" {notice} ")
-    } else if app.prs.loading {
-        " ↻ refreshing… ".to_string()
+    let (status, status_style) = if let Some(notice) = app.current_notice() {
+        (format!(" {notice} "), dim())
     } else {
-        app.prs.updated.as_ref().map_or(String::new(), |u| format!(" ↻ updated {u} "))
+        status_text(app.prs.loading, app.prs.error.is_some(), app.prs.updated.as_deref(), app.prs.fresh, app.animation_frame())
     };
     let status_width = status.chars().count() as u16;
     let block = Block::bordered()
@@ -615,7 +633,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
             title_text(name, &rows),
             Style::new().fg(if focused { theme::BLUE } else { theme::FG }).add_modifier(Modifier::BOLD),
         ))
-        .title(Line::from(Span::styled(status, dim())).right_aligned());
+        .title(Line::from(Span::styled(status, status_style)).right_aligned());
     let inner = block.inner(area);
     f.render_widget(block, area);
     hits.push((area, Target::PrPanel));
