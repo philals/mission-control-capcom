@@ -1346,13 +1346,45 @@ mod tests {
     fn the_panel_explains_loading_empty_and_error_states() {
         let (_root, mut app) = two_stories();
         let out = render(&app, 140, 40);
-        assert!(out.contains("Loading pull requests"), "{out}");
+        assert!(out.contains("STAND BY") || out.contains("MISSION CONTROL"), "the loading screen shows while the first list loads:\n{out}");
+        assert!(out.contains("RETRO"), "{out}");
         app.apply_prs(Err("gh failed: not logged in".into()));
         let out = render(&app, 140, 40);
         assert!(out.contains("gh failed: not logged in"), "{out}");
         app.apply_prs(Ok(vec![]));
         let out = render(&app, 140, 40);
         assert!(out.contains("No open pull requests match"), "{out}");
+    }
+
+    #[test]
+    fn the_loading_screen_runs_only_during_the_first_load_and_gives_way_to_what_arrives() {
+        let (_root, mut app) = two_stories();
+        app.frame_override = Some(0);
+        let first = render(&app, 140, 40);
+        assert!(first.contains("MISSION CONTROL · HOUSTON") && first.contains("GO / NO-GO FOR PR UPLINK"), "{first}");
+        assert!(first.contains("↻ refreshing") || first.contains("PULL REQUESTS"), "the real status stays in the title:\n{first}");
+        app.frame_override = Some(40);
+        let later = render(&app, 140, 40);
+        assert!(later.contains("ALL STATIONS GO") && later.contains("AWAITING TELEMETRY"), "{later}");
+        app.apply_prs(Err("gh failed: not logged in".into()));
+        let failed = render(&app, 140, 40);
+        assert!(!failed.contains("MISSION CONTROL") && failed.contains("gh failed: not logged in"), "an error replaces the animation:\n{failed}");
+        app.apply_prs(Ok(vec![]));
+        let empty = render(&app, 140, 40);
+        assert!(!empty.contains("MISSION CONTROL") && empty.contains("No open pull requests match"), "{empty}");
+        let (_root, mut off) = two_stories();
+        off.prs.disabled = true;
+        assert!(!render(&off, 140, 40).contains("MISSION CONTROL"), "no animation when the panel is off");
+    }
+
+    #[test]
+    fn the_loading_screen_fits_a_short_panel_and_a_narrow_terminal() {
+        let (_root, mut app) = two_stories();
+        app.frame_override = Some(7);
+        for (w, h) in [(140, 24), (100, 18), (60, 20)] {
+            let out = render(&app, w, h);
+            assert!(out.contains("STAND BY") || out.contains("MISSION CONTROL") || out.contains("RETRO"), "{w}x{h}:\n{out}");
+        }
     }
 
     #[test]
@@ -1551,7 +1583,8 @@ mod tests {
         let (_root, mut app) = two_stories();
         let out = render(&app, 120, 30);
         assert!(out.contains("🚀") && out.contains("CAPCOM") && !out.contains("T+0"), "{out}");
-        assert!(!out.contains("GO"), "no light before the pull requests have loaded:\n{out}");
+        let header = out.lines().next().unwrap_or_default();
+        assert!(!header.contains("GO"), "no light before the pull requests have loaded:\n{out}");
         app.apply_prs(Ok(vec![]));
         assert!(render(&app, 120, 30).contains("● GO"));
         app.apply_prs(Ok(feed()));

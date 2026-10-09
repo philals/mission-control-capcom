@@ -5,6 +5,7 @@ mod demo;
 mod finish;
 mod fixstate;
 mod herdr;
+mod loading;
 mod panel;
 mod pr_state;
 mod prs;
@@ -81,12 +82,23 @@ fn screenshot(path: &std::path::Path, screen: &str, size: &str) -> Result<()> {
         app.col = 3;
         app.row[3] = 0;
     }
+    if screen == "loading" {
+        app.prs.items.clear();
+        app.prs.loaded = false;
+        app.prs.loading = true;
+        app.prs.updated = None;
+        app.frame_override = Some(17);
+    }
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h))?;
     terminal.draw(|frame| ui::draw(frame, &app))?;
     let (title, description) = match screen {
         "board" => (
             "capcom story board",
             "A kanban board of one demo story with its tasks in TODO, PLANNING, PLANNED, IMPLEMENTING and DONE columns, above panels of open pull requests with their CI stages and of manual workflow runs.",
+        ),
+        "loading" => (
+            "capcom loading screen",
+            "The pull requests panel while the first list loads: a 1960s Mission Control go/no-go poll, with each console answering GO in turn above a moving signal strip.",
         ),
         _ => (
             "capcom story list",
@@ -211,7 +223,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     let mut dirty = true;
     let mut drawn_tick = u64::MAX;
     loop {
-        let tick = app.started.elapsed().as_secs() / app.tick_seconds();
+        let tick = app.started.elapsed().as_millis() as u64 / app.tick_millis();
         if dirty || tick != drawn_tick {
             terminal.draw(|frame| ui::draw(frame, app))?;
             dirty = false;

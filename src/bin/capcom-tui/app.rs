@@ -561,6 +561,8 @@ pub struct App {
     checker: Option<(Sender<pr_state::Msg>, Receiver<Lookups>)>,
     watched: Vec<String>,
     pub started: std::time::Instant,
+    /// Tests and screenshots pin the animation to one frame.
+    pub frame_override: Option<u64>,
     notice: Option<(String, std::time::Instant)>,
     ready_done: (Sender<Result<String, String>>, Receiver<Result<String, String>>),
     feed: Option<(Receiver<PrMsg>, Sender<()>)>,
@@ -642,6 +644,7 @@ impl App {
             checker: None,
             watched: Vec::new(),
             started: std::time::Instant::now(),
+            frame_override: None,
             notice: None,
             ready_done: std::sync::mpsc::channel(),
             feed: None,
@@ -684,17 +687,30 @@ impl App {
             .unwrap_or(0);
     }
 
-    /// How often the screen must be redrawn with nothing else happening: every second while something
-    /// on it counts time (a running check or run, a status line that will clear), else rarely, for the
-    /// "5 minutes ago" texts.
-    pub fn tick_seconds(&self) -> u64 {
+    /// The first list of pull requests is still on its way, so the panel shows the loading screen.
+    pub fn loading_screen(&self) -> bool {
+        self.screen == Screen::List && !self.prs.loaded && !self.prs.disabled && self.prs.error.is_none() && self.pr_rows().is_empty()
+    }
+
+    /// Which frame of an animation to draw now.
+    pub fn animation_frame(&self) -> u64 {
+        self.frame_override.unwrap_or_else(|| self.started.elapsed().as_millis() as u64 / crate::loading::FRAME_MILLIS)
+    }
+
+    /// How often the screen must be redrawn with nothing else happening: four times a second while
+    /// the loading screen animates, every second while something on screen counts time (a running
+    /// check or run, a status line that will clear), else rarely, for the "5 minutes ago" texts.
+    pub fn tick_millis(&self) -> u64 {
+        if self.loading_screen() {
+            return crate::loading::FRAME_MILLIS;
+        }
         let counting = self.current_notice().is_some()
             || self.prs.items.iter().any(PullRequest::is_busy)
             || self.runs.items.iter().any(Run::is_active);
         if counting {
-            1
+            1000
         } else {
-            30
+            30_000
         }
     }
 
@@ -2993,13 +3009,16 @@ mod tests {
     }
 
     #[test]
-    fn an_idle_board_redraws_rarely_and_a_busy_one_every_second() {
+    fn an_idle_board_redraws_rarely_a_busy_one_every_second_and_the_loading_screen_four_times_a_second() {
         let root = TempDir::new().unwrap();
         story(&root, "PROJ-1", &[("One", Pr, &[])]);
-        let mut app = new(&root);
-        assert_eq!(app.tick_seconds(), 30);
+        let mut app = App::new(root.path().to_path_buf(), None);
+        app.prs.disabled = false;
+        assert_eq!(app.tick_millis(), 250, "the first load animates");
+        app.apply_prs(Ok(vec![]));
+        assert_eq!(app.tick_millis(), 30_000);
         app.set_notice("hello".into());
-        assert_eq!(app.tick_seconds(), 1, "a status line will clear by itself");
+        assert_eq!(app.tick_millis(), 1000, "a status line will clear by itself");
     }
 
     #[test]
