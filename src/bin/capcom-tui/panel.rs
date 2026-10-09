@@ -1,4 +1,5 @@
 //! The pull request panel (bottom of the story list and of a board) and the PR detail sheet.
+use crate::durations::{approx, Durations};
 use crate::theme;
 use crate::app::{App, Focus, PrRow, Screen, Target};
 use crate::prs::{check_seconds, duration_text, relative, Check, CheckState, MergeState, PullRequest, Review, Waiting};
@@ -307,14 +308,28 @@ fn row_height(row: &PrRow, width: usize) -> u16 {
     (title_lines(row, width).len() + 2 + shown) as u16
 }
 
+/// What a running check has taken so far, against what it usually takes: `2m 05s of ~4m`, or
+/// `5m 10s · usually ~4m` once it has run longer.
+fn took_text(check: &Check, now: DateTime<Utc>, usual: Option<i64>) -> String {
+    let Some(seconds) = check_seconds(check, now) else {
+        return String::new();
+    };
+    match (check.state, usual) {
+        (CheckState::Running, Some(usual)) if seconds <= usual + usual / 4 => format!(" {} of {}", duration_text(seconds), approx(usual)),
+        (CheckState::Running, Some(usual)) => format!(" {} · usually {}", duration_text(seconds), approx(usual)),
+        _ => format!(" {}", duration_text(seconds)),
+    }
+}
+
 fn stage_line(
     check: &Check,
     label_width: usize,
     marker: &Span<'static>,
     now: DateTime<Utc>,
+    usual: Option<i64>,
 ) -> Vec<Span<'static>> {
     let (icon, color, word) = stage_style(check.state);
-    let took = check_seconds(check, now).map_or(String::new(), |s| format!(" {}", duration_text(s)));
+    let took = took_text(check, now, usual);
     vec![
         marker.clone(),
         Span::raw("  "),
@@ -324,7 +339,7 @@ fn stage_line(
     ]
 }
 
-fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> Vec<Line<'static>> {
+fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>, durations: &Durations) -> Vec<Line<'static>> {
     let go = row.live.and_then(PullRequest::waiting_for) == Some(Waiting::Reviewer);
     let marker = match (selected, go) {
         (true, _) => Span::styled("▌ ", Style::new().fg(theme::CYAN)),
@@ -365,7 +380,7 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
                 .max()
                 .unwrap_or(0);
             for check in open.iter().take(MAX_STAGE_LINES) {
-                stages.push(stage_line(check, label_width, &marker, now));
+                stages.push(stage_line(check, label_width, &marker, now, durations.estimate(&row.repo, check)));
             }
             if open.len() > MAX_STAGE_LINES {
                 let more = open.len() - MAX_STAGE_LINES;
@@ -509,7 +524,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         }
         let h = (heights[i] - 1).min(bottom - y);
         let rect = Rect::new(body.x, y, body.width, h);
-        let lines = row_lines(row, body.width as usize, focused && i == selected, now);
+        let lines = row_lines(row, body.width as usize, focused && i == selected, now, &app.durations);
         f.render_widget(Paragraph::new(lines), rect);
         hits.push((rect, Target::Pr(i)));
         let title_n = title_lines(row, width).len() as u16;

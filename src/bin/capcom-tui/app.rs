@@ -561,6 +561,9 @@ pub struct App {
     checker: Option<(Sender<pr_state::Msg>, Receiver<Lookups>)>,
     watched: Vec<String>,
     pub started: std::time::Instant,
+    /// How long each check usually takes, for the "of ~4m" on a running one.
+    pub durations: crate::durations::Durations,
+    pub durations_path: Option<PathBuf>,
     /// Tests and screenshots pin the animation to one frame.
     pub frame_override: Option<u64>,
     notice: Option<(String, std::time::Instant)>,
@@ -644,6 +647,8 @@ impl App {
             checker: None,
             watched: Vec::new(),
             started: std::time::Instant::now(),
+            durations: crate::durations::Durations::default(),
+            durations_path: None,
             frame_override: None,
             notice: None,
             ready_done: std::sync::mpsc::channel(),
@@ -1014,6 +1019,11 @@ impl App {
                 self.autocopilot_prs.retain(|url, _| items.iter().any(|p| p.url == *url));
                 if self.autofix_prs.len() + self.autocopilot_prs.len() != before {
                     self.save_settings();
+                }
+                if self.durations.learn(&items) {
+                    if let Some(path) = &self.durations_path {
+                        self.durations.save(path);
+                    }
                 }
                 self.prs.items = items;
                 self.prs.error = None;

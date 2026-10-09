@@ -2,6 +2,7 @@ mod app;
 mod attention;
 mod cache;
 mod demo;
+mod durations;
 mod finish;
 mod fixstate;
 mod herdr;
@@ -181,6 +182,10 @@ fn main() -> Result<()> {
     app.notify = Arc::new(notify_desktop);
     app.fix_store = cache::Cache::default_dir().map(fixstate::Store::new);
     app.settings_path = settings::default_path();
+    app.durations_path = cache::Cache::default_dir().map(|d| d.join("check-durations.json"));
+    if let Some(path) = &app.durations_path {
+        app.durations = durations::Durations::load(path);
+    }
     app.load_settings();
     app.extra_repos = cli.deploy_repos;
     let (checker_tx, checker_rx) =
