@@ -98,7 +98,7 @@ impl Index {
 
     /// Read what has been added to every transcript since last time. True when anything changed.
     pub fn refresh(&mut self, config: &Path) -> bool {
-        let mut seen = Vec::new();
+        let mut seen = std::collections::HashSet::new();
         let mut changed = false;
         let projects = std::fs::read_dir(config.join("projects")).into_iter().flatten().flatten();
         for project in projects {
@@ -107,7 +107,7 @@ impl Index {
                 if path.extension().is_some_and(|e| e == "jsonl") {
                     let key = path.to_string_lossy().to_string();
                     changed |= self.read_new(&key, &path);
-                    seen.push(key);
+                    seen.insert(key);
                 }
             }
         }

@@ -423,19 +423,24 @@ impl GhApi {
     }
 }
 
+/// Only the fields we read: GitHub's full run is about 15 KB, and ten of them come back per repo.
+const RUN_FIELDS: &str = "{id,name,display_title,path,head_branch,status,conclusion,html_url,created_at,run_started_at,updated_at}";
+const RUNS_JQ: &str = "{workflow_runs:[.workflow_runs[]|{id,name,display_title,path,head_branch,status,conclusion,html_url,created_at,run_started_at,updated_at}]}";
+const JOBS_JQ: &str = "{jobs:[.jobs[]|{name,status,conclusion,html_url,started_at,completed_at}]}";
+
 impl RunApi for GhApi {
     fn runs(&self, repo: &str) -> Result<String> {
         let login = self.login()?;
-        let path = format!("repos/{repo}/actions/runs?event=workflow_dispatch&actor={login}&per_page=10");
-        gh_output(&["api", &path])
+        let path = format!("repos/{repo}/actions/runs?event=workflow_dispatch&actor={login}&per_page=10&exclude_pull_requests=true");
+        gh_output(&["api", &path, "--jq", RUNS_JQ])
     }
 
     fn run(&self, repo: &str, run_id: u64) -> Result<String> {
-        gh_output(&["api", &format!("repos/{repo}/actions/runs/{run_id}")])
+        gh_output(&["api", &format!("repos/{repo}/actions/runs/{run_id}"), "--jq", RUN_FIELDS])
     }
 
     fn jobs(&self, repo: &str, run_id: u64) -> Result<String> {
-        gh_output(&["api", &format!("repos/{repo}/actions/runs/{run_id}/jobs?per_page=100")])
+        gh_output(&["api", &format!("repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"), "--jq", JOBS_JQ])
     }
 }
 
@@ -578,6 +583,19 @@ mod tests {
 
     fn now() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 10, 8, 4, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn the_trimmed_gh_fields_cover_everything_the_parsers_read() {
+        for field in [
+            "id", "name", "display_title", "path", "head_branch", "status", "conclusion", "html_url", "created_at",
+            "run_started_at", "updated_at",
+        ] {
+            assert!(RUNS_JQ.contains(field) && RUN_FIELDS.contains(field), "{field} is trimmed away");
+        }
+        for field in ["name", "status", "conclusion", "html_url", "started_at", "completed_at"] {
+            assert!(JOBS_JQ.contains(field), "{field} is trimmed away");
+        }
     }
 
     #[test]

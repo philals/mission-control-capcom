@@ -111,6 +111,10 @@ A task's `repos` list says which PRs it expects: list a repo once per PR. `--rep
 
 Every open `capcom-tui` (a terminal and the Herdr plugin, say) shares one cache in `~/.cache/capcom/` (`$XDG_CACHE_HOME/capcom`, or `CAPCOM_CACHE_DIR`). A copy fetches from GitHub only when the cached data is older than the polling interval (5 s busy / 30 s idle for PRs, 10 s / 30 s for runs); a lock makes sure only one copy fetches at a time and the others reuse the result. A manual refresh (`r` or the `↻ updated` label) fetches at once, unless some copy fetched in the last 3 seconds. There is no daemon: when every copy is closed, nothing polls. Copies with a different `--pr-query` or repo list keep separate entries. Cache files are private to your user and are tidied after a day.
 
+## Idle cost
+
+An idle board does very little: it redraws only when something changed (a key, a click, new data, a reload) and otherwise once a second for the clock and the "ago" times, and it notices a changed `board.json` by checking each file's size, modification time and inode instead of reading it. The GitHub calls for runs ask `gh` to return only the fields the board shows (about 4 KB instead of about 150 KB per repo).
+
 ## Herdr plugin
 
 The repo is also a Herdr plugin (`herdr-plugin.toml`) with one action, `capcom.open`: it opens the TUI as an overlay, or focuses the copy already open in the current workspace.

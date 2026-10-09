@@ -200,10 +200,21 @@ fn run_terminal(app: &mut App) -> Result<()> {
 }
 
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
+    // Draw only when something changed, and once a second for the clock and the "ago" times.
+    let mut dirty = true;
+    let mut drawn_second = u64::MAX;
     loop {
-        terminal.draw(|frame| ui::draw(frame, app))?;
+        let second = app.started.elapsed().as_secs();
+        if dirty || second != drawn_second {
+            terminal.draw(|frame| ui::draw(frame, app))?;
+            dirty = false;
+            drawn_second = second;
+        }
         if event::poll(Duration::from_millis(250))? {
-            match event::read()? {
+            let event = event::read()?;
+            // nothing on screen follows the pointer, so moving it needs no redraw
+            dirty |= !matches!(&event, Event::Mouse(m) if m.kind == MouseEventKind::Moved);
+            match event {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     if app.on_key(key.code, key.modifiers.contains(KeyModifiers::CONTROL)) {
                         return Ok(());
@@ -221,15 +232,16 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                 _ => {}
             }
         }
-        app.poll_feed();
-        app.poll_runs();
-        app.poll_ready();
+        dirty |= app.poll_feed();
+        dirty |= app.poll_runs();
+        dirty |= app.poll_ready();
         if app.take_bell() {
             let _ = std::io::Write::write_all(&mut std::io::stdout(), b"\x07");
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
         if app.needs_reload() {
             app.reload();
+            dirty = true;
         }
     }
 }
