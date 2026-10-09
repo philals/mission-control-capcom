@@ -463,7 +463,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let body = Rect::new(inner.x, top, inner.width, (inner.y + inner.height).saturating_sub(top));
     if rows.is_empty() {
         if app.loading_screen() && body.height > 0 {
-            let frame = crate::loading::lines(app.animation_frame(), body.width, body.height);
+            let frame = crate::loading::lines(crate::loading::Scene::Pulls, app.animation_frame(), body.width, body.height);
             let top = body.y + body.height.saturating_sub(frame.len() as u16) / 2;
             let rect = Rect::new(body.x, top, body.width, (frame.len() as u16).min(body.height));
             f.render_widget(Paragraph::new(frame), rect);

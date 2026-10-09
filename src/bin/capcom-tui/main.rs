@@ -87,6 +87,10 @@ fn screenshot(path: &std::path::Path, screen: &str, size: &str) -> Result<()> {
         app.prs.loaded = false;
         app.prs.loading = true;
         app.prs.updated = None;
+        app.runs.items.clear();
+        app.runs.loaded = false;
+        app.runs.loading = true;
+        app.runs.updated = None;
         app.frame_override = Some(17);
     }
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h))?;
@@ -98,7 +102,7 @@ fn screenshot(path: &std::path::Path, screen: &str, size: &str) -> Result<()> {
         ),
         "loading" => (
             "capcom loading screen",
-            "The pull requests panel while the first list loads: a 1960s Mission Control go/no-go poll, with each console answering GO in turn above a moving signal strip.",
+            "The pull requests and runs panels while their first data loads: a 1960s Mission Control go/no-go poll, and a launch-pad countdown and checklist, each above a moving signal strip.",
         ),
         _ => (
             "capcom story list",
