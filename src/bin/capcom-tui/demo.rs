@@ -111,6 +111,7 @@ fn pull_requests() -> Vec<PullRequest> {
                 copilot_reviewed_at: Some(ago(20)),
                 threads: ["a", "b"].iter().map(|id| Thread { id: id.to_string(), resolved: false, outdated: false, by_copilot: true }).collect(),
                 cancelled: vec![],
+                merge: crate::prs::MergeState::Conflicting,
             },
             repo: "acme/web".into(),
             number: 212,

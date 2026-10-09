@@ -1071,14 +1071,15 @@ impl App {
     /// What is wrong with one of your PRs that an agent could fix: failing checks (once CI has
     /// settled) and Copilot's unresolved comments (once its review is in). `(fingerprint, why)`.
     pub fn fix_needed(pr: &PullRequest) -> Option<(String, String)> {
-        use crate::prs::CopilotState;
+        use crate::prs::{CopilotState, MergeState};
         if !pr.feedback.mine {
             return None;
         }
         let mut failing: Vec<String> = if pr.settled() { pr.real_failures().iter().map(|c| c.name.clone()).collect() } else { Vec::new() };
         let mut threads: Vec<String> =
             if pr.feedback.copilot == CopilotState::Requested { Vec::new() } else { pr.copilot_open().iter().map(|t| t.id.clone()).collect() };
-        if failing.is_empty() && threads.is_empty() {
+        let conflicts = pr.feedback.merge == MergeState::Conflicting;
+        if failing.is_empty() && threads.is_empty() && !conflicts {
             return None;
         }
         failing.sort();
@@ -1090,7 +1091,12 @@ impl App {
         if !threads.is_empty() {
             why.push(format!("{} unresolved Copilot comment{}", threads.len(), if threads.len() == 1 { "" } else { "s" }));
         }
-        Some((format!("{}|{}|{}", pr.feedback.head, failing.join(","), threads.join(",")), why.join(" and ")))
+        if conflicts {
+            why.push("merge conflicts with the default branch".to_string());
+        }
+        let state = format!("{}|{}|{}", pr.feedback.head, failing.join(","), threads.join(","));
+        // a conflict is its own state, so clearing it (or a new one) is a new ask; no conflict leaves the key as it was
+        Some((if conflicts { format!("{state}|conflict") } else { state }, why.join(" and ")))
     }
 
     /// The PR panel's "fix round 2/5 sent 3m ago" note for a PR.
