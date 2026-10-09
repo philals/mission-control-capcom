@@ -224,16 +224,9 @@ fn padded(left: Vec<Span<'static>>, right: Vec<Span<'static>>, width: u16) -> Li
     Line::from(spans)
 }
 
-/// The brand, the mission clock and the go/no-go light (no-go while any open PR has a failed check).
+/// The brand and the go/no-go light (no-go while any open PR has a failed check).
 fn brand(app: &App) -> Vec<Span<'static>> {
-    let secs = app.started.elapsed().as_secs();
-    let mut spans = vec![
-        Span::styled("🚀 CAPCOM", Style::new().fg(panel::ORANGE).add_modifier(Modifier::BOLD)),
-        Span::styled(
-            format!("  T+{:02}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60),
-            Style::new().fg(theme::DIM),
-        ),
-    ];
+    let mut spans = vec![Span::styled("🚀 CAPCOM", Style::new().fg(panel::ORANGE).add_modifier(Modifier::BOLD))];
     if app.attention.away() {
         spans.push(Span::styled("  ☾ AWAY · slow polling", Style::new().fg(theme::DIM)));
     }
@@ -1554,10 +1547,10 @@ mod tests {
     }
 
     #[test]
-    fn the_header_has_the_brand_a_mission_clock_and_a_go_no_go_light() {
+    fn the_header_has_the_brand_and_a_go_no_go_light() {
         let (_root, mut app) = two_stories();
         let out = render(&app, 120, 30);
-        assert!(out.contains("🚀") && out.contains("CAPCOM") && out.contains("T+00:00:"), "{out}");
+        assert!(out.contains("🚀") && out.contains("CAPCOM") && !out.contains("T+0"), "{out}");
         assert!(!out.contains("GO"), "no light before the pull requests have loaded:\n{out}");
         app.apply_prs(Ok(vec![]));
         assert!(render(&app, 120, 30).contains("● GO"));

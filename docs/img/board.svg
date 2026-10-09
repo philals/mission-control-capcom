@@ -1120,14 +1120,13 @@
 <text x="8.0" y="21.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">‹</text>
 <text x="24.8" y="21.5" fill="#8cc2ff" textLength="58.8" lengthAdjust="spacing">Stories</text>
 <text x="125.6" y="21.5" fill="#ff9a3c" font-weight="700" textLength="50.4" lengthAdjust="spacing">CAPCOM</text>
-<text x="192.8" y="21.5" fill="#b8ae94" textLength="84.0" lengthAdjust="spacing">T+00:00:00</text>
-<text x="293.6" y="21.5" fill="#ff806c" font-weight="700" textLength="8.4" lengthAdjust="spacing">●</text>
-<text x="310.4" y="21.5" fill="#ff806c" font-weight="700" textLength="42.0" lengthAdjust="spacing">NO-GO</text>
-<text x="369.2" y="21.5" fill="#f3ebd6" font-weight="700" textLength="67.2" lengthAdjust="spacing">DEMO-101</text>
-<text x="453.2" y="21.5" fill="#b8ae94" textLength="100.8" lengthAdjust="spacing">Notification</text>
-<text x="562.4" y="21.5" fill="#b8ae94" textLength="92.4" lengthAdjust="spacing">preferences</text>
-<text x="671.6" y="21.5" fill="#84f0a0" textLength="25.2" lengthAdjust="spacing">1/6</text>
-<text x="705.2" y="21.5" fill="#84f0a0" textLength="33.6" lengthAdjust="spacing">done</text>
+<text x="192.8" y="21.5" fill="#ff806c" font-weight="700" textLength="8.4" lengthAdjust="spacing">●</text>
+<text x="209.6" y="21.5" fill="#ff806c" font-weight="700" textLength="42.0" lengthAdjust="spacing">NO-GO</text>
+<text x="268.4" y="21.5" fill="#f3ebd6" font-weight="700" textLength="67.2" lengthAdjust="spacing">DEMO-101</text>
+<text x="352.4" y="21.5" fill="#b8ae94" textLength="100.8" lengthAdjust="spacing">Notification</text>
+<text x="461.6" y="21.5" fill="#b8ae94" textLength="92.4" lengthAdjust="spacing">preferences</text>
+<text x="570.8" y="21.5" fill="#84f0a0" textLength="25.2" lengthAdjust="spacing">1/6</text>
+<text x="604.4" y="21.5" fill="#84f0a0" textLength="33.6" lengthAdjust="spacing">done</text>
 <text x="1066.4" y="21.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">‹</text>
 <text x="1083.2" y="21.5" fill="#b8ae94" textLength="25.2" lengthAdjust="spacing">1/5</text>
 <text x="1116.8" y="21.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">›</text>
@@ -1225,7 +1224,7 @@
 <text x="209.6" y="399.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">2</text>
 <text x="570.8" y="399.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">↻</text>
 <text x="587.6" y="399.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="654.8" y="399.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">17:43:28</text>
+<text x="654.8" y="399.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">20:15:18</text>
 <text x="755.6" y="399.5" fill="#f3ebd6" font-weight="700" textLength="42.0" lengthAdjust="spacing">STORY</text>
 <text x="806.0" y="399.5" fill="#f3ebd6" font-weight="700" textLength="33.6" lengthAdjust="spacing">RUNS</text>
 <text x="848.0" y="399.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">&amp;</text>
@@ -1234,7 +1233,7 @@
 <text x="932.0" y="399.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">3</text>
 <text x="1100.0" y="399.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">↻</text>
 <text x="1116.8" y="399.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="1184.0" y="399.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">17:43:28</text>
+<text x="1184.0" y="399.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">20:15:18</text>
 <text x="33.2" y="417.5" fill="#f3ebd6" font-weight="700" textLength="33.6" lengthAdjust="spacing">(not</text>
 <text x="75.2" y="417.5" fill="#f3ebd6" font-weight="700" textLength="16.8" lengthAdjust="spacing">in</text>
 <text x="100.4" y="417.5" fill="#f3ebd6" font-weight="700" textLength="33.6" lengthAdjust="spacing">your</text>

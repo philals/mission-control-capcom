@@ -534,23 +534,12 @@ impl GhSource {
         GhSource { query, rate: Mutex::new(None) }
     }
 
-    fn graphql(&self, query: &str, vars: &[String]) -> Result<String> {
-        let mut cmd = Command::new("gh");
-        cmd.args(["api", "graphql", "-f"]).arg(format!("query={query}"));
-        for var in vars {
-            cmd.arg("-f").arg(var);
-        }
-        let Some(out) = run_with_timeout(cmd, GH_TIMEOUT).context("running gh")? else {
-            bail!("gh timed out after {}s", GH_TIMEOUT.as_secs());
-        };
-        if !out.status.success() {
-            bail!("gh failed: {}", String::from_utf8_lossy(&out.stderr).trim());
-        }
-        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    fn graphql(&self, query: &str, vars: &Value) -> Result<String> {
+        capcom::github::graphql(query, vars)
     }
 
     fn fetch_all(&self) -> Result<Vec<PullRequest>> {
-        let page = parse_page(&self.graphql(GRAPHQL, &[format!("q={}", self.query)])?)?;
+        let page = parse_page(&self.graphql(GRAPHQL, &serde_json::json!({ "q": self.query }))?)?;
         let mut rate = page.rate;
         let mut prs = page.prs;
         let reviewed: Vec<String> = prs
@@ -560,7 +549,7 @@ impl GhSource {
             .take(MAX_THREAD_LOOKUPS)
             .collect();
         if !reviewed.is_empty() {
-            let vars: Vec<String> = reviewed.iter().map(|id| format!("ids[]={id}")).collect();
+            let vars = serde_json::json!({ "ids": reviewed });
             // the list is still worth showing without the conversations, so only a spent budget stops it
             match self.graphql(THREADS_GRAPHQL, &vars).and_then(|json| parse_threads_answer(&json)) {
                 Ok((threads, more)) => {
@@ -580,13 +569,18 @@ impl GhSource {
 
     /// The budget is spent: find out when it comes back, remember it, and say so.
     fn limited(&self) -> anyhow::Error {
-        let mut cmd = Command::new("gh");
-        cmd.args(["api", "-i", "graphql", "-f", "query={rateLimit{cost}}"]);
-        let probed = run_with_timeout(cmd, GH_TIMEOUT)
-            .ok()
-            .flatten()
-            .and_then(|out| parse_rate_headers(&String::from_utf8_lossy(&out.stdout)));
-        let reset_at = probed.map_or_else(|| Utc::now() + chrono::Duration::minutes(10), |r| r.reset_at);
+        let from_headers = capcom::github::graphql_budget().and_then(|b| DateTime::from_timestamp(b.reset, 0));
+        let reset_at = from_headers.or_else(|| {
+            // the direct route was not used, so ask for the headers through gh
+            let mut cmd = Command::new("gh");
+            cmd.args(["api", "-i", "graphql", "-f", "query={rateLimit{cost}}"]);
+            run_with_timeout(cmd, GH_TIMEOUT)
+                .ok()
+                .flatten()
+                .and_then(|out| parse_rate_headers(&String::from_utf8_lossy(&out.stdout)))
+                .map(|r| r.reset_at)
+        });
+        let reset_at = reset_at.unwrap_or_else(|| Utc::now() + chrono::Duration::minutes(10));
         let cost = self.rate.lock().expect("rate lock").map_or(1, |r| r.cost);
         *self.rate.lock().expect("rate lock") = Some(Rate { cost, remaining: 0, reset_at });
         anyhow::anyhow!(

@@ -684,6 +684,20 @@ impl App {
             .unwrap_or(0);
     }
 
+    /// How often the screen must be redrawn with nothing else happening: every second while something
+    /// on it counts time (a running check or run, a status line that will clear), else rarely, for the
+    /// "5 minutes ago" texts.
+    pub fn tick_seconds(&self) -> u64 {
+        let counting = self.current_notice().is_some()
+            || self.prs.items.iter().any(PullRequest::is_busy)
+            || self.runs.items.iter().any(Run::is_active);
+        if counting {
+            1
+        } else {
+            30
+        }
+    }
+
     pub fn needs_reload(&self) -> bool {
         signature(&self.root) != self.sig
     }
@@ -2976,6 +2990,16 @@ mod tests {
         old.settings_path = Some(file);
         old.load_settings();
         assert!(old.attention.slow_when_away(), "a settings file from before has it on");
+    }
+
+    #[test]
+    fn an_idle_board_redraws_rarely_and_a_busy_one_every_second() {
+        let root = TempDir::new().unwrap();
+        story(&root, "PROJ-1", &[("One", Pr, &[])]);
+        let mut app = new(&root);
+        assert_eq!(app.tick_seconds(), 30);
+        app.set_notice("hello".into());
+        assert_eq!(app.tick_seconds(), 1, "a status line will clear by itself");
     }
 
     #[test]
