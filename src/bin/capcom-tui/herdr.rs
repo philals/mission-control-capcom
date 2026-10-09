@@ -30,6 +30,12 @@ pub struct Resume {
     pub known_agents: Vec<String>,
     /// `(session id, directory it was started in)`, when one is recorded.
     pub session: Option<(String, String)>,
+    /// Text to send the agent once it is there (a skill invocation, for example).
+    pub prompt: Option<String>,
+    /// Bring the agent's tab to the front. Automatic prompts leave your screen alone.
+    pub focus: bool,
+    /// With no session to resume, start a fresh agent in `<workdir>/<this repo name>` if that exists.
+    pub fresh_repo: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,6 +43,10 @@ pub enum Outcome {
     Started,
     /// An agent with that name was already running, so it was brought to the front instead.
     Focused,
+    /// The prompt was sent to an agent that was already running.
+    Prompted,
+    /// The agent is in the middle of a turn: nothing was sent, try again later.
+    Busy,
 }
 
 pub trait Herdr: Send + Sync {
@@ -152,16 +162,6 @@ impl Cli {
         .and_then(|(id, label)| id.map(|id| (id, label))))
     }
 
-    /// The pane of a running agent whose Claude Code session is `session`, by what Herdr reports.
-    fn pane_of_session(&self, session: &str) -> Result<Option<String>, String> {
-        let list = self.call(&["agent", "list"])?;
-        Ok(list["result"]["agents"].as_array().and_then(|all| {
-            all.iter()
-                .find(|a| a["agent_session"]["value"] == session)
-                .and_then(|a| a["pane_id"].as_str().map(str::to_string))
-        }))
-    }
-
     fn agent_running(&self, name: &str) -> Result<bool, String> {
         let list = self.call(&["agent", "list"])?;
         Ok(list["result"]["agents"].as_array().is_some_and(|all| all.iter().any(|a| a["name"] == name)))
@@ -213,28 +213,62 @@ impl Herdr for Cli {
 }
 
 impl Cli {
-    fn resume_in_herdr(&self, r: &Resume) -> Result<Outcome, String> {
-        if let Some((id, _)) = &r.session {
-            if let Some(pane) = self.pane_of_session(id)? {
-                self.call(&["agent", "focus", &pane])?;
-                return Ok(Outcome::Focused);
-            }
-        }
-        for name in r.known_agents.iter().chain(std::iter::once(&r.agent)) {
-            if self.agent_running(name)? {
-                self.call(&["agent", "focus", name])?;
-                return Ok(Outcome::Focused);
-            }
-        }
-        let Some((id, cwd)) = &r.session else {
-            return Err("no session is recorded for this task yet".into());
+    /// The running agent for a resume request: the one holding its session, else one the board named.
+    fn running_agent(&self, r: &Resume) -> Result<Option<(String, bool)>, String> {
+        let list = self.call(&["agent", "list"])?;
+        let agents = list["result"]["agents"].as_array().cloned().unwrap_or_default();
+        let by_session = r.session.as_ref().and_then(|(id, _)| agents.iter().find(|a| a["agent_session"]["value"] == id.as_str()));
+        let by_name = || {
+            r.known_agents.iter().chain(std::iter::once(&r.agent)).find_map(|name| agents.iter().find(|a| a["name"] == name.as_str()))
         };
-        let launch = Launch { workspace: r.workspace.clone(), label: r.label.clone(), tab: r.tab.clone(), agent: r.agent.clone(), prompt: String::new() };
-        if !std::path::Path::new(cwd).is_dir() {
-            return Err(format!("its session started in {cwd}, which no longer exists"));
+        Ok(by_session.or_else(by_name).and_then(|a| {
+            let pane = a["pane_id"].as_str()?.to_string();
+            Some((pane, a["agent_status"] == "working"))
+        }))
+    }
+
+    fn resume_in_herdr(&self, r: &Resume) -> Result<Outcome, String> {
+        if let Some((pane, working)) = self.running_agent(r)? {
+            if let Some(prompt) = &r.prompt {
+                if working {
+                    return Ok(Outcome::Busy);
+                }
+                self.call(&["agent", "prompt", &pane, prompt])?;
+                if r.focus {
+                    self.call(&["agent", "focus", &pane])?;
+                }
+                return Ok(Outcome::Prompted);
+            }
+            self.call(&["agent", "focus", &pane])?;
+            return Ok(Outcome::Focused);
         }
-        let pane = self.new_pane(&launch, Some(cwd))?;
-        self.call(&["agent", "start", &r.agent, "--kind", "claude", "--pane", &pane, "--", "--resume", id])?;
+        let launch = Launch { workspace: r.workspace.clone(), label: r.label.clone(), tab: r.tab.clone(), agent: r.agent.clone(), prompt: String::new() };
+        let pane = match (&r.session, &r.fresh_repo, &r.prompt) {
+            (Some((_, cwd)), _, _) => {
+                if !std::path::Path::new(cwd).is_dir() {
+                    return Err(format!("its session started in {cwd}, which no longer exists"));
+                }
+                self.new_pane(&launch, Some(cwd))?
+            }
+            (None, Some(repo), Some(_)) => {
+                let dir = self.cwd.join(repo);
+                if !dir.is_dir() {
+                    return Err(format!("no session is recorded for this PR and {} does not exist to start a new agent in", dir.display()));
+                }
+                self.new_pane(&launch, Some(&dir.to_string_lossy()))?
+            }
+            _ => return Err("no session is recorded for this task yet".into()),
+        };
+        match &r.session {
+            Some((id, _)) => self.call(&["agent", "start", &r.agent, "--kind", "claude", "--pane", &pane, "--", "--resume", id])?,
+            None => self.call(&["agent", "start", &r.agent, "--kind", "claude", "--pane", &pane])?,
+        };
+        if let Some(prompt) = &r.prompt {
+            self.call(&["agent", "prompt", &r.agent, prompt])?;
+        }
+        if r.focus {
+            self.call(&["agent", "focus", &r.agent])?;
+        }
         Ok(Outcome::Started)
     }
 }
@@ -371,6 +405,9 @@ mod tests {
             agent: "proj-123-t2-resume".into(),
             known_agents: vec!["proj-123-t2-impl".into()],
             session: Some(("abc-123".into(), "/work/api".into())),
+            prompt: None,
+            focus: true,
+            fresh_repo: None,
         }
     }
 
@@ -385,7 +422,7 @@ mod tests {
     fn a_running_agent_started_by_the_board_is_focused_by_name() {
         let (cli, calls) = cli(json!([]), json!([{"name": "proj-123-t2-impl", "pane_id": "w5:p1"}]));
         assert_eq!(cli.resume(&resume()), Ok(Outcome::Focused));
-        assert!(calls.lock().unwrap().contains(&"agent focus proj-123-t2-impl".to_string()));
+        assert!(calls.lock().unwrap().contains(&"agent focus w5:p1".to_string()));
     }
 
     #[test]
@@ -423,6 +460,70 @@ mod tests {
         let error = cli.resume(&r).unwrap_err();
         assert!(error.contains("/no/such/folder") && error.contains("no longer exists"), "{error}");
         assert!(!calls.lock().unwrap().iter().any(|c| c.starts_with("agent start")));
+    }
+
+    fn prompting() -> Resume {
+        Resume { prompt: Some("/pr-address https://github.com/acme/api/pull/7".into()), focus: false, ..resume() }
+    }
+
+    #[test]
+    fn an_idle_agent_is_prompted_in_place_and_your_screen_is_left_alone() {
+        let (cli, calls) = cli(json!([]), json!([{"pane_id": "w5:p1", "agent_status": "idle", "agent_session": {"value": "abc-123"}}]));
+        assert_eq!(cli.resume(&prompting()), Ok(Outcome::Prompted));
+        let calls = calls.lock().unwrap();
+        assert!(calls.contains(&"agent prompt w5:p1 /pr-address https://github.com/acme/api/pull/7".to_string()), "{calls:?}");
+        assert!(!calls.iter().any(|c| c.starts_with("agent focus")), "{calls:?}");
+    }
+
+    #[test]
+    fn a_working_agent_is_not_interrupted() {
+        let (cli, calls) = cli(json!([]), json!([{"pane_id": "w5:p1", "agent_status": "working", "agent_session": {"value": "abc-123"}}]));
+        assert_eq!(cli.resume(&prompting()), Ok(Outcome::Busy));
+        assert!(!calls.lock().unwrap().iter().any(|c| c.starts_with("agent prompt")));
+    }
+
+    #[test]
+    fn a_closed_session_is_resumed_and_then_prompted() {
+        let (cli, calls) = cli(json!([]), json!([]));
+        let dir = std::env::temp_dir().to_string_lossy().to_string();
+        let mut r = prompting();
+        r.workspace = String::new();
+        r.session = Some(("abc-123".into(), dir));
+        assert_eq!(cli.resume(&r), Ok(Outcome::Started));
+        let calls = calls.lock().unwrap();
+        let start = calls.iter().position(|c| c.starts_with("agent start")).expect("started");
+        let prompt = calls.iter().position(|c| c.starts_with("agent prompt proj-123-t2-resume")).expect("prompted");
+        assert!(start < prompt, "{calls:?}");
+        assert!(calls[start].ends_with("-- --resume abc-123"), "{calls:?}");
+    }
+
+    #[test]
+    fn with_no_session_a_fresh_agent_starts_in_the_repo_folder_under_the_workdir_or_the_user_is_told() {
+        let work = tempfile::tempdir().unwrap();
+        std::fs::create_dir(work.path().join("api")).unwrap();
+        let calls: Calls = Arc::new(Mutex::new(Vec::new()));
+        let log = calls.clone();
+        let run: Runner = Box::new(move |args| {
+            log.lock().unwrap().push(args.join(" "));
+            Ok(match args.first().map(String::as_str) {
+                Some("tab") => json!({"result": {"root_pane": {"pane_id": "w3:p2"}}}),
+                _ => json!({"result": {"agents": [], "workspaces": []}}),
+            })
+        });
+        let cli = Cli::with_runner(work.path().to_path_buf(), run);
+        let mut r = prompting();
+        r.workspace = String::new();
+        r.session = None;
+        r.fresh_repo = Some("api".into());
+        assert_eq!(cli.resume(&r), Ok(Outcome::Started));
+        let calls = calls.lock().unwrap();
+        let dir = work.path().join("api").to_string_lossy().to_string();
+        assert!(calls.iter().any(|c| c.contains(&format!("--cwd {dir}"))), "{calls:?}");
+        assert!(calls.contains(&"agent start proj-123-t2-resume --kind claude --pane w3:p2".to_string()), "{calls:?}");
+        drop(calls);
+        let mut elsewhere = r.clone();
+        elsewhere.fresh_repo = Some("nowhere".into());
+        assert!(cli.resume(&elsewhere).unwrap_err().contains("does not exist"));
     }
 
     #[test]

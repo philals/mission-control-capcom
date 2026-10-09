@@ -2,6 +2,7 @@ use crate::finish;
 use crate::herdr::{self, Herdr, Launch, Outcome, Resume};
 use crate::pr_state;
 use crate::prs::{PrMsg, PullRequest};
+use crate::fixstate::{Claim, Store as FixStore};
 use crate::runs::{parse_run_url, valid_repo, Batch, Run, RunMsg, RunState, Watch};
 use crate::settings::{self, Settings, COLUMNS, DEFAULT_COLUMN_WEIGHT, DEFAULT_SPLIT, MIN_COLUMN_WEIGHT};
 use ratatui::crossterm::event::KeyCode;
@@ -93,6 +94,10 @@ pub enum Target {
     PrCopy(usize),
     /// The `[ agent ]` button: back to the agent session that made the PR.
     PrAgent(usize),
+    /// The `[ fix ]` button: ask the agent to address this PR now.
+    PrFix(usize),
+    ToggleAutoFix,
+    ToggleAutoCopilot,
     /// The `[DRAFT]` badge of a live draft pull request.
     PrBadge(usize),
     ConfirmYes,
@@ -240,6 +245,10 @@ pub struct PrRow<'a> {
     pub owner: Option<(String, String)>,
     /// Whether `[ agent ]` has anywhere to go: a task, or a session that made this PR.
     pub has_agent: bool,
+    /// There is something an agent could fix on this PR.
+    pub can_fix: bool,
+    /// What capcom has asked the agent so far, such as `⟳ fix round 2/5 sent 3m ago`.
+    pub fix: Option<String>,
 }
 
 fn pr_id(row: &PrRow) -> String {
@@ -356,8 +365,16 @@ pub enum AppMsg {
     Cleanup(String),
     /// Which session made which PR, read from Claude Code's transcripts.
     PrLinks(Vec<(String, PrSession)>),
+    /// The agent was asked to fix a PR: this is round `n`.
+    FixSent(String, u32),
+    /// The ask did not happen (agent busy, state file locked): look again on the next poll.
+    FixRetry(String),
 }
 
+/// Automatic rounds of "fix this PR" per PR before capcom gives up and tells you.
+pub const MAX_FIX_ROUNDS: u32 = 5;
+/// Minutes after an ask with nothing changing on the PR before capcom says the agent did not act.
+const STALL_MINUTES: i64 = 10;
 const NOTICE_SECONDS: u64 = 8;
 /// A watched run stays in the panel this long after it finishes.
 const WATCH_KEEP_MINUTES: i64 = 30;
@@ -425,6 +442,20 @@ fn gh_mark_ready(url: &str) -> Result<(), String> {
     }
 }
 
+fn gh_request_copilot(url: &str) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err("not a pull request link".into());
+    }
+    let mut cmd = Command::new("gh");
+    cmd.args(["pr", "edit", url, "--add-reviewer", "@copilot"]);
+    match capcom::refresh::run_with_timeout(cmd, std::time::Duration::from_secs(30)) {
+        Ok(Some(out)) if out.status.success() => Ok(()),
+        Ok(Some(out)) => Err(String::from_utf8_lossy(&out.stderr).lines().next().unwrap_or("gh failed").to_string()),
+        Ok(None) => Err("gh timed out".into()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 pub struct App {
     pub root: PathBuf,
     pub keys: Vec<String>,
@@ -478,6 +509,15 @@ pub struct App {
     pub readier: Readier,
     pub confirm: Option<Confirm>,
     pub agent_ask: Option<AgentAsk>,
+    /// Tick boxes: ask the agent to fix red CI and Copilot's comments by itself, and ask Copilot to review new PRs.
+    pub autofix: bool,
+    pub autocopilot: bool,
+    pub fix_store: Option<FixStore>,
+    pub copilot_requester: Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>,
+    fix_seen: HashMap<String, String>,
+    fix_rounds: HashMap<String, (u32, std::time::Instant)>,
+    fix_stall_checked: std::collections::HashSet<String>,
+    copilot_tried: std::collections::HashSet<String>,
     /// (PR url, session that made it) for PRs that are on no task.
     pub pr_links: Vec<(String, PrSession)>,
     pub herdr: Option<Arc<dyn Herdr>>,
@@ -552,6 +592,14 @@ impl App {
             readier: Arc::new(gh_mark_ready),
             confirm: None,
             agent_ask: None,
+            autofix: false,
+            autocopilot: false,
+            fix_store: None,
+            copilot_requester: Arc::new(gh_request_copilot),
+            fix_seen: HashMap::new(),
+            fix_rounds: HashMap::new(),
+            fix_stall_checked: std::collections::HashSet::new(),
+            copilot_tried: std::collections::HashSet::new(),
             pr_links: Vec::new(),
             herdr: None,
             new_story: None,
@@ -892,6 +940,7 @@ impl App {
             Ok(items) => {
                 self.alert_awaiting_review(&items);
                 self.alert_copilot_reviews(&items);
+                self.autopilot(&items);
                 self.prs.items = items;
                 self.prs.error = None;
                 self.prs.updated = Some(now());
@@ -943,6 +992,176 @@ impl App {
             }
         }
         self.copilot_seen = Some(now);
+    }
+
+    /// What is wrong with one of your PRs that an agent could fix: failing checks (once CI has
+    /// settled) and Copilot's unresolved comments (once its review is in). `(fingerprint, why)`.
+    pub fn fix_needed(pr: &PullRequest) -> Option<(String, String)> {
+        use crate::prs::CopilotState;
+        if !pr.feedback.mine {
+            return None;
+        }
+        let mut failing: Vec<String> = if pr.settled() { pr.real_failures().iter().map(|c| c.name.clone()).collect() } else { Vec::new() };
+        let mut threads: Vec<String> =
+            if pr.feedback.copilot == CopilotState::Requested { Vec::new() } else { pr.copilot_open().iter().map(|t| t.id.clone()).collect() };
+        if failing.is_empty() && threads.is_empty() {
+            return None;
+        }
+        failing.sort();
+        threads.sort();
+        let mut why = Vec::new();
+        if !failing.is_empty() {
+            why.push(format!("{} failing check{}", failing.len(), if failing.len() == 1 { "" } else { "s" }));
+        }
+        if !threads.is_empty() {
+            why.push(format!("{} unresolved Copilot comment{}", threads.len(), if threads.len() == 1 { "" } else { "s" }));
+        }
+        Some((format!("{}|{}|{}", pr.feedback.head, failing.join(","), threads.join(",")), why.join(" and ")))
+    }
+
+    /// The PR panel's "fix round 2/5 sent 3m ago" note for a PR.
+    pub fn fix_label(&self, url: &str) -> Option<String> {
+        let (round, at) = self.fix_rounds.get(url)?;
+        let mins = at.elapsed().as_secs() / 60;
+        Some(format!("⟳ fix round {round}/{MAX_FIX_ROUNDS} sent {}", if mins == 0 { "just now".to_string() } else { format!("{mins}m ago") }))
+    }
+
+    /// The tick boxes at work: ask Copilot to review new PRs, and ask the agent to fix red CI or
+    /// Copilot's comments, once per state of the PR and up to a limit of rounds.
+    fn autopilot(&mut self, items: &[PullRequest]) {
+        let Some(store) = self.fix_store.clone() else {
+            return;
+        };
+        for pr in items.iter().filter(|p| p.feedback.mine) {
+            if self.autocopilot
+                && pr.feedback.copilot == crate::prs::CopilotState::None
+                && self.copilot_tried.insert(pr.url.clone())
+            {
+                let (url, name) = (pr.url.clone(), format!("{}#{}", pr.repo, pr.number));
+                let (store, requester, done) = (store.clone(), self.copilot_requester.clone(), self.launch_done.0.clone());
+                std::thread::spawn(move || {
+                    if store.claim_copilot(&url) {
+                        let text = match requester(&url) {
+                            Ok(()) => format!("asked Copilot to review {name}"),
+                            Err(e) => format!("could not ask Copilot to review {name}: {e}"),
+                        };
+                        let _ = done.send(AppMsg::Notice(text));
+                    }
+                });
+            }
+            if !self.autofix {
+                continue;
+            }
+            match Self::fix_needed(pr) {
+                None => {
+                    if self.fix_seen.remove(&pr.url).is_some() || self.fix_rounds.remove(&pr.url).is_some() {
+                        let (store, url) = (store.clone(), pr.url.clone());
+                        std::thread::spawn(move || store.clear(&url));
+                    }
+                }
+                Some((fingerprint, why)) => {
+                    if self.fix_seen.get(&pr.url) == Some(&fingerprint) {
+                        self.check_stalled(pr, &fingerprint, &store);
+                    } else {
+                        self.fix_seen.insert(pr.url.clone(), fingerprint.clone());
+                        self.dispatch_fix(pr, fingerprint, why, false);
+                    }
+                }
+            }
+        }
+    }
+
+    fn check_stalled(&mut self, pr: &PullRequest, fingerprint: &str, store: &FixStore) {
+        let waited = self.fix_rounds.get(&pr.url).is_some_and(|(_, at)| at.elapsed() > std::time::Duration::from_secs(STALL_MINUTES as u64 * 60));
+        if !waited || !self.fix_stall_checked.insert(format!("{}|{fingerprint}", pr.url)) {
+            return;
+        }
+        let (store, url, name) = (store.clone(), pr.url.clone(), format!("{}#{}", pr.repo, pr.number));
+        let (notify, fp, done) = (self.notify.clone(), fingerprint.to_string(), self.launch_done.0.clone());
+        std::thread::spawn(move || {
+            if store.stalled(&url, &fp, STALL_MINUTES) {
+                notify("CAPCOM: the agent has not acted", &format!("{name} looks the same {STALL_MINUTES} minutes after it was asked to fix it"));
+                let _ = done.send(AppMsg::Notice(format!("{name}: no change {STALL_MINUTES} minutes after the agent was asked: it may be stuck")));
+            }
+        });
+    }
+
+    /// Ask the agent that made a PR to address it: the running agent if there is one and it is idle,
+    /// else its session resumed, else a fresh agent in the repo's folder.
+    fn dispatch_fix(&mut self, pr: &PullRequest, fingerprint: String, why: String, manual: bool) {
+        let (Some(herdr), Some(store)) = (self.herdr.clone(), self.fix_store.clone()) else {
+            if manual {
+                self.set_notice("not running inside Herdr, so no agent can be asked".into());
+            }
+            return;
+        };
+        let name = format!("{}#{}", pr.repo, pr.number);
+        let owner = self.pr_owner(&pr.url);
+        let mut resume = self.resume_request(&pr.url, &pr.repo, &name, owner.as_ref());
+        resume.focus = manual;
+        let (url, done, notify) = (pr.url.clone(), self.launch_done.0.clone(), self.notify.clone());
+        std::thread::spawn(move || match store.claim(&url, &fingerprint, MAX_FIX_ROUNDS, manual) {
+            Claim::Same => {}
+            Claim::Busy => {
+                let _ = done.send(AppMsg::FixRetry(url));
+            }
+            Claim::GaveUp => {
+                notify("CAPCOM: giving up on a PR", &format!("{name} is still not right after {MAX_FIX_ROUNDS} rounds: over to you"));
+                let _ = done.send(AppMsg::Notice(format!("{name}: still not right after {MAX_FIX_ROUNDS} automatic rounds: over to you (press f to start again)")));
+            }
+            Claim::Go { round, undo } => {
+                let text = if manual {
+                    format!("/pr-address {url} (asked by hand: {why})")
+                } else {
+                    format!("/pr-address {url} (automatic round {round} of {MAX_FIX_ROUNDS}: {why})")
+                };
+                resume.prompt = Some(text);
+                match herdr.resume(&resume) {
+                    Ok(Outcome::Busy) => {
+                        store.undo(&url, undo);
+                        let _ = done.send(AppMsg::FixRetry(url));
+                    }
+                    Ok(_) => {
+                        let _ = done.send(AppMsg::FixSent(url, round));
+                        let _ = done.send(AppMsg::Notice(format!("asked the agent to fix {name} ({why})")));
+                    }
+                    Err(e) => {
+                        store.undo(&url, undo);
+                        let _ = done.send(AppMsg::Notice(format!("could not reach an agent for {name}: {e}")));
+                    }
+                }
+            }
+        });
+    }
+
+    /// `f` or `[ fix ]`: ask the agent to address the selected PR now, whatever the tick boxes say.
+    pub fn fix_pr(&mut self, index: usize) {
+        let Some(url) = self.pr_rows().get(index).map(|r| r.url.clone()) else {
+            return;
+        };
+        let Some(pr) = self.prs.items.iter().find(|p| same_url(&p.url, &url)).cloned() else {
+            self.set_notice("only open PRs from GitHub can be fixed".into());
+            return;
+        };
+        if !pr.feedback.mine {
+            self.set_notice("you did not write this PR, so capcom leaves it alone".into());
+            return;
+        }
+        let (fingerprint, why) = Self::fix_needed(&pr).unwrap_or_else(|| (format!("{}|by hand", pr.feedback.head), "everything outstanding".to_string()));
+        self.fix_seen.insert(pr.url.clone(), fingerprint.clone());
+        self.dispatch_fix(&pr, fingerprint, why, true);
+    }
+
+    pub fn toggle_autofix(&mut self) {
+        self.autofix = !self.autofix;
+        self.save_settings();
+        self.set_notice(format!("auto-fix {}", if self.autofix { format!("on: the agent is asked to fix red CI and Copilot's comments, up to {MAX_FIX_ROUNDS} rounds a PR") } else { "off".into() }));
+    }
+
+    pub fn toggle_autocopilot(&mut self) {
+        self.autocopilot = !self.autocopilot;
+        self.save_settings();
+        self.set_notice(format!("auto-request Copilot {}", if self.autocopilot { "on: Copilot reviews your PRs as they appear" } else { "off" }));
     }
 
     pub fn attach_runs(
@@ -1191,6 +1410,8 @@ impl App {
             columns: self.col_weights.to_vec(),
             auto_sync: self.auto_sync,
             watched: self.watches.clone(),
+            autofix: self.autofix,
+            autocopilot: self.autocopilot,
         }
     }
 
@@ -1204,6 +1425,8 @@ impl App {
         self.split_pinned = saved.split_pinned;
         self.auto_sync = saved.auto_sync;
         self.watches = saved.watched;
+        self.autofix = saved.autofix;
+        self.autocopilot = saved.autocopilot;
         self.sync_watched();
         for (slot, weight) in self.col_weights.iter_mut().zip(saved.columns) {
             *slot = weight;
@@ -1394,12 +1617,49 @@ impl App {
 
     /// Go back to the agent that made a PR: focus it if it is still running in Herdr, otherwise
     /// resume its recorded Claude Code session in a new tab.
+    /// How to reach the agent that made a PR: the task's recorded session, the session the
+    /// transcripts say made it, or (for a prompt) a fresh agent in the repo's folder.
+    fn resume_request(&self, url: &str, repo: &str, name: &str, owner: Option<&(String, String)>) -> Resume {
+        let linked = self.pr_link(url).map(|s| (s.session.clone(), s.cwd.clone()));
+        let fresh_repo = repo.rsplit('/').next().map(str::to_string);
+        match owner {
+            Some((key, task)) => {
+                let recorded = self.session_for(key, task).map(|s| (s.id.clone(), s.cwd.clone()));
+                Resume {
+                    workspace: key.clone(),
+                    label: self.workspace_label(key),
+                    tab: format!("{task} resume"),
+                    agent: herdr::agent_name(&[key, task, "resume"]),
+                    known_agents: ["impl", "cleanup", "plan"].iter().map(|phase| herdr::agent_name(&[key, task, phase])).collect(),
+                    prompt: None,
+                    focus: true,
+                    fresh_repo,
+                    // the transcript's own folder is the truth if the session has since moved to a worktree
+                    session: match (recorded, linked) {
+                        (Some((id, _)), Some((linked_id, dir))) if id == linked_id => Some((id, dir)),
+                        (recorded, linked) => recorded.or(linked),
+                    },
+                }
+            }
+            None => Resume {
+                workspace: String::new(),
+                label: String::new(),
+                tab: format!("{name} agent"),
+                agent: herdr::agent_name(&["pr", name, "resume"]),
+                known_agents: Vec::new(),
+                prompt: None,
+                focus: true,
+                fresh_repo,
+                session: linked,
+            },
+        }
+    }
+
     pub fn open_pr_agent(&mut self, index: usize) {
-        let Some((owner, url, name)) = self.pr_rows().get(index).map(|r| (r.owner.clone(), r.url.clone(), pr_id(r))) else {
+        let Some((owner, url, repo, name)) = self.pr_rows().get(index).map(|r| (r.owner.clone(), r.url.clone(), r.repo.clone(), pr_id(r))) else {
             return;
         };
-        let linked = self.pr_link(&url).map(|s| (s.session.clone(), s.cwd.clone()));
-        if owner.is_none() && linked.is_none() {
+        if owner.is_none() && self.pr_link(&url).is_none() {
             self.set_notice("no agent is known for this PR: it is on no task and no Claude Code session recorded making it".into());
             return;
         }
@@ -1407,41 +1667,16 @@ impl App {
             self.set_notice("not running inside Herdr, so the agent cannot be brought back".into());
             return;
         };
-        let (resume, task) = match owner {
-            Some((key, task)) => {
-                let recorded = self.session_for(&key, &task).map(|s| (s.id.clone(), s.cwd.clone()));
-                let resume = Resume {
-                    workspace: key.clone(),
-                    label: self.workspace_label(&key),
-                    tab: format!("{task} resume"),
-                    agent: herdr::agent_name(&[&key, &task, "resume"]),
-                    known_agents: ["impl", "cleanup", "plan"].iter().map(|phase| herdr::agent_name(&[&key, &task, phase])).collect(),
-                    // the transcript's own folder is the truth if the session has since moved to a worktree
-                    session: match (recorded, linked) {
-                        (Some((id, _)), Some((linked_id, dir))) if id == linked_id => Some((id, dir)),
-                        (recorded, linked) => recorded.or(linked),
-                    },
-                };
-                (resume, task)
-            }
-            None => {
-                let resume = Resume {
-                    workspace: String::new(),
-                    label: String::new(),
-                    tab: format!("{name} agent"),
-                    agent: herdr::agent_name(&["pr", &name, "resume"]),
-                    known_agents: Vec::new(),
-                    session: linked,
-                };
-                (resume, name)
-            }
-        };
+        let mut resume = self.resume_request(&url, &repo, &name, owner.as_ref());
+        resume.fresh_repo = None;
+        let task = owner.map_or(name, |(_, task)| task);
         self.set_notice(format!("looking for the agent that made {task}…"));
         let done = self.launch_done.0.clone();
         std::thread::spawn(move || {
             let text = match herdr.resume(&resume) {
                 Ok(Outcome::Started) => format!("resumed the session for {task} in Herdr workspace {}", resume.workspace),
                 Ok(Outcome::Focused) => format!("the agent for {task} is running: brought to the front"),
+                Ok(Outcome::Prompted | Outcome::Busy) => format!("the agent for {task} is running"),
                 Err(e) => format!("{task}: {e}"),
             };
             let _ = done.send(AppMsg::Notice(text));
@@ -1476,6 +1711,8 @@ impl App {
                         board_state: None,
                         owner: self.pr_owner(&p.url),
                         has_agent: self.pr_owner(&p.url).is_some() || self.pr_link(&p.url).is_some(),
+                        can_fix: p.feedback.mine && (Self::fix_needed(p).is_some() || p.open_threads() > 0),
+                        fix: self.fix_label(&p.url),
                     })
                     .collect();
                 // PRs that are green and only waiting for a reviewer come first (the order is otherwise kept)
@@ -1506,6 +1743,8 @@ impl App {
                             board_state: Some(pr.state),
                             owner: self.pr_owner(&pr.url),
                             has_agent: true,
+                            can_fix: live.is_some_and(|p| p.feedback.mine && (Self::fix_needed(p).is_some() || p.open_threads() > 0)),
+                            fix: self.fix_label(&pr.url),
                         });
                     }
                 }
@@ -1618,6 +1857,7 @@ impl App {
             let text = match herdr.launch(&launch) {
                 Ok(Outcome::Started) => format!("started {} in Herdr workspace {}", launch.agent, launch.workspace),
                 Ok(Outcome::Focused) => format!("{} is already running: brought to the front", launch.agent),
+                Ok(Outcome::Prompted | Outcome::Busy) => format!("{} is already running", launch.agent),
                 Err(e) => format!("could not start {}: {e}", launch.agent),
             };
             let _ = done.send(AppMsg::Notice(text));
@@ -1872,6 +2112,12 @@ impl App {
             match msg {
                 AppMsg::Notice(text) => self.set_notice(text),
                 AppMsg::PrLinks(links) => self.pr_links = links,
+                AppMsg::FixSent(url, round) => {
+                    self.fix_rounds.insert(url, (round, std::time::Instant::now()));
+                }
+                AppMsg::FixRetry(url) => {
+                    self.fix_seen.remove(&url);
+                }
                 AppMsg::Cleanup(id) => {
                     let title = self.board.as_ref().and_then(|b| b.task(&id)).map_or(String::new(), |t| t.title.clone());
                     self.agent_ask = Some(AgentAsk { id, title, kind: AskKind::Cleanup });
@@ -2075,6 +2321,18 @@ impl App {
                 self.copy_pr(self.pr_sel);
                 return false;
             }
+            KeyCode::Char('F') => {
+                self.toggle_autofix();
+                return false;
+            }
+            KeyCode::Char('C') => {
+                self.toggle_autocopilot();
+                return false;
+            }
+            KeyCode::Char('f') if self.focus == Focus::Prs => {
+                self.fix_pr(self.pr_sel);
+                return false;
+            }
             KeyCode::Char('a') if self.focus == Focus::Prs => {
                 self.open_pr_agent(self.pr_sel);
                 return false;
@@ -2239,6 +2497,20 @@ impl App {
                 self.copy_pr(i);
                 return;
             }
+            Some(Target::PrFix(i)) => {
+                self.set_focus(Focus::Prs);
+                self.pr_sel = i;
+                self.fix_pr(i);
+                return;
+            }
+            Some(Target::ToggleAutoFix) => {
+                self.toggle_autofix();
+                return;
+            }
+            Some(Target::ToggleAutoCopilot) => {
+                self.toggle_autocopilot();
+                return;
+            }
             Some(Target::PrAgent(i)) => {
                 self.set_focus(Focus::Prs);
                 self.pr_sel = i;
@@ -2326,7 +2598,7 @@ impl App {
             return;
         }
         let target = self.hit(x, y);
-        if matches!(target, Some(Target::Pr(_) | Target::PrDetails(_) | Target::PrAgent(_) | Target::PrPanel | Target::OpenCheck(..))) {
+        if matches!(target, Some(Target::Pr(_) | Target::PrDetails(_) | Target::PrAgent(_) | Target::PrFix(_) | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::PrPanel | Target::OpenCheck(..))) {
             self.set_focus(Focus::Prs);
             self.pr_move(delta);
             return;
