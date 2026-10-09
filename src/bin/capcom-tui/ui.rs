@@ -1222,11 +1222,17 @@ mod tests {
             "PULL REQUESTS · 3", "updated", "acme/widgets#12", "Add notices", "PROJ-2 · T1",
             "acme/api#99", "Unrelated chore", "approved", "✎ 3", " ago", "[bug]", "[ details ]",
             "✓ 3", "✗ 1", "◔ 2", "● 1", "◔ CI / build", "◔ CI / test", "● CI / deploy",
-            "✗ CI / unit", "no checks", "[READY]", "[DRAFT]",
+            "✗ CI / unit", "[READY]", "[DRAFT]",
         ] {
             assert!(out.contains(want), "missing {want:?} in:\n{out}");
         }
         assert!(out.contains("Tab PRs/runs"), "{out}");
+        assert!(!out.contains("no checks"), "quiet PRs are one line each until selected:\n{out}");
+        let mut app = app;
+        app.pr_sel = 2;
+        assert!(render(&app, 170, 44).contains("no checks"), "the selected one shows its detail");
+        let (_root, app) = with_prs();
+        let out = render(&app, 170, 44);
         for gone in ["running: ", "queued: ", "failed: ", "CI / lint"] {
             assert!(!out.contains(gone), "{gone:?} should not appear in:\n{out}");
         }
@@ -1260,7 +1266,7 @@ mod tests {
         assert_eq!(buf[(x, y)].fg, theme::ORANGE, "pending is orange");
         let (sx, sy) = find(&text, "● 1");
         assert_eq!(buf[(sx, sy)].fg, theme::ORANGE, "the summary count matches");
-        assert!(!text.contains("○"), "no hollow circle is left:\n{text}");
+        assert!(!text.lines().filter(|l| l.contains(" CI / ")).any(|l| l.contains('○')), "no hollow circle on a stage line:\n{text}");
     }
 
     #[test]
@@ -1301,7 +1307,7 @@ mod tests {
     fn a_long_stage_list_is_capped_and_the_selected_pr_stays_fully_visible() {
         let (_root, mut app) = two_stories();
         app.apply_prs(Ok(vec![busy_pr(1, 12), busy_pr(2, 3), busy_pr(3, 3)]));
-        let out = render(&app, 140, 36);
+        let out = render(&app, 140, 46);
         assert!(out.contains("CI / job07"), "{out}");
         assert!(!out.contains("CI / job08"), "{out}");
         assert!(out.contains("… +4 more"), "{out}");
@@ -1425,12 +1431,20 @@ mod tests {
         let out = render(&app, 170, 44);
         let (x, y) = find(&out, "Unrelated chore");
         app.on_click(x, y);
-        assert_eq!(*log.borrow(), vec!["https://github.com/acme/api/pull/99".to_string()]);
-        assert_eq!((app.focus, app.pr_sel, app.pr_sheet), (Focus::Prs, 1, false));
-        render(&app, 170, 44);
+        assert!(log.borrow().is_empty(), "a quiet PR is one line: the first click only opens it up");
+        assert_eq!((app.focus, app.pr_sel, app.pr_sheet), (Focus::Prs, 2, false));
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "Unrelated chore");
         app.on_click(x, y);
-        assert_eq!(log.borrow().len(), 2, "every click opens it again, the sheet stays closed");
+        assert_eq!(*log.borrow(), vec!["https://github.com/acme/api/pull/99".to_string()]);
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "Unrelated chore");
+        app.on_click(x, y);
+        assert_eq!(log.borrow().len(), 2, "every click on an open row opens it again, the sheet stays closed");
         assert!(!app.pr_sheet);
+        let (x, y) = find(&out, "Add notices");
+        app.on_click(x, y);
+        assert_eq!(log.borrow().last().map(String::as_str), Some("https://github.com/acme/widgets/pull/12"), "a PR that needs you opens at the first click");
     }
 
     #[test]
@@ -1438,7 +1452,7 @@ mod tests {
         let (_root, mut app) = with_prs();
         let log = recorder(&mut app);
         let out = render(&app, 170, 44);
-        assert_eq!(out.matches("[ details ]").count(), 3, "one button per pull request:\n{out}");
+        assert_eq!(out.matches("[ details ]").count(), 1, "buttons only on the rows that are open: the red PR, which is selected:\n{out}");
         let (x, y) = find(&out, "[ details ]");
         app.on_click(x + 2, y);
         assert!(app.pr_sheet && app.focus == Focus::Prs);
@@ -1457,13 +1471,14 @@ mod tests {
     #[test]
     fn the_details_button_of_a_later_pr_opens_that_prs_sheet() {
         let (_root, mut app) = with_prs();
+        app.pr_sel = 2;
         let out = render(&app, 170, 44);
-        let y_second = find(&out, "Unrelated chore").1 + 2;
+        let y_second = find(&out, "Unrelated chore").1 + 3;
         let x = out.lines().nth(y_second as usize).unwrap().find("[ details ]").expect("button on the CI line");
         let x = out.lines().nth(y_second as usize).unwrap()[..x].chars().count() as u16;
         app.on_click(x + 1, y_second);
         assert!(app.pr_sheet);
-        assert_eq!(app.pr_sel, 1);
+        assert_eq!(app.pr_sel, 2);
         let out = render(&app, 170, 44);
         assert!(out.contains("Draft (not ready for review)"), "{out}");
     }
@@ -1488,7 +1503,7 @@ mod tests {
     fn the_pr_sheet_says_when_a_pull_request_is_a_draft() {
         let (_root, mut app) = with_prs();
         app.focus = Focus::Prs;
-        app.pr_sel = 1;
+        app.pr_sel = 2;
         app.pr_sheet = true;
         let out = render(&app, 150, 50);
         assert!(out.contains("Draft (not ready for review)"), "{out}");
@@ -1517,7 +1532,7 @@ mod tests {
         let opened = recorder(&mut app);
         let copied = copies(&mut app);
         let out = render(&app, 170, 44);
-        assert_eq!(out.matches("[ copy ]").count(), 3, "one per pull request:\n{out}");
+        assert_eq!(out.matches("[ copy ]").count(), 1, "on the open row only:\n{out}");
         let (x, y) = find(&out, "[ copy ]");
         app.on_click(x + 2, y);
         assert_eq!(*copied.borrow(), vec!["https://github.com/acme/widgets/pull/12".to_string()]);
@@ -1578,7 +1593,7 @@ mod tests {
         let (x, y) = find(&out, "[READY]");
         app.on_click(x + 2, y);
         assert!(app.confirm.is_none());
-        app.pr_sel = 1;
+        app.pr_sel = 2;
         app.on_key(KeyCode::Char('m'), false);
         assert!(app.confirm.is_some());
         app.on_key(KeyCode::Esc, false);
@@ -1589,8 +1604,8 @@ mod tests {
     fn a_failed_mark_ready_is_reported() {
         let (_root, mut app) = with_prs();
         app.readier = std::sync::Arc::new(|_| Err("not permitted".into()));
-        app.pr_sel = 1;
-        app.ask_mark_ready(1);
+        app.pr_sel = 2;
+        app.ask_mark_ready(2);
         app.confirm_ready();
         for _ in 0..100 {
             app.poll_ready();
@@ -1737,8 +1752,9 @@ mod tests {
         let fake = with_herdr(&mut app);
         assert_eq!(render(&app, 170, 44).matches("[ agent ]").count(), 1);
         app.pr_links = vec![(url.to_string(), capcom::session::PrSession { session: "s-99".into(), cwd: "/w/api/tree".into() })];
+        app.pr_sel = app.pr_rows().iter().position(|r| r.url == url).unwrap();
         let out = render(&app, 170, 44);
-        assert_eq!(out.matches("[ agent ]").count(), 2, "the task PR and the linked one:\n{out}");
+        assert_eq!(out.matches("[ agent ]").count(), 2, "the task PR and the selected, linked one:\n{out}");
         let line = out.lines().position(|l| l.contains("acme/api#99")).unwrap();
         let (x, y) = out
             .lines()
@@ -1820,6 +1836,96 @@ mod tests {
         let asks = fake.resumes.lock().unwrap();
         assert_eq!(asks.len(), 2, "a new commit that is still red is another round");
         assert!(asks[1].prompt.clone().unwrap().contains("round 2 of 5"));
+    }
+
+    #[test]
+    fn the_rail_shows_a_prs_way_to_a_merge_in_words_and_icons() {
+        let (_root, mut app) = two_stories();
+        let mut pr = pr_with(1, "Needs work", Review::Required, false, CheckState::Failed);
+        pr.feedback.copilot = crate::prs::CopilotState::Reviewed;
+        pr.feedback.threads = vec![crate::prs::Thread { id: "t".into(), resolved: false, outdated: false, by_copilot: true }];
+        pr.feedback.merge = crate::prs::MergeState::Conflicting;
+        app.apply_prs(Ok(vec![pr]));
+        let out = render(&app, 170, 44);
+        let rail = line_of(&out, "ready ●");
+        for want in ["ready ●", "CI 1 failed ✗", "copilot ●", "threads 1 ✗", "approved ○", "conflicts ✗"] {
+            assert!(rail.contains(want), "missing {want:?} in the rail: {rail}");
+        }
+        let mut good = pr_with(2, "Nearly there", Review::Approved, false, CheckState::Passed);
+        good.feedback.copilot = crate::prs::CopilotState::Reviewed;
+        good.feedback.merge = crate::prs::MergeState::Clean;
+        app.apply_prs(Ok(vec![good]));
+        let rail = render(&app, 170, 44);
+        let rail = line_of(&rail, "ready ●");
+        assert!(rail.contains("CI ●") && rail.contains("threads ●") && rail.contains("approved ●") && rail.contains("merge ●"), "{rail}");
+        let mut draft = pr_with(3, "Early", Review::None, true, CheckState::Running);
+        draft.feedback.merge = crate::prs::MergeState::Behind;
+        app.apply_prs(Ok(vec![draft]));
+        let rail = render(&app, 170, 44);
+        let rail = line_of(&rail, "draft ○");
+        assert!(rail.contains("CI running ◔") && rail.contains("behind ◔"), "{rail}");
+        assert_readable(&app, 170, 44, "the rail");
+    }
+
+    #[test]
+    fn a_narrow_rail_drops_the_steps_that_are_done_and_keeps_the_ones_that_need_something() {
+        let (_root, mut app) = two_stories();
+        let mut pr = pr_with(1, "Needs work", Review::Required, true, CheckState::Failed);
+        pr.feedback.copilot = crate::prs::CopilotState::Reviewed;
+        pr.feedback.threads = vec![crate::prs::Thread { id: "t".into(), resolved: false, outdated: false, by_copilot: true }];
+        pr.feedback.merge = crate::prs::MergeState::Conflicting;
+        app.apply_prs(Ok(vec![pr]));
+        let narrow = render(&app, 66, 44);
+        let rail = line_of(&narrow, "CI 1 failed");
+        assert!(rail.contains("conflicts ✗") && rail.contains("threads 1 ✗") && rail.contains("CI 1 failed ✗"), "what is wrong stays: {rail}");
+        assert!(!rail.contains("copilot ●"), "done steps go first: {rail}");
+        let tiny = render(&app, 50, 44);
+        assert!(line_of(&tiny, "CI 1 failed").contains("conflicts ✗"), "even then the merge state stays:\n{tiny}");
+    }
+
+    #[test]
+    fn quiet_prs_take_one_line_until_selected_and_what_needs_you_stays_open() {
+        let (_root, mut app) = two_stories();
+        let quiet = |n: u64, title: &str| pr_with(n, title, Review::None, true, CheckState::Skipped);
+        let mut red = pr_with(9, "Broken", Review::Required, false, CheckState::Failed);
+        red.checks[2].state = CheckState::Failed;
+        app.apply_prs(Ok(vec![quiet(1, "Quiet one"), quiet(2, "Quiet two"), red]));
+        let out = render(&app, 170, 44);
+        let (_, red_y) = find(&out, "Broken");
+        let (_, quiet_y) = find(&out, "Quiet one");
+        assert!(red_y < quiet_y, "red first:\n{out}");
+        assert_eq!(line_of(&out, "Quiet one").matches("acme/api#1").count(), 1, "badge, id and title share one line:\n{out}");
+        let (_, two_y) = find(&out, "Quiet two");
+        assert_eq!(two_y, quiet_y + 2, "one line each with a divider between:\n{out}");
+        assert!(out.matches("[ details ]").count() == 1, "only the open row has buttons:\n{out}");
+        app.focus = Focus::Prs;
+        app.on_key(KeyCode::Down, false);
+        app.on_key(KeyCode::Down, false);
+        let out = render(&app, 170, 44);
+        assert!(out.matches("[ details ]").count() == 2, "the selected quiet row opens up:\n{out}");
+        assert!(out.contains("draft ○"), "{out}");
+    }
+
+    #[test]
+    fn the_row_you_are_on_stays_under_you_when_the_order_changes() {
+        let (_root, mut app) = two_stories();
+        let calm = |n: u64| pr_with(n, &format!("PR {n}"), Review::None, true, CheckState::Skipped);
+        let mut red = |n: u64| {
+            let mut pr = pr_with(n, &format!("PR {n}"), Review::Required, false, CheckState::Failed);
+            pr.checks[2].state = CheckState::Failed;
+            pr
+        };
+        app.apply_prs(Ok(vec![calm(1), calm(2), calm(3)]));
+        app.focus = Focus::Prs;
+        app.pr_sel = 2;
+        let url = |n: u64| format!("https://github.com/acme/api/pull/{n}");
+        assert_eq!(app.pr_rows()[2].url, url(3));
+        app.apply_prs(Ok(vec![calm(1), calm(2), calm(3), red(4)]));
+        assert_eq!(app.pr_rows()[0].url, url(4), "the red PR jumps to the top");
+        assert_eq!(app.pr_rows()[app.pr_sel].url, url(3), "the PR you were on is still the selected one");
+        app.focus = Focus::Main;
+        app.apply_prs(Ok(vec![calm(1), calm(2), calm(3), red(4)]));
+        assert_eq!(app.pr_sel, 0, "with the panel not in use, the most urgent row is the selected one");
     }
 
     #[test]
@@ -2004,7 +2110,7 @@ mod tests {
         settle(&mut app);
         assert!(asked.lock().unwrap().is_empty(), "off by default");
         let out = render(&app, 170, 44);
-        assert_eq!(out.matches("[ ] auto-review").count(), 3, "a tick on each of your two PRs, plus the default at the bottom:\n{out}");
+        assert_eq!(out.matches("[ ] auto-review").count(), 2, "a tick on the selected PR (quiet ones are one line), plus the default at the bottom:\n{out}");
         let (x, y) = find(&out, "[ ] auto-review");
         app.on_click(x + 2, y);
         settle(&mut app);
@@ -2919,7 +3025,11 @@ mod tests {
         let out = render(&app, 170, 44);
         assert_eq!(out.matches("◉ AWAITING REVIEW").count(), 1, "only the ready, green, review-required PR:\n{out}");
         assert!(out.contains("PULL REQUESTS · 5 · 1 awaiting review"), "{out}");
-        assert!(out.contains("✔ APPROVED · READY TO MERGE") && out.contains("✔ ALL GREEN"), "{out}");
+        assert!(out.contains("✔ APPROVED · READY TO MERGE"), "{out}");
+        assert!(!out.contains("✔ ALL GREEN"), "a PR with nothing to do is one line until selected:\n{out}");
+        app.pr_sel = 3;
+        assert!(render(&app, 170, 44).contains("✔ ALL GREEN"));
+        app.pr_sel = 0;
         assert_readable(&app, 170, 44, "green PRs highlighted");
     }
 
@@ -2961,7 +3071,7 @@ mod tests {
     }
 
     #[test]
-    fn prs_waiting_for_a_reviewer_are_listed_first_and_the_rest_keep_their_order() {
+    fn prs_are_listed_by_how_much_they_need_you_and_ties_keep_their_order() {
         let (_root, mut app) = two_stories();
         app.apply_prs(Ok(vec![
             live("acme/api", 1, "Running"),
@@ -2970,7 +3080,7 @@ mod tests {
             green(4, "Also waits", Review::Required, false),
         ]));
         let numbers: Vec<u64> = app.pr_rows().iter().filter_map(|r| r.number).collect();
-        assert_eq!(numbers, vec![2, 4, 1, 3]);
+        assert_eq!(numbers, vec![2, 4, 3, 1], "waiting for a reviewer, then ready to merge, then still running");
     }
 
     #[test]
@@ -3076,7 +3186,7 @@ mod tests {
             assert!(out.contains(want), "missing {want:?} in:\n{out}");
         }
         assert!(line_of(&out, "PULL REQUESTS").contains("RUNS & WATCH"), "same row, side by side:\n{out}");
-        assert_eq!(out.matches("[ details ]").count(), 6, "a details button on each PR and each run:\n{out}");
+        assert_eq!(out.matches("[ details ]").count(), 4, "a details button on the open PR row and on each run:\n{out}");
         assert!(!out.contains("[ open ]"), "runs no longer have a separate open button:\n{out}");
         assert!(!out.contains("compile"), "passed stages are not listed:\n{out}");
     }
