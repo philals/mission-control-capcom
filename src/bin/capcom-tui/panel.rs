@@ -193,9 +193,28 @@ pub fn waiting_label(waiting: Waiting) -> (&'static str, Color) {
     }
 }
 
+/// Copilot's part in a PR: nothing until it is asked, then reviewing, then what is left to fix.
+pub fn copilot_label(pr: &PullRequest) -> Option<(String, Color)> {
+    use crate::prs::CopilotState;
+    match pr.feedback.copilot {
+        CopilotState::None => None,
+        CopilotState::Requested => Some(("copilot ◔ reviewing".to_string(), theme::YELLOW)),
+        CopilotState::Reviewed => match pr.copilot_open().len() {
+            0 => Some(("copilot ✔ reviewed".to_string(), theme::GREEN)),
+            n => Some((format!("copilot ✎ {n} to fix"), theme::ORANGE)),
+        },
+    }
+}
+
 fn summary_line(pr: &PullRequest) -> Vec<Span<'static>> {
+    let copilot = copilot_label(pr).map(|(text, color)| Span::styled(text, Style::new().fg(color)));
     if pr.checks.is_empty() {
-        return vec![Span::styled("no checks", dim())];
+        let mut spans = vec![Span::styled("no checks", dim())];
+        if let Some(copilot) = copilot {
+            spans.push(Span::raw("  "));
+            spans.push(copilot);
+        }
+        return spans;
     }
     let c = pr.counts();
     let mut spans = Vec::new();
@@ -229,6 +248,7 @@ fn summary_line(pr: &PullRequest) -> Vec<Span<'static>> {
     if c.skipped > 0 {
         push(format!("⊘ {}", c.skipped), theme::DIM);
     }
+    spans.extend(copilot);
     spans
 }
 
