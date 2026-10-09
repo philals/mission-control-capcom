@@ -684,6 +684,11 @@ impl App {
         self.visible_stories().get(index).map(|s| (s.key.clone(), list_col_of(s), s.total))
     }
 
+    /// The Herdr workspace name for a story: its key, a hyphen and a few words from its title.
+    fn workspace_label(&self, key: &str) -> String {
+        self.stories.iter().find(|s| s.key == key).map_or_else(|| key.to_string(), |s| herdr::workspace_label(key, &s.title))
+    }
+
     /// Start the review skill for a story whose tasks are all finished, in a new Herdr tab.
     pub fn review_story(&mut self, key: &str) {
         let checked = store::load(&self.root, key).and_then(|mut board| match board.story.status {
@@ -697,6 +702,7 @@ impl App {
         }
         self.run_launch(Launch {
             workspace: key.to_string(),
+            label: self.workspace_label(key),
             tab: "review".into(),
             agent: herdr::agent_name(&[key, "review"]),
             prompt: format!("/story-review {key}"),
@@ -728,6 +734,7 @@ impl App {
             (ListCol::Doing, ListCol::Review) => self.review_story(&key),
             (ListCol::Todo, ListCol::Doing) if total == 0 => self.run_launch(Launch {
                 workspace: key.clone(),
+                label: self.workspace_label(&key),
                 tab: "break down".into(),
                 agent: herdr::agent_name(&[&key, "breakdown"]),
                 prompt: format!("/story-break-down {key}"),
@@ -1365,6 +1372,7 @@ impl App {
         };
         self.run_launch(Launch {
             workspace: key.clone(),
+            label: self.workspace_label(&key),
             tab: format!("{task_id} {tab}"),
             agent: herdr::agent_name(&[&key, task_id, phase]),
             prompt: format!("/{skill} {key} {task_id}"),
@@ -1530,8 +1538,10 @@ impl App {
             self.set_notice(format!("{key} is already on the board"));
             return;
         }
+        // the story's title is not known yet: the breakdown skill renames the workspace once it is
         self.run_launch(Launch {
             workspace: key.clone(),
+            label: key.clone(),
             tab: "break down".into(),
             agent: herdr::agent_name(&[&key, "breakdown"]),
             prompt: format!("/story-break-down {key}"),

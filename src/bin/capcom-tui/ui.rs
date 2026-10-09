@@ -1632,6 +1632,7 @@ mod tests {
             launches,
             vec![crate::herdr::Launch {
                 workspace: "PROJ-1".into(),
+                label: "PROJ-1 - Notices".into(),
                 tab: "T3 plan".into(),
                 agent: "proj-1-t3-plan".into(),
                 prompt: "/story-plan-task PROJ-1 T3".into(),
@@ -1829,6 +1830,7 @@ mod tests {
             launches,
             vec![crate::herdr::Launch {
                 workspace: "NEW-5".into(),
+                label: "NEW-5".into(),
                 tab: "break down".into(),
                 agent: "new-5-breakdown".into(),
                 prompt: "/story-break-down NEW-5".into(),
@@ -2293,6 +2295,7 @@ mod tests {
             launches,
             vec![crate::herdr::Launch {
                 workspace: "PROJ-4".into(),
+                label: "PROJ-4 - Story PROJ-4".into(),
                 tab: "review".into(),
                 agent: "proj-4-review".into(),
                 prompt: "/story-review PROJ-4".into(),

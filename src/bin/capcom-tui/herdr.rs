@@ -7,7 +7,10 @@ use std::time::Duration;
 /// One agent to start: where it lives and what it is told.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Launch {
+    /// The story key: how an existing workspace is recognised.
     pub workspace: String,
+    /// What a new (or renamed) workspace is called, such as `PROJ-123 - Notification preferences`.
+    pub label: String,
     pub tab: String,
     pub agent: String,
     pub prompt: String,
@@ -22,6 +25,36 @@ pub enum Outcome {
 
 pub trait Herdr: Send + Sync {
     fn launch(&self, launch: &Launch) -> Result<Outcome, String>;
+}
+
+const SHORT_NAME_WORDS: usize = 3;
+const SHORT_NAME_CHARS: usize = 28;
+const TRAILING_FILLER: [&str; 9] = ["a", "an", "the", "to", "of", "for", "and", "or", "in"];
+
+/// A very short name for a story: its first few words, without trailing filler words.
+pub fn short_name(title: &str) -> String {
+    let mut words: Vec<&str> = Vec::new();
+    let mut length = 0;
+    for word in title.split_whitespace().map(|w| w.trim_matches(|c: char| !c.is_alphanumeric())).filter(|w| !w.is_empty()) {
+        let added = length + word.chars().count() + usize::from(!words.is_empty());
+        if words.len() == SHORT_NAME_WORDS || added > SHORT_NAME_CHARS {
+            break;
+        }
+        words.push(word);
+        length = added;
+    }
+    while words.len() > 1 && TRAILING_FILLER.contains(&words[words.len() - 1].to_lowercase().as_str()) {
+        words.pop();
+    }
+    words.join(" ")
+}
+
+/// The Herdr workspace name for a story: the key, a hyphen and a few words naming the feature.
+pub fn workspace_label(key: &str, title: &str) -> String {
+    match short_name(title).as_str() {
+        "" => key.to_string(),
+        name => format!("{key} - {name}"),
+    }
 }
 
 /// Herdr names agents `[a-z][a-z0-9_-]{0,31}`.
@@ -89,13 +122,17 @@ impl Cli {
         (self.run)(&args)
     }
 
-    fn find_workspace(&self, label: &str) -> Result<Option<String>, String> {
+    /// The workspace for a story, by its key: labelled just `KEY` (older) or `KEY - some words`.
+    fn find_workspace(&self, key: &str) -> Result<Option<(String, String)>, String> {
         let list = self.call(&["workspace", "list"])?;
-        Ok(list["result"]["workspaces"]
-            .as_array()
-            .and_then(|all| all.iter().find(|w| w["label"] == label))
-            .and_then(|w| w["workspace_id"].as_str())
-            .map(str::to_string))
+        let described = format!("{key} - ");
+        Ok(list["result"]["workspaces"].as_array().and_then(|all| {
+            all.iter().find_map(|w| {
+                let label = w["label"].as_str()?;
+                (label == key || label.starts_with(&described)).then(|| (w["workspace_id"].as_str().map(str::to_string), label.to_string()))
+            })
+        })
+        .and_then(|(id, label)| id.map(|id| (id, label))))
     }
 
     fn agent_running(&self, name: &str) -> Result<bool, String> {
@@ -109,12 +146,15 @@ impl Cli {
         let cwd = self.cwd.to_string_lossy().to_string();
         let pane = |v: &Value| v["result"]["root_pane"]["pane_id"].as_str().map(str::to_string);
         match self.find_workspace(&l.workspace)? {
-            Some(id) => {
+            Some((id, label)) => {
+                if l.label != l.workspace && label != l.label {
+                    let _ = self.call(&["workspace", "rename", &id, &l.label]);
+                }
                 let made = self.call(&["tab", "create", "--workspace", &id, "--label", &l.tab, "--cwd", &cwd, "--no-focus"])?;
                 pane(&made).ok_or_else(|| "herdr did not return the new tab's pane".to_string())
             }
             None => {
-                let made = self.call(&["workspace", "create", "--label", &l.workspace, "--cwd", &cwd, "--no-focus"])?;
+                let made = self.call(&["workspace", "create", "--label", &l.label, "--cwd", &cwd, "--no-focus"])?;
                 if let Some(tab) = made["result"]["tab"]["tab_id"].as_str() {
                     let _ = self.call(&["tab", "rename", tab, &l.tab]);
                 }
@@ -243,6 +283,7 @@ mod tests {
     fn launch() -> Launch {
         Launch {
             workspace: "PROJ-123".into(),
+            label: "PROJ-123 - Notification preferences".into(),
             tab: "T2 plan".into(),
             agent: "proj-123-t2-plan".into(),
             prompt: "/story-plan-task PROJ-123 T2".into(),
@@ -254,15 +295,63 @@ mod tests {
         let (cli, calls) = cli(json!([{"label": "other", "workspace_id": "w1"}]), json!([]));
         assert_eq!(cli.launch(&launch()), Ok(Outcome::Started));
         let calls = calls.lock().unwrap();
-        assert!(calls.contains(&"workspace create --label PROJ-123 --cwd /work --no-focus".to_string()), "{calls:?}");
+        assert!(calls.contains(&"workspace create --label PROJ-123 - Notification preferences --cwd /work --no-focus".to_string()), "{calls:?}");
         assert!(calls.contains(&"tab rename w9:t1 T2 plan".to_string()), "{calls:?}");
         assert!(calls.contains(&"agent start proj-123-t2-plan --kind claude --pane w9:p1".to_string()), "{calls:?}");
         assert_eq!(calls.last().unwrap(), "agent prompt proj-123-t2-plan /story-plan-task PROJ-123 T2");
     }
 
     #[test]
-    fn a_story_with_a_workspace_gets_a_new_tab_in_it() {
+    fn short_names_are_a_few_words_of_the_title() {
+        assert_eq!(short_name("Notification preferences"), "Notification preferences");
+        assert_eq!(short_name("Check Lambda business logic"), "Check Lambda business");
+        assert_eq!(short_name("Add the preferences endpoint to the API"), "Add the preferences");
+        assert_eq!(short_name("Billing export to CSV"), "Billing export");
+        assert_eq!(short_name("  Dark mode!  "), "Dark mode");
+        assert_eq!(short_name("Extraordinarily-long-unbreakable-word-name more words"), "");
+        assert_eq!(short_name(""), "");
+        assert!(short_name("Internationalisation Documentation Infrastructure rewrite").chars().count() <= 28);
+    }
+
+    #[test]
+    fn workspace_labels_are_the_key_a_hyphen_and_a_few_words() {
+        assert_eq!(workspace_label("PROJ-123", "Notification preferences"), "PROJ-123 - Notification preferences");
+        assert_eq!(workspace_label("PROJ-123", ""), "PROJ-123");
+        assert_eq!(workspace_label("PROJ-123", "   "), "PROJ-123");
+    }
+
+    #[test]
+    fn an_older_workspace_named_only_by_the_key_is_found_and_given_the_descriptive_name() {
         let (cli, calls) = cli(json!([{"label": "PROJ-123", "workspace_id": "w3"}]), json!([]));
+        cli.launch(&launch()).unwrap();
+        let calls = calls.lock().unwrap();
+        assert!(calls.contains(&"workspace rename w3 PROJ-123 - Notification preferences".to_string()), "{calls:?}");
+        assert!(!calls.iter().any(|c| c.starts_with("workspace create")));
+    }
+
+    #[test]
+    fn a_workspace_with_the_right_name_is_left_alone_and_other_keys_are_not_confused() {
+        let (first, calls) = cli(json!([{"label": "PROJ-123 - Notification preferences", "workspace_id": "w3"}]), json!([]));
+        first.launch(&launch()).unwrap();
+        assert!(!calls.lock().unwrap().iter().any(|c| c.starts_with("workspace rename")));
+        let (second, calls) = cli(json!([{"label": "PROJ-1234 - Something else", "workspace_id": "w4"}, {"label": "PROJ-12", "workspace_id": "w5"}]), json!([]));
+        second.launch(&launch()).unwrap();
+        let calls = calls.lock().unwrap();
+        assert!(calls.iter().any(|c| c.starts_with("workspace create")), "PROJ-123 is not PROJ-1234 or PROJ-12: {calls:?}");
+    }
+
+    #[test]
+    fn a_launch_labelled_only_with_the_key_never_renames_a_descriptive_workspace() {
+        let (cli, calls) = cli(json!([{"label": "PROJ-123 - Notification preferences", "workspace_id": "w3"}]), json!([]));
+        let mut plain = launch();
+        plain.label = "PROJ-123".into();
+        cli.launch(&plain).unwrap();
+        assert!(!calls.lock().unwrap().iter().any(|c| c.starts_with("workspace rename")));
+    }
+
+    #[test]
+    fn a_story_with_a_workspace_gets_a_new_tab_in_it() {
+        let (cli, calls) = cli(json!([{"label": "PROJ-123 - Notification preferences", "workspace_id": "w3"}]), json!([]));
         assert_eq!(cli.launch(&launch()), Ok(Outcome::Started));
         let calls = calls.lock().unwrap();
         assert!(
