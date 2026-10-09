@@ -1378,6 +1378,30 @@ mod tests {
     }
 
     #[test]
+    fn the_runs_panel_has_its_own_loading_scene_that_gives_way_to_what_arrives() {
+        let (_root, mut app) = two_stories();
+        app.frame_override = Some(0);
+        let first = render(&app, 170, 44);
+        assert!(first.contains("MISSION CONTROL") && first.contains("LAUNCH CONTROL"), "both panels animate at once:\n{first}");
+        assert_eq!(app.tick_millis(), 250);
+        app.frame_override = Some(120);
+        assert!(render(&app, 170, 44).contains("HOLD AT T-MINUS 00:03"));
+        app.apply_prs(Ok(vec![]));
+        let after_prs = render(&app, 170, 44);
+        assert!(!after_prs.contains("MISSION CONTROL") && after_prs.contains("LAUNCH CONTROL"), "each panel stops when its own data arrives:\n{after_prs}");
+        assert_eq!(app.tick_millis(), 250, "still animating while the runs load");
+        app.apply_runs(Err("gh failed: not logged in".into()));
+        let failed = render(&app, 170, 44);
+        assert!(!failed.contains("LAUNCH CONTROL") && failed.contains("gh failed: not logged in"), "{failed}");
+        app.apply_runs(Ok(Batch::default()));
+        assert!(!render(&app, 170, 44).contains("LAUNCH CONTROL"));
+        assert_eq!(app.tick_millis(), 30_000, "nothing animates once both have loaded");
+        let (_root, mut off) = two_stories();
+        off.runs.disabled = true;
+        assert!(!render(&off, 170, 44).contains("LAUNCH CONTROL"), "no animation when the panel is off");
+    }
+
+    #[test]
     fn the_loading_screen_fits_a_short_panel_and_a_narrow_terminal() {
         let (_root, mut app) = two_stories();
         app.frame_override = Some(7);
@@ -3122,7 +3146,7 @@ mod tests {
         let (_root, mut app) = two_stories();
         app.focus = Focus::Runs;
         let out = render(&app, 170, 40);
-        assert!(out.contains("Loading runs"), "{out}");
+        assert!(out.contains("LAUNCH CONTROL") && out.contains("COUNTDOWN"), "the launch pad shows while the first runs load:\n{out}");
         app.apply_runs(Ok(Batch::default()));
         let out = render(&app, 170, 40);
         assert!(out.contains("No runs"), "{out}");

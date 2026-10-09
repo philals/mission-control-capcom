@@ -692,6 +692,11 @@ impl App {
         self.screen == Screen::List && !self.prs.loaded && !self.prs.disabled && self.prs.error.is_none() && self.pr_rows().is_empty()
     }
 
+    /// The first runs are still on their way, so that panel shows its loading screen.
+    pub fn runs_loading_screen(&self) -> bool {
+        self.screen == Screen::List && !self.runs.loaded && !self.runs.disabled && self.runs.error.is_none() && self.visible_runs().is_empty()
+    }
+
     /// Which frame of an animation to draw now.
     pub fn animation_frame(&self) -> u64 {
         self.frame_override.unwrap_or_else(|| self.started.elapsed().as_millis() as u64 / crate::loading::FRAME_MILLIS)
@@ -701,7 +706,7 @@ impl App {
     /// the loading screen animates, every second while something on screen counts time (a running
     /// check or run, a status line that will clear), else rarely, for the "5 minutes ago" texts.
     pub fn tick_millis(&self) -> u64 {
-        if self.loading_screen() {
+        if self.loading_screen() || self.runs_loading_screen() {
             return crate::loading::FRAME_MILLIS;
         }
         let counting = self.current_notice().is_some()
@@ -3016,6 +3021,8 @@ mod tests {
         app.prs.disabled = false;
         assert_eq!(app.tick_millis(), 250, "the first load animates");
         app.apply_prs(Ok(vec![]));
+        assert_eq!(app.tick_millis(), 250, "and so does the runs panel until its first data arrives");
+        app.apply_runs(Ok(Batch::default()));
         assert_eq!(app.tick_millis(), 30_000);
         app.set_notice("hello".into());
         assert_eq!(app.tick_millis(), 1000, "a status line will clear by itself");
