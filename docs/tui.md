@@ -39,7 +39,7 @@ One column per task status (a Dropped column appears only if something was dropp
 | PR panel | click a PR to open it on GitHub, a CI stage line to open that check, `[ details ]` for its sheet (each check there has `[ open ]`); wheel scrolls | `Tab` focus, `↑↓` select, `Enter` sheet, `o` open on GitHub, `c` copy link, `m` mark draft ready, `r` refresh (or click the `↻ updated` label) |
 | Runs panel | click a run to open it on GitHub, a stage line to open that stage, `[ details ]` for the sheet (each stage there has `[ open ]`); click a tab when narrow; wheel scrolls | `Tab` focus, `↑↓` select, `Enter` sheet, `o` open run, `r` refresh |
 | Layout | drag the divider, the top edge of the bottom area, or a kanban column border | `< >` PR panel narrower or wider, `+ -` bottom area taller or shorter, `, .` selected column narrower or wider, `=` reset |
-| Anywhere | | `r` reload, `?` help, `q` or Ctrl-C quit |
+| Anywhere | | `r` reload, `W` slow polling when out of focus on or off, `F` / `C` auto-fix and auto-review defaults, `?` help, `q` or Ctrl-C quit |
 
 ## Pull requests panel
 
@@ -113,7 +113,7 @@ Every open `capcom-tui` (a terminal and the Herdr plugin, say) shares one cache 
 
 ## Idle cost
 
-An idle board does very little: it redraws only when something changed (a key, a click, new data, a reload) and otherwise once a second for the clock and the "ago" times, and it notices a changed `board.json` by checking each file's size, modification time and inode instead of reading it. The GitHub calls for runs ask `gh` to return only the fields the board shows (about 4 KB instead of about 150 KB per repo).
+An idle board does very little: it redraws only when something changed (a key, a click, new data, a reload) and otherwise once a second for the clock and the "ago" times, and it notices a changed `board.json` by checking each file's size, modification time and inode instead of reading it. **When you are elsewhere it polls far less:** if the terminal reports that its window lost focus, or Herdr says another pane has focus (capcom asks Herdr every 5 seconds, using `HERDR_PANE_ID`), the PR and runs feeds wait four times longer, and never less than a minute, so a running pipeline is checked every minute and an idle board every two. The header shows `☾ AWAY · slow polling`, and coming back refreshes at once. Alerts and auto-fix still happen while you are away, up to a couple of minutes later. If you watch the board from a pane beside the one you work in, press `W` to turn this off (it is remembered). When neither the terminal nor Herdr can say, the board counts as being looked at. The GitHub calls for runs ask `gh` to return only the fields the board shows (about 4 KB instead of about 150 KB per repo).
 
 ## Herdr plugin
 

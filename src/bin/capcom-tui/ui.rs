@@ -234,6 +234,9 @@ fn brand(app: &App) -> Vec<Span<'static>> {
             Style::new().fg(theme::DIM),
         ),
     ];
+    if app.attention.away() {
+        spans.push(Span::styled("  ☾ AWAY · slow polling", Style::new().fg(theme::DIM)));
+    }
     if app.auto_sync {
         spans.push(Span::styled("  ⟳ AUTO-SYNC", Style::new().fg(theme::CYAN).add_modifier(Modifier::BOLD)));
     }
@@ -869,6 +872,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("R", "sync the open story's PR states from GitHub (like capcom refresh); merged tasks finish".into()),
         row("S", "auto-sync on/off: write PR states found on GitHub to the board by itself (saved)".into()),
         row("c", "copy the selected pull request's link".into()),
+        row("W", "slow polling while this pane is not in focus: on or off (saved)".into()),
         row("m", "mark the selected draft ready for review (asks first)".into()),
         row("d", "show or hide completed stories (list)".into()),
         row("Esc  b", "back to the list, or close a sheet".into()),
@@ -1766,6 +1770,16 @@ mod tests {
         let asks = fake.resumes.lock().unwrap();
         assert_eq!(asks.len(), 2, "a new commit that is still red is another round");
         assert!(asks[1].prompt.clone().unwrap().contains("round 2 of 5"));
+    }
+
+    #[test]
+    fn the_header_says_when_the_board_is_polling_slowly_because_it_is_out_of_focus() {
+        let (_root, mut app) = sample();
+        assert!(!render(&app, 120, 30).contains("AWAY"));
+        app.on_focus(false);
+        assert!(render(&app, 120, 30).contains("AWAY · slow polling"));
+        app.toggle_slow_when_away();
+        assert!(!render(&app, 120, 30).contains("AWAY"), "with the switch off it never slows down");
     }
 
     #[test]

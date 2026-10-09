@@ -312,6 +312,35 @@ pub fn find_pane(list_json: &str) -> Option<String> {
 }
 
 /// Herdr sets this in every pane it manages.
+/// Whether Herdr's `pane get` answer says the pane has focus (in the focused tab of the focused workspace).
+pub fn parse_focused(json: &str) -> Option<bool> {
+    serde_json::from_str::<serde_json::Value>(json).ok()?.pointer("/result/pane/focused")?.as_bool()
+}
+
+/// Ask Herdr whether this pane has focus. None when it cannot say, which counts as looked at.
+fn pane_focused() -> Option<bool> {
+    let id = std::env::var("HERDR_PANE_ID").ok()?;
+    let mut cmd = Command::new("herdr");
+    cmd.args(["pane", "get", &id]);
+    let out = capcom::refresh::run_with_timeout(cmd, Duration::from_secs(5)).ok()??;
+    out.status.success().then(|| parse_focused(&String::from_utf8_lossy(&out.stdout))).flatten()
+}
+
+/// Keep `attention` up to date with Herdr's focus, and wake the feeds when the board comes back
+/// into view so it shows fresh data at once.
+pub fn watch_focus(attention: std::sync::Arc<crate::attention::Attention>, wakes: Vec<std::sync::mpsc::Sender<()>>) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(5));
+        let was_away = attention.away();
+        attention.set_herdr(pane_focused().unwrap_or(true));
+        if was_away && !attention.away() {
+            for wake in &wakes {
+                let _ = wake.send(());
+            }
+        }
+    });
+}
+
 pub fn inside_herdr() -> bool {
     std::env::var("HERDR_ENV").is_ok_and(|v| v == "1")
 }
@@ -321,6 +350,14 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn herdrs_pane_answer_says_whether_this_pane_has_focus() {
+        assert_eq!(parse_focused(r#"{"id":"x","result":{"pane":{"focused":true,"pane_id":"w1:p1"}}}"#), Some(true));
+        assert_eq!(parse_focused(r#"{"result":{"pane":{"focused":false}}}"#), Some(false));
+        assert_eq!(parse_focused(r#"{"error":{"message":"no such pane"}}"#), None);
+        assert_eq!(parse_focused("not json"), None);
+    }
 
     #[test]
     fn keys_are_found_in_plain_text_and_in_urls() {
