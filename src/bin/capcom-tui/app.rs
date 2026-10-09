@@ -1153,20 +1153,25 @@ impl App {
     /// The panel rows: every open PR on the main screen, only the story's own PRs on the board.
     pub fn pr_rows(&self) -> Vec<PrRow<'_>> {
         match self.screen {
-            Screen::List => self
-                .prs
-                .items
-                .iter()
-                .map(|p| PrRow {
-                    live: Some(p),
-                    url: p.url.clone(),
-                    repo: p.repo.clone(),
-                    number: Some(p.number),
-                    title: p.title.clone(),
-                    tag: self.pr_tag(&p.url),
-                    board_state: None,
-                })
-                .collect(),
+            Screen::List => {
+                let mut rows: Vec<PrRow> = self
+                    .prs
+                    .items
+                    .iter()
+                    .map(|p| PrRow {
+                        live: Some(p),
+                        url: p.url.clone(),
+                        repo: p.repo.clone(),
+                        number: Some(p.number),
+                        title: p.title.clone(),
+                        tag: self.pr_tag(&p.url),
+                        board_state: None,
+                    })
+                    .collect();
+                // PRs that are green and only waiting for a reviewer come first (the order is otherwise kept)
+                rows.sort_by_key(|r| r.live.and_then(PullRequest::waiting_for) != Some(crate::prs::Waiting::Reviewer));
+                rows
+            }
             Screen::Board => {
                 let Some(board) = &self.board else {
                     return Vec::new();

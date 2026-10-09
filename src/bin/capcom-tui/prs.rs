@@ -25,6 +25,17 @@ pub enum Review {
     Required,
 }
 
+/// What an all-green, out-of-draft PR is waiting for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Waiting {
+    /// GitHub says a review is required and it has not been given.
+    Reviewer,
+    /// Approved: only the merge is left.
+    Merge,
+    /// No review is required: it is simply green.
+    Nothing,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CheckState {
     Queued,
@@ -95,6 +106,22 @@ impl PullRequest {
         self.checks.iter().any(|c| matches!(c.state, CheckState::Running | CheckState::Queued))
     }
 
+    /// A PR that is out of draft with every check passed (skipped ones do not count against it), and
+    /// what it is now waiting for. None for drafts, PRs with changes requested, and any that still has
+    /// a check running, queued or failed, or no passing check at all.
+    pub fn waiting_for(&self) -> Option<Waiting> {
+        let c = self.counts();
+        if self.is_draft || c.failed + c.running + c.queued > 0 || c.passed == 0 {
+            return None;
+        }
+        match self.review {
+            Review::Required => Some(Waiting::Reviewer),
+            Review::Approved => Some(Waiting::Merge),
+            Review::None => Some(Waiting::Nothing),
+            Review::ChangesRequested => None,
+        }
+    }
+
     pub fn checks_in(&self, state: CheckState) -> Vec<&Check> {
         self.checks.iter().filter(|c| c.state == state).collect()
     }
@@ -129,7 +156,7 @@ fn check_state(status: &str, conclusion: &str) -> CheckState {
         "IN_PROGRESS" => CheckState::Running,
         "COMPLETED" => match conclusion {
             "SUCCESS" => CheckState::Passed,
-            "FAILURE" | "TIMED_OUT" | "STARTUP_FAILURE" => CheckState::Failed,
+            "FAILURE" | "TIMED_OUT" | "STARTUP_FAILURE" | "CANCELLED" | "ACTION_REQUIRED" | "STALE" => CheckState::Failed,
             _ => CheckState::Skipped,
         },
         _ => CheckState::Queued,
@@ -504,6 +531,56 @@ mod tests {
         wake.send(()).unwrap();
         std::thread::sleep(Duration::from_millis(100));
         assert!(inner.forced.load(Ordering::SeqCst) >= 1, "a wake is a manual refresh");
+    }
+
+    fn green_pr(review: Review) -> PullRequest {
+        let check = |state| Check { name: "x".into(), workflow: None, state, started_at: None, completed_at: None, url: None };
+        PullRequest {
+            repo: "acme/api".into(),
+            number: 1,
+            title: "t".into(),
+            url: "https://github.com/acme/api/pull/1".into(),
+            is_draft: false,
+            labels: vec![],
+            review,
+            comments: 0,
+            updated_at: "2026-10-08T01:00:00Z".into(),
+            checks: vec![check(CheckState::Passed), check(CheckState::Passed), check(CheckState::Skipped)],
+        }
+    }
+
+    #[test]
+    fn an_all_green_pr_out_of_draft_says_what_it_is_waiting_for() {
+        assert_eq!(green_pr(Review::Required).waiting_for(), Some(Waiting::Reviewer));
+        assert_eq!(green_pr(Review::Approved).waiting_for(), Some(Waiting::Merge));
+        assert_eq!(green_pr(Review::None).waiting_for(), Some(Waiting::Nothing));
+    }
+
+    #[test]
+    fn drafts_changes_requested_and_unfinished_or_failing_checks_are_never_waiting() {
+        let mut draft = green_pr(Review::Required);
+        draft.is_draft = true;
+        assert_eq!(draft.waiting_for(), None);
+        assert_eq!(green_pr(Review::ChangesRequested).waiting_for(), None);
+        for state in [CheckState::Failed, CheckState::Running, CheckState::Queued] {
+            let mut pr = green_pr(Review::Required);
+            pr.checks[2].state = state;
+            assert_eq!(pr.waiting_for(), None, "{state:?}");
+        }
+        let mut none_passed = green_pr(Review::Required);
+        none_passed.checks.iter_mut().for_each(|c| c.state = CheckState::Skipped);
+        assert_eq!(none_passed.waiting_for(), None, "skipped only is not green");
+        let mut no_checks = green_pr(Review::Required);
+        no_checks.checks.clear();
+        assert_eq!(no_checks.waiting_for(), None);
+    }
+
+    #[test]
+    fn cancelled_and_action_required_checks_are_not_green() {
+        assert_eq!(check_state("COMPLETED", "CANCELLED"), CheckState::Failed);
+        assert_eq!(check_state("COMPLETED", "ACTION_REQUIRED"), CheckState::Failed);
+        assert_eq!(check_state("COMPLETED", "NEUTRAL"), CheckState::Skipped);
+        assert_eq!(check_state("COMPLETED", "SKIPPED"), CheckState::Skipped);
     }
 
     #[test]

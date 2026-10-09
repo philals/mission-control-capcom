@@ -92,7 +92,7 @@ A typical run, in order: break the story down and approve the table; plan each t
 </p>
 
 - **Stories and boards:** a kanban of your stories (TO DO, DOING, IN REVIEW) and a kanban per story with a card for each task (ready to implement, waits on dependencies, blocked, PRs merged). Drag a finished story from DOING to IN REVIEW and it opens a Herdr tab running `/story-review`.
-- **Your PRs, with CI:** every open PR from a GitHub search you control, `[DRAFT]` or `[READY]`, with the CI stages that are running, queued or failed listed one per line. Click to open, copy the link, or mark a draft ready (it asks first).
+- **Your PRs, with CI:** every open PR from a GitHub search you control, `[DRAFT]` or `[READY]`, with the CI stages that are running, queued or failed listed one per line. A PR that is all green and only waiting for a reviewer is flagged `◉ AWAITING REVIEW` and counted in the panel title. Click to open, copy the link, or mark a draft ready (it asks first).
 - **Your manual runs:** the "Run workflow" runs you started, such as a nonprod deploy, with their stages and a link to each.
 - **Finishing tasks:** drag an IMPLEMENTING card to DONE (or press `x`) and capcom checks its PRs on GitHub, and only finishes the task if every one is merged.
 - **Resizable and remembered:** drag any divider; sizes are saved.

@@ -1,7 +1,7 @@
 //! The pull request panel (bottom of the story list and of a board) and the PR detail sheet.
 use crate::theme;
 use crate::app::{App, Focus, PrRow, Screen, Target};
-use crate::prs::{check_seconds, duration_text, relative, Check, CheckState, PullRequest, Review};
+use crate::prs::{check_seconds, duration_text, relative, Check, CheckState, PullRequest, Review, Waiting};
 use chrono::{DateTime, Utc};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -175,12 +175,26 @@ fn badge(row: &PrRow) -> Span<'static> {
     Span::styled(text, Style::new().fg(color).add_modifier(Modifier::BOLD))
 }
 
+/// The highlight for an all-green PR that is only waiting on someone, with its words and an icon.
+pub fn waiting_label(waiting: Waiting) -> (&'static str, Color) {
+    match waiting {
+        Waiting::Reviewer => ("◉ AWAITING REVIEW", theme::CYAN),
+        Waiting::Merge => ("✔ APPROVED · READY TO MERGE", theme::GREEN),
+        Waiting::Nothing => ("✔ ALL GREEN", theme::GREEN),
+    }
+}
+
 fn summary_line(pr: &PullRequest) -> Vec<Span<'static>> {
     if pr.checks.is_empty() {
         return vec![Span::styled("no checks", dim())];
     }
     let c = pr.counts();
     let mut spans = Vec::new();
+    if let Some(waiting) = pr.waiting_for() {
+        let (text, color) = waiting_label(waiting);
+        spans.push(Span::styled(text, Style::new().fg(color).add_modifier(Modifier::BOLD)));
+        spans.push(Span::raw("  "));
+    }
     let mut push = |text: String, color: Color| {
         spans.push(Span::styled(text, Style::new().fg(color)));
         spans.push(Span::raw("  "));
@@ -324,6 +338,16 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> V
     lines
 }
 
+/// `PULL REQUESTS · 3`, with `· 1 awaiting review` when some are all green and waiting for a reviewer.
+fn title_text(name: &str, rows: &[PrRow]) -> String {
+    let waiting = rows.iter().filter(|r| r.live.and_then(PullRequest::waiting_for) == Some(Waiting::Reviewer)).count();
+    if waiting > 0 {
+        format!(" {name} · {} · {waiting} awaiting review ", rows.len())
+    } else {
+        format!(" {name} · {} ", rows.len())
+    }
+}
+
 pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let rows = app.pr_rows();
     let focused = app.focus == Focus::Prs;
@@ -341,7 +365,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         .border_type(if focused { BorderType::Double } else { BorderType::Plain })
         .border_style(Style::new().fg(if focused { theme::BLUE } else { theme::BORDER }))
         .title(Span::styled(
-            format!(" {name} · {} ", rows.len()),
+            title_text(name, &rows),
             Style::new().fg(if focused { theme::BLUE } else { theme::FG }).add_modifier(Modifier::BOLD),
         ))
         .title(Line::from(Span::styled(status, dim())).right_aligned());
@@ -501,6 +525,14 @@ pub fn draw_sheet(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
                 Review::None => "none",
             };
             lines.push(label_row("Review", review.into()));
+            if let Some(waiting) = pr.waiting_for() {
+                let words = match waiting {
+                    Waiting::Reviewer => "all checks green: waiting for a reviewer",
+                    Waiting::Merge => "all checks green and approved: ready to merge",
+                    Waiting::Nothing => "all checks green (no review is required)",
+                };
+                lines.push(label_row("Waiting", words.into()));
+            }
             let labels = if pr.labels.is_empty() { "none".to_string() } else { pr.labels.join(", ") };
             lines.push(label_row("Labels", labels));
             lines.push(label_row("Comments", pr.comments.to_string()));

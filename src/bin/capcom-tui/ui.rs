@@ -2391,6 +2391,77 @@ mod tests {
         assert_readable(&app, 170, 44, "dragging a story over IN REVIEW");
     }
 
+    fn pr_with(number: u64, title: &str, review: Review, draft: bool, last: CheckState) -> PullRequest {
+        PullRequest {
+            repo: "acme/api".into(),
+            number,
+            title: title.into(),
+            url: format!("https://github.com/acme/api/pull/{number}"),
+            is_draft: draft,
+            labels: vec![],
+            review,
+            comments: 0,
+            updated_at: "2026-10-08T01:00:00Z".into(),
+            checks: vec![check("lint", CheckState::Passed), check("build", CheckState::Passed), check("e2e", last)],
+        }
+    }
+
+    fn green(number: u64, title: &str, review: Review, draft: bool) -> PullRequest {
+        pr_with(number, title, review, draft, CheckState::Skipped)
+    }
+
+    fn live(_repo: &str, number: u64, title: &str) -> PullRequest {
+        pr_with(number, title, Review::Required, false, CheckState::Running)
+    }
+
+    #[test]
+    fn an_all_green_pr_waiting_for_a_reviewer_is_highlighted_and_counted_in_the_title() {
+        let (_root, mut app) = two_stories();
+        app.apply_prs(Ok(vec![
+            green(1, "Waits for a reviewer", Review::Required, false),
+            green(2, "Green but still a draft", Review::Required, true),
+            green(3, "Approved and green", Review::Approved, false),
+            green(4, "No review needed", Review::None, false),
+            live("acme/api", 5, "Still running"),
+        ]));
+        let out = render(&app, 170, 44);
+        assert_eq!(out.matches("◉ AWAITING REVIEW").count(), 1, "only the ready, green, review-required PR:\n{out}");
+        assert!(out.contains("PULL REQUESTS · 5 · 1 awaiting review"), "{out}");
+        assert!(out.contains("✔ APPROVED · READY TO MERGE") && out.contains("✔ ALL GREEN"), "{out}");
+        assert_readable(&app, 170, 44, "green PRs highlighted");
+    }
+
+    #[test]
+    fn prs_waiting_for_a_reviewer_are_listed_first_and_the_rest_keep_their_order() {
+        let (_root, mut app) = two_stories();
+        app.apply_prs(Ok(vec![
+            live("acme/api", 1, "Running"),
+            green(2, "Waits for a reviewer", Review::Required, false),
+            green(3, "Approved", Review::Approved, false),
+            green(4, "Also waits", Review::Required, false),
+        ]));
+        let numbers: Vec<u64> = app.pr_rows().iter().filter_map(|r| r.number).collect();
+        assert_eq!(numbers, vec![2, 4, 1, 3]);
+    }
+
+    #[test]
+    fn the_pr_sheet_says_what_a_green_pr_is_waiting_for() {
+        let (_root, mut app) = two_stories();
+        app.apply_prs(Ok(vec![green(1, "Waits for a reviewer", Review::Required, false)]));
+        app.focus = Focus::Prs;
+        app.pr_sheet = true;
+        let out = render(&app, 170, 44);
+        assert!(out.contains("Waiting") && out.contains("all checks green: waiting for a reviewer"), "{out}");
+    }
+
+    #[test]
+    fn no_highlight_and_no_count_when_nothing_is_waiting() {
+        let (_root, mut app) = two_stories();
+        app.apply_prs(Ok(vec![green(2, "Draft", Review::Required, true), live("acme/api", 5, "Running")]));
+        let out = render(&app, 170, 44);
+        assert!(!out.contains("AWAITING REVIEW") && !out.contains("awaiting review"), "{out}");
+    }
+
     #[test]
     fn scrolling_over_the_pr_panel_moves_the_pr_selection() {
         let (_root, mut app) = with_prs();

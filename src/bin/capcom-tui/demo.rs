@@ -137,6 +137,23 @@ fn pull_requests() -> Vec<PullRequest> {
             ],
         },
         PullRequest {
+            repo: "acme/web".into(),
+            number: 215,
+            title: "docs: explain the notification digest settings".into(),
+            url: "https://github.com/acme/web/pull/215".into(),
+            is_draft: false,
+            labels: vec!["docs".into()],
+            review: Review::Required,
+            comments: 0,
+            updated_at: ago(45),
+            checks: vec![
+                check("CI", "lint", CheckState::Passed, 50, 1),
+                check("CI", "build", CheckState::Passed, 50, 3),
+                check("CI", "unit tests", CheckState::Passed, 50, 5),
+                check("CI", "e2e", CheckState::Skipped, 50, 0),
+            ],
+        },
+        PullRequest {
             repo: "acme/api".into(),
             number: 198,
             title: "fix: retry token refresh when the identity provider is slow".into(),
@@ -229,7 +246,7 @@ mod tests {
         for want in [Status::Todo, Status::Planning, Status::Planned, Status::Implementing, Status::Done] {
             assert!(statuses.contains(&want), "{want:?} missing in {statuses:?}");
         }
-        assert_eq!(app.pr_rows().len(), 3);
+        assert_eq!(app.pr_rows().len(), 4);
         let text = std::fs::read_to_string(root.join("DEMO-101/board.json")).unwrap();
         assert!(text.contains("acme/") && text.contains("jira.example.com"), "only invented names and hosts");
         let _ = std::fs::remove_dir_all(&root);
