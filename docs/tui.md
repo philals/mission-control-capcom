@@ -88,9 +88,14 @@ Every open `capcom-tui` (a terminal and the Herdr plugin, say) shares one cache 
 The repo is also a Herdr plugin (`herdr-plugin.toml`) with one action, `capcom.open`: it opens the TUI as an overlay, or focuses the copy already open in the current workspace.
 
 ```
-cargo install --path .                      # puts capcom-tui on your PATH
-herdr plugin link /path/to/capcom           # installs the plugin from this folder
+herdr plugin install philals/capcom        # from GitHub: builds and installs capcom and capcom-tui (needs Rust)
+
+# or, from a checkout of this repo:
+cargo install --path . --locked            # puts capcom-tui on your PATH
+herdr plugin link /path/to/capcom          # registers the plugin from this folder
 ```
+
+The install step (`scripts/install.sh`) runs `cargo install` into `~/.local/bin`. The plugin is listed on the [Herdr marketplace](https://herdr.dev/plugins/) once the repository is public and tagged with the `herdr-plugin` topic.
 
 Then bind a key in Herdr's `config.toml`:
 
