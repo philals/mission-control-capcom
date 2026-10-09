@@ -88,13 +88,13 @@ A typical run, in order: break the story down and approve the table; plan each t
 ## The terminal board
 
 <p align="center">
-  <img src="docs/img/list.svg" alt="capcom-tui story board: demo stories in TO DO, DOING and IN REVIEW columns with progress bars and task counts, above the pull requests and manual runs panels" width="100%">
+  <img src="docs/img/list.svg" alt="capcom-tui story board: demo stories in TO DO, DOING and IN REVIEW columns with progress bars and task counts, above the pull requests and runs and watch panels" width="100%">
 </p>
 
 - **Stories and boards:** a kanban of your stories (TO DO, DOING, IN REVIEW) and a kanban per story with a card for each task (ready to implement, waits on dependencies, blocked, PRs merged). Drag a finished story from DOING to IN REVIEW and it opens a Herdr tab running `/story-review`.
 - **Your PRs, with CI:** every open PR from a GitHub search you control, `[DRAFT]` or `[READY]`, with the CI stages that are running, queued or failed listed one per line. A PR that is all green and only waiting for a reviewer is lit up with a green `GO · ◉ AWAITING REVIEW` block, a green bar and a tinted row, and counted in the panel title. Click to open, copy the link, or mark a draft ready (it asks first).
 - **Back to the agent:** a PR made through a task has an `[ agent ]` button that focuses the Claude Code session that made it in Herdr, or resumes it (`claude --resume`) if the tab was closed. PRs you made outside the workflow work too: Claude Code records which session made each PR, and capcom reads that.
-- **Your manual runs:** the "Run workflow" runs you started, such as a nonprod deploy, with their stages and a link to each.
+- **Runs and watch:** the "Run workflow" runs you started, such as a nonprod deploy, plus any GitHub Actions run you paste a link to. Each shows its stages and a link, finished runs leave after 30 minutes, and you get a bell, a status line and (with `notify-send`) a desktop notification when one finishes.
 - **Finishing tasks:** drag an IMPLEMENTING card to DONE (or press `x`) and capcom checks its PRs on GitHub, and only finishes the task if every one is merged.
 - **Resizable and remembered:** drag any divider; sizes are saved.
 - **Accessible by design:** a fixed theme with at least 4.5:1 text contrast on every screen (a test checks it), state shown with words and icons as well as colour, and focus shown by a double border.

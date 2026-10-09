@@ -46,6 +46,32 @@ pub struct Run {
     pub started_at: Option<String>,
     pub updated_at: String,
     pub jobs: Vec<Job>,
+    /// Added by pasting its link, rather than found as one of your manual runs.
+    #[serde(default)]
+    pub watched: bool,
+}
+
+/// A run you asked to follow: it stays in the panel while it runs and for a while after.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Watch {
+    pub repo: String,
+    pub id: u64,
+    pub added_at: String,
+}
+
+/// `(owner/name, run id)` from a link to a GitHub Actions run or one of its jobs, such as
+/// `https://github.com/acme/web/actions/runs/123` or `…/runs/123/job/456`.
+pub fn parse_run_url(text: &str) -> Option<(String, u64)> {
+    let rest = text.trim().strip_prefix("https://github.com/")?;
+    let mut parts = rest.split('/');
+    let (owner, name) = (parts.next()?, parts.next()?);
+    if (parts.next()?, parts.next()?) != ("actions", "runs") {
+        return None;
+    }
+    let id: String = parts.next()?.chars().take_while(char::is_ascii_digit).collect();
+    let repo = format!("{owner}/{name}");
+    valid_repo(&repo).then_some(())?;
+    Some((repo, id.parse().ok()?))
 }
 
 impl Run {
@@ -108,33 +134,36 @@ fn error_message(v: &Value) -> anyhow::Error {
     anyhow!(text(v, "message").unwrap_or_else(|| "unexpected response from GitHub".to_string()))
 }
 
+/// One run, as returned by `repos/{repo}/actions/runs/{id}`.
+pub fn parse_run(repo: &str, json: &str) -> Result<Run> {
+    let value: Value = serde_json::from_str(json).context("parsing gh output")?;
+    parse_one(repo, &value).ok_or_else(|| error_message(&value))
+}
+
 pub fn parse_runs(repo: &str, json: &str) -> Result<Vec<Run>> {
     let value: Value = serde_json::from_str(json).context("parsing gh output")?;
     let Some(items) = value.get("workflow_runs").and_then(Value::as_array) else {
         return Err(error_message(&value));
     };
-    Ok(items
-        .iter()
-        .filter_map(|r| {
-            let name = text(r, "name").or_else(|| text(r, "path"))?;
-            Some(Run {
-                repo: repo.to_string(),
-                id: r.get("id")?.as_u64()?,
-                title: text(r, "display_title").unwrap_or_else(|| name.clone()),
-                name,
-                branch: text(r, "head_branch").unwrap_or_default(),
-                url: text(r, "html_url")?,
-                state: state_of(
-                    &text(r, "status").unwrap_or_default(),
-                    &text(r, "conclusion").unwrap_or_default(),
-                ),
-                created_at: text(r, "created_at")?,
-                started_at: text(r, "run_started_at"),
-                updated_at: text(r, "updated_at").unwrap_or_default(),
-                jobs: Vec::new(),
-            })
-        })
-        .collect())
+    Ok(items.iter().filter_map(|r| parse_one(repo, r)).collect())
+}
+
+fn parse_one(repo: &str, r: &Value) -> Option<Run> {
+    let name = text(r, "name").or_else(|| text(r, "path"))?;
+    Some(Run {
+        repo: repo.to_string(),
+        id: r.get("id")?.as_u64()?,
+        title: text(r, "display_title").unwrap_or_else(|| name.clone()),
+        name,
+        branch: text(r, "head_branch").unwrap_or_default(),
+        url: text(r, "html_url")?,
+        state: state_of(&text(r, "status").unwrap_or_default(), &text(r, "conclusion").unwrap_or_default()),
+        created_at: text(r, "created_at")?,
+        started_at: text(r, "run_started_at"),
+        updated_at: text(r, "updated_at").unwrap_or_default(),
+        jobs: Vec::new(),
+        watched: false,
+    })
 }
 
 pub fn parse_jobs(json: &str) -> Result<Vec<Job>> {
@@ -174,6 +203,11 @@ pub fn valid_repo(repo: &str) -> bool {
 pub trait RunSource: Send + Sync {
     fn fetch(&self, repos: &[String]) -> Result<Batch>;
 
+    /// The runs you asked to watch, whatever their age or who started them.
+    fn fetch_watched(&self, _watched: &[(String, u64)], _force: bool) -> Result<Batch> {
+        Ok(Batch::default())
+    }
+
     /// A manual refresh: skip any "recent enough" shortcut.
     fn fetch_forced(&self, repos: &[String]) -> Result<Batch> {
         self.fetch(repos)
@@ -208,6 +242,16 @@ impl RunSource for SharedSource {
         self.get(repos, false)
     }
 
+    fn fetch_watched(&self, watched: &[(String, u64)], force: bool) -> Result<Batch> {
+        let mut sorted: Vec<String> = watched.iter().map(|(r, id)| format!("{r}#{id}")).collect();
+        sorted.sort_unstable();
+        let name = format!("watch-{}", cache::key_of(&sorted.iter().map(String::as_str).collect::<Vec<_>>()));
+        let cadence = self.cadence;
+        self.cache.shared(&name, Utc::now, move |batch: &Batch| cadence.interval(batch), force, || {
+            self.inner.fetch_watched(watched, force)
+        })
+    }
+
     fn fetch_forced(&self, repos: &[String]) -> Result<Batch> {
         self.get(repos, true)
     }
@@ -215,6 +259,7 @@ impl RunSource for SharedSource {
 
 pub trait RunApi: Send + Sync {
     fn runs(&self, repo: &str) -> Result<String>;
+    fn run(&self, repo: &str, run_id: u64) -> Result<String>;
     fn jobs(&self, repo: &str, run_id: u64) -> Result<String>;
 }
 
@@ -239,6 +284,48 @@ impl<A: RunApi> Fetcher<A> {
         finished.is_some_and(|t| now - t <= self.window)
     }
 
+    /// Stages of a run: loaded while it is active or failed, and kept once it has finished.
+    fn load_jobs(&self, run: &mut Run, warnings: &mut Vec<String>) {
+        if !run.is_active() && run.state != RunState::Failed {
+            return;
+        }
+        if !run.is_active() {
+            if let Some(jobs) = self.cache.lock().expect("cache lock").get(&run.id) {
+                run.jobs = jobs.clone();
+                return;
+            }
+        }
+        match self.api.jobs(&run.repo, run.id).and_then(|j| parse_jobs(&j)) {
+            Ok(jobs) => {
+                if !run.is_active() {
+                    self.cache.lock().expect("cache lock").insert(run.id, jobs.clone());
+                }
+                run.jobs = jobs;
+            }
+            Err(e) => warnings.push(format!("{} run {}: {e:#}", run.repo, run.id)),
+        }
+    }
+
+    pub fn fetch_watched_runs(&self, watched: &[(String, u64)]) -> Result<Batch> {
+        let mut batch = Batch::default();
+        let mut failures = Vec::new();
+        for (repo, id) in watched.iter().filter(|(r, _)| valid_repo(r)) {
+            match self.api.run(repo, *id).and_then(|j| parse_run(repo, &j)) {
+                Ok(mut run) => {
+                    run.watched = true;
+                    self.load_jobs(&mut run, &mut batch.warnings);
+                    batch.runs.push(run);
+                }
+                Err(e) => failures.push(format!("{repo} run {id}: {e:#}")),
+            }
+        }
+        if batch.runs.is_empty() && !failures.is_empty() {
+            bail!("{}", failures.join("; "));
+        }
+        batch.warnings.extend(failures);
+        Ok(batch)
+    }
+
     fn fetch_repo(&self, repo: &str, now: DateTime<Utc>) -> Result<(Vec<Run>, Vec<String>)> {
         let json = self.api.runs(repo)?;
         let mut runs: Vec<Run> = parse_runs(repo, &json)?
@@ -247,24 +334,7 @@ impl<A: RunApi> Fetcher<A> {
             .collect();
         let mut warnings = Vec::new();
         for run in runs.iter_mut() {
-            if !run.is_active() && run.state != RunState::Failed {
-                continue;
-            }
-            if !run.is_active() {
-                if let Some(jobs) = self.cache.lock().expect("cache lock").get(&run.id) {
-                    run.jobs = jobs.clone();
-                    continue;
-                }
-            }
-            match self.api.jobs(repo, run.id).and_then(|j| parse_jobs(&j)) {
-                Ok(jobs) => {
-                    if !run.is_active() {
-                        self.cache.lock().expect("cache lock").insert(run.id, jobs.clone());
-                    }
-                    run.jobs = jobs;
-                }
-                Err(e) => warnings.push(format!("{repo} run {}: {e:#}", run.id)),
-            }
+            self.load_jobs(run, &mut warnings);
         }
         Ok((runs, warnings))
     }
@@ -313,6 +383,10 @@ impl<A: RunApi> RunSource for Fetcher<A> {
     fn fetch(&self, repos: &[String]) -> Result<Batch> {
         self.fetch_at(repos, Utc::now())
     }
+
+    fn fetch_watched(&self, watched: &[(String, u64)], _force: bool) -> Result<Batch> {
+        self.fetch_watched_runs(watched)
+    }
 }
 
 fn gh_output(args: &[&str]) -> Result<String> {
@@ -356,6 +430,10 @@ impl RunApi for GhApi {
         gh_output(&["api", &path])
     }
 
+    fn run(&self, repo: &str, run_id: u64) -> Result<String> {
+        gh_output(&["api", &format!("repos/{repo}/actions/runs/{run_id}")])
+    }
+
     fn jobs(&self, repo: &str, run_id: u64) -> Result<String> {
         gh_output(&["api", &format!("repos/{repo}/actions/runs/{run_id}/jobs?per_page=100")])
     }
@@ -391,6 +469,29 @@ impl RunCadence {
     }
 }
 
+/// Your manual runs and the runs you watch in one list. A run that is both counts as watched, and
+/// when only one of the two lookups fails the other still shows, with the failure as a warning.
+fn merge(manual: Result<Batch, String>, watching: Result<Batch, String>) -> Result<Batch, String> {
+    match (manual, watching) {
+        (Ok(mut batch), Ok(extra)) => {
+            for run in extra.runs {
+                match batch.runs.iter_mut().find(|r| r.repo == run.repo && r.id == run.id) {
+                    Some(existing) => existing.watched = true,
+                    None => batch.runs.push(run),
+                }
+            }
+            batch.warnings.extend(extra.warnings);
+            batch.runs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            Ok(batch)
+        }
+        (Ok(mut batch), Err(e)) | (Err(e), Ok(mut batch)) => {
+            batch.warnings.push(e);
+            Ok(batch)
+        }
+        (Err(a), Err(b)) => Err(format!("{a}; {b}")),
+    }
+}
+
 pub enum RunMsg {
     Started,
     Result(Result<Batch, String>),
@@ -401,6 +502,7 @@ pub enum RunMsg {
 pub fn spawn(
     source: Arc<dyn RunSource>,
     repos: Arc<Mutex<Vec<String>>>,
+    watched: Arc<Mutex<Vec<(String, u64)>>>,
     cadence: RunCadence,
 ) -> (Receiver<RunMsg>, Sender<()>) {
     let (tx, rx) = mpsc::channel();
@@ -412,13 +514,20 @@ pub fn spawn(
                 break;
             }
             let list = repos.lock().expect("repo list lock").clone();
-            let result = if list.is_empty() {
+            let followed = watched.lock().expect("watch list lock").clone();
+            let manual = if list.is_empty() {
                 Ok(Batch::default())
             } else if forced {
                 source.fetch_forced(&list).map_err(|e| format!("{e:#}"))
             } else {
                 source.fetch(&list).map_err(|e| format!("{e:#}"))
             };
+            let watching = if followed.is_empty() {
+                Ok(Batch::default())
+            } else {
+                source.fetch_watched(&followed, forced).map_err(|e| format!("{e:#}"))
+            };
+            let result = merge(manual, watching);
             let wait = cadence.next(&result);
             if tx.send(RunMsg::Result(result)).is_err() {
                 break;
@@ -531,6 +640,40 @@ mod tests {
     }
 
     #[test]
+    fn run_links_give_the_repo_and_run_id_whether_they_point_at_the_run_or_one_of_its_jobs() {
+        let want = Some(("linz/web".to_string(), 37880156807));
+        assert_eq!(parse_run_url("https://github.com/linz/web/actions/runs/37880156807"), want);
+        assert_eq!(parse_run_url("  https://github.com/linz/web/actions/runs/37880156807/job/99?pr=1\n"), want);
+        assert_eq!(parse_run_url("https://github.com/linz/web/actions/runs/37880156807#summary"), want);
+        for bad in ["", "PROJ-123", "https://github.com/linz/web/pull/12", "https://github.com/linz/web/actions/runs/", "https://github.com/linz/web/actions/runs/abc", "https://example.com/linz/web/actions/runs/1", "https://github.com/../web/actions/runs/1"] {
+            assert_eq!(parse_run_url(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_watched_run_is_fetched_by_id_flagged_and_given_stages_while_active() {
+        let fetcher = Fetcher::new(FakeApi::new(vec![]), chrono::Duration::minutes(30));
+        let batch = fetcher.fetch_watched_runs(&[("acme/web".into(), 777), ("acme/web".into(), 778), ("acme/web".into(), 999)]).unwrap();
+        assert_eq!(batch.runs.iter().map(|r| (r.id, r.watched, r.state)).collect::<Vec<_>>(), vec![(777, true, RunState::Running), (778, true, RunState::Success)]);
+        assert!(!batch.runs[0].jobs.is_empty() && batch.runs[1].jobs.is_empty(), "stages only for the active run");
+        assert!(batch.warnings.iter().any(|w| w.contains("999") && w.contains("Not Found")), "{:?}", batch.warnings);
+        let nothing = fetcher.fetch_watched_runs(&[("acme/web".into(), 999)]);
+        assert!(nothing.unwrap_err().to_string().contains("Not Found"), "a watch list that finds nothing is an error");
+    }
+
+    #[test]
+    fn manual_and_watched_runs_merge_with_a_run_in_both_counted_as_watched_and_one_failing_source_only_warns() {
+        let run = |id: u64, at: &str, watched: bool| Run { id, created_at: at.into(), watched, ..parse_runs("acme/widgets", RUNS).unwrap().remove(0) };
+        let manual = Batch { runs: vec![run(1, "2026-10-01T01:00:00Z", false), run(2, "2026-10-01T03:00:00Z", false)], warnings: vec![] };
+        let watching = Batch { runs: vec![run(2, "2026-10-01T03:00:00Z", true), run(3, "2026-10-01T02:00:00Z", true)], warnings: vec!["w".into()] };
+        let merged = merge(Ok(manual.clone()), Ok(watching)).unwrap();
+        assert_eq!(merged.runs.iter().map(|r| (r.id, r.watched)).collect::<Vec<_>>(), vec![(2, true), (3, true), (1, false)]);
+        let one = merge(Ok(manual), Err("HTTP 404".into())).unwrap();
+        assert_eq!((one.runs.len(), one.warnings), (2, vec!["HTTP 404".to_string()]));
+        assert!(merge(Err("a".into()), Err("b".into())).is_err());
+    }
+
+    #[test]
     fn parse_reports_api_errors() {
         let e = parse_runs("acme/widgets", r#"{"message":"Not Found"}"#).unwrap_err();
         assert!(e.to_string().contains("Not Found"), "{e}");
@@ -564,6 +707,17 @@ mod tests {
                 Some((_, Err(e))) => bail!("{e}"),
                 None => bail!("unknown repo {repo}"),
             }
+        }
+
+        fn run(&self, repo: &str, run_id: u64) -> Result<String> {
+            let (status, conclusion) = match run_id {
+                777 => ("in_progress", "null".to_string()),
+                778 => ("completed", "\"success\"".to_string()),
+                _ => bail!("Not Found"),
+            };
+            Ok(format!(
+                r#"{{"id":{run_id},"name":"Build","display_title":"Build web","head_branch":"main","html_url":"https://github.com/{repo}/actions/runs/{run_id}","status":"{status}","conclusion":{conclusion},"created_at":"2026-10-01T00:00:00Z","updated_at":"2026-10-01T00:05:00Z"}}"#
+            ))
         }
 
         fn jobs(&self, _repo: &str, run_id: u64) -> Result<String> {
@@ -709,7 +863,7 @@ mod tests {
         let source = Arc::new(Recording { seen: Default::default(), calls: AtomicUsize::new(0) });
         let repos = Arc::new(Mutex::new(Vec::<String>::new()));
         let cadence = RunCadence { busy: Duration::from_secs(30), idle: Duration::from_secs(30) };
-        let (rx, wake) = spawn(source.clone(), repos.clone(), cadence);
+        let (rx, wake) = spawn(source.clone(), repos.clone(), Arc::new(Mutex::new(Vec::new())), cadence);
         assert!(next_batch(&rx).unwrap().runs.is_empty());
         assert_eq!(source.calls.load(Ordering::SeqCst), 0, "no repos: nothing is fetched");
         *repos.lock().unwrap() = vec!["acme/widgets".to_string()];

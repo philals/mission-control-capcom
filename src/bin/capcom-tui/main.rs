@@ -111,6 +111,14 @@ fn shared_cache() -> Option<cache::Cache> {
     cache::Cache::default_dir().and_then(cache::Cache::open)
 }
 
+/// A desktop notification through `notify-send`, when it is installed; otherwise nothing happens.
+fn notify_desktop(title: &str, body: &str) {
+    let (title, body) = (title.to_string(), body.to_string());
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("notify-send").args(["--app-name=CAPCOM", &title, &body]).status();
+    });
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     if cli.find_pane {
@@ -150,6 +158,7 @@ fn main() -> Result<()> {
     if let Some(config) = capcom::session::config_dir() {
         app.start_pr_links(config, cache::Cache::default_dir().map(|d| d.join("pr-links.json")));
     }
+    app.notify = Arc::new(notify_desktop);
     app.settings_path = settings::default_path();
     app.load_settings();
     app.extra_repos = cli.deploy_repos;
@@ -160,15 +169,16 @@ fn main() -> Result<()> {
         app.runs.disabled = true;
     } else {
         let repos = Arc::new(Mutex::new(Vec::new()));
+        let watched = Arc::new(Mutex::new(Vec::new()));
         let cadence = runs::RunCadence::default();
         let live: Arc<dyn runs::RunSource> =
-            Arc::new(runs::Fetcher::new(runs::GhApi::default(), chrono::Duration::hours(3)));
+            Arc::new(runs::Fetcher::new(runs::GhApi::default(), chrono::Duration::minutes(30)));
         let source: Arc<dyn runs::RunSource> = match shared_cache() {
             Some(cache) => Arc::new(runs::SharedSource { inner: live, cache, cadence }),
             None => live,
         };
-        let (rx, wake) = runs::spawn(source, repos.clone(), cadence);
-        app.attach_runs(rx, wake, repos);
+        let (rx, wake) = runs::spawn(source, repos.clone(), watched.clone(), cadence);
+        app.attach_runs(rx, wake, repos, watched);
     }
     run_terminal(&mut app)
 }
@@ -212,6 +222,10 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         app.poll_feed();
         app.poll_runs();
         app.poll_ready();
+        if app.take_bell() {
+            let _ = std::io::Write::write_all(&mut std::io::stdout(), b"\x07");
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
         if app.needs_reload() {
             app.reload();
         }
