@@ -376,6 +376,8 @@ pub struct Confirm {
     pub url: String,
     pub id: String,
     pub title: String,
+    /// Back to draft, rather than ready for review.
+    pub to_draft: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -505,11 +507,23 @@ fn copy_to_clipboard(text: &str) {
 }
 
 fn gh_mark_ready(url: &str) -> Result<(), String> {
+    gh_pr_ready(url, false)
+}
+
+/// Back to draft: `gh pr ready --undo` (GitHub only offers this through its GraphQL API, which gh speaks).
+fn gh_mark_draft(url: &str) -> Result<(), String> {
+    gh_pr_ready(url, true)
+}
+
+fn gh_pr_ready(url: &str, undo: bool) -> Result<(), String> {
     if !url.starts_with("https://") {
         return Err("not a pull request link".into());
     }
     let mut cmd = Command::new("gh");
     cmd.args(["pr", "ready", url]);
+    if undo {
+        cmd.arg("--undo");
+    }
     match capcom::refresh::run_with_timeout(cmd, std::time::Duration::from_secs(30)) {
         Ok(Some(out)) if out.status.success() => Ok(()),
         Ok(Some(out)) => Err(String::from_utf8_lossy(&out.stderr).lines().next().unwrap_or("gh failed").to_string()),
@@ -588,6 +602,8 @@ pub struct App {
     pub opener: Box<dyn Fn(&str)>,
     pub copier: Box<dyn Fn(&str)>,
     pub readier: Readier,
+    /// Turns a ready PR back into a draft.
+    pub drafter: Readier,
     pub confirm: Option<Confirm>,
     pub agent_ask: Option<AgentAsk>,
     /// Tick boxes: ask the agent to fix red CI and Copilot's comments by itself, and ask Copilot to review new PRs.
@@ -692,6 +708,7 @@ impl App {
             opener: Box::new(open_in_browser),
             copier: Box::new(copy_to_clipboard),
             readier: Arc::new(gh_mark_ready),
+            drafter: Arc::new(gh_mark_draft),
             confirm: None,
             agent_ask: None,
             autofix: false,
@@ -2147,12 +2164,32 @@ impl App {
     }
 
     /// Ask before marking a live draft ready for review.
+    /// Ask whether to mark a draft ready for review.
     pub fn ask_mark_ready(&mut self, index: usize) {
         let confirm = self.pr_rows().get(index).and_then(|r| {
-            r.live.filter(|p| p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone() })
+            r.live.filter(|p| p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone(), to_draft: false })
         });
         if confirm.is_some() {
             self.confirm = confirm;
+        }
+    }
+
+    /// Ask whether to turn a ready PR back into a draft.
+    pub fn ask_mark_draft(&mut self, index: usize) {
+        let confirm = self.pr_rows().get(index).and_then(|r| {
+            r.live.filter(|p| !p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone(), to_draft: true })
+        });
+        if confirm.is_some() {
+            self.confirm = confirm;
+        }
+    }
+
+    /// The `[DRAFT]`/`[READY]` badge and the `m` key: the other state, after asking.
+    pub fn ask_toggle_draft(&mut self, index: usize) {
+        match self.pr_rows().get(index).and_then(|r| r.live).map(|p| p.is_draft) {
+            Some(true) => self.ask_mark_ready(index),
+            Some(false) => self.ask_mark_draft(index),
+            None => self.set_notice("this pull request is not in your open list, so its state cannot be changed here".into()),
         }
     }
 
@@ -2160,12 +2197,17 @@ impl App {
         let Some(confirm) = self.confirm.take() else {
             return;
         };
-        self.set_notice(format!("marking {} ready…", confirm.id));
-        let readier = self.readier.clone();
+        self.set_notice(format!("{} {}…", if confirm.to_draft { "turning" } else { "marking" }, if confirm.to_draft { format!("{} back into a draft", confirm.id) } else { format!("{} ready", confirm.id) }));
+        let change = if confirm.to_draft { self.drafter.clone() } else { self.readier.clone() };
         let done = self.ready_done.0.clone();
         let wake = self.feed.as_ref().map(|(_, w)| w.clone());
         std::thread::spawn(move || {
-            let result = readier(&confirm.url).map(|_| confirm.id.clone()).map_err(|e| format!("{}: {e}", confirm.id));
+            let result = match (change(&confirm.url), confirm.to_draft) {
+                (Ok(()), false) => Ok(format!("{} is ready for review", confirm.id)),
+                (Ok(()), true) => Ok(format!("{} is a draft again", confirm.id)),
+                (Err(e), false) => Err(format!("could not mark ready: {}: {e}", confirm.id)),
+                (Err(e), true) => Err(format!("could not turn it back into a draft: {}: {e}", confirm.id)),
+            };
             let _ = done.send(result);
             if let Some(wake) = wake {
                 let _ = wake.send(());
@@ -2472,8 +2514,7 @@ impl App {
         while let Ok(result) = self.ready_done.1.try_recv() {
             changed = true;
             match result {
-                Ok(id) => self.set_notice(format!("{id} is ready for review")),
-                Err(e) => self.set_notice(format!("could not mark ready: {e}")),
+                Ok(text) | Err(text) => self.set_notice(text),
             }
         }
         changed
@@ -2692,7 +2733,7 @@ impl App {
                 return false;
             }
             KeyCode::Char('m') if self.focus == Focus::Prs => {
-                self.ask_mark_ready(self.pr_sel);
+                self.ask_toggle_draft(self.pr_sel);
                 return false;
             }
             KeyCode::Char('o') if self.focus == Focus::Runs => {
@@ -2860,6 +2901,7 @@ impl App {
             Action::PrAutoFix(url) => on_pr(self, &url, &|app, i| app.toggle_pr_autofix(i)),
             Action::PrAutoReview(url) => on_pr(self, &url, &|app, i| app.toggle_pr_review(i)),
             Action::PrReady(url) => on_pr(self, &url, &|app, i| app.ask_mark_ready(i)),
+            Action::PrDraft(url) => on_pr(self, &url, &|app, i| app.ask_mark_draft(i)),
         }
         false
     }
@@ -2912,7 +2954,13 @@ impl App {
             Target::PrAgent(_) => "go to the agent that made this PR (a)",
             Target::PrCopy(_) => "copy the link of this PR (c)",
             Target::PrDetails(_) => "every check, the state and the link (Enter)",
-            Target::PrBadge(_) => "mark this draft ready for review (m)",
+            Target::PrBadge(i) => {
+                if self.pr_rows().get(i).and_then(|r| r.live).is_some_and(|p| p.is_draft) {
+                    "mark this draft ready for review (m)"
+                } else {
+                    "turn this PR back into a draft (m)"
+                }
+            }
             Target::ToggleAutoFix => "auto-fix for PRs with no tick of their own (F)",
             Target::ToggleAutoCopilot => "auto-review for PRs with no tick of their own (C)",
             Target::GoLight => "select the first red PR",
@@ -3055,7 +3103,7 @@ impl App {
             Some(Target::PrBadge(i)) => {
                 self.set_focus(Focus::Prs);
                 self.pr_sel = i;
-                self.ask_mark_ready(i);
+                self.ask_toggle_draft(i);
                 return;
             }
             Some(Target::PrDetails(i)) => {
