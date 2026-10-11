@@ -120,7 +120,7 @@ fn draw_hover(f: &mut Frame, app: &App, hits: &Hits) {
     };
     let button = matches!(
         target,
-        Target::PrAuto(_) | Target::PrReview(_) | Target::PrAgent(_) | Target::PrCopy(_) | Target::PrDetails(_) | Target::PrBadge(_)
+        Target::PrAuto(_) | Target::PrReview(_) | Target::PrMerge(_) | Target::PrAgent(_) | Target::PrCopy(_) | Target::PrDetails(_) | Target::PrBadge(_)
             | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::GoLight | Target::Refresh | Target::NewStory | Target::ToggleDone
             | Target::OpenCheck(..) | Target::OpenJob(..) | Target::RunDetails(_) | Target::Back | Target::PaletteItem(_)
     );
@@ -960,7 +960,10 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("S", "auto-sync on/off: write PR states found on GitHub to the board by itself (saved)".into()),
         row("c", "copy the selected pull request's link".into()),
         row("W", "slow polling while this pane is not in focus: on or off (saved)".into()),
-        row("m", "mark the selected draft ready for review (asks first)".into()),
+        row("m", "mark the selected draft ready for review, or turn a ready PR back into a draft (asks first)".into()),
+        row("t / v", "tick auto-fix / auto-review on the selected pull request".into()),
+        row("g", "automerge on the selected pull request: its merge bot's label, on (asks first) or off".into()),
+        row("a", "go to the agent that made the selected pull request".into()),
         row("d", "show or hide completed stories (list)".into()),
         row("Esc  b", "back to the list, or close a sheet".into()),
         row("r", "reload now (it also reloads by itself)".into()),
@@ -2045,6 +2048,7 @@ mod tests {
         });
         // never the real GitHub from a test: updating a branch fails unless a test installs its own
         app.branch_updater = std::sync::Arc::new(|_, _, _| Err("no network in tests".into()));
+        app.labeler = std::sync::Arc::new(|_, _, _, _| Err("no network in tests".into()));
         (root, app, fake, asked)
     }
 
@@ -2609,6 +2613,148 @@ mod tests {
         app.apply_prs(Ok(vec![behind(1, "sha3")]));
         settle(&mut app);
         assert_eq!(calls.lock().unwrap().len(), 2, "after the cooldown it updates");
+    }
+
+    /// Make a label change give `outcome`, and note each call as `repo#number +label` or `-label`.
+    fn label_calls(app: &mut App, outcome: Result<(), String>) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = log.clone();
+        app.labeler = std::sync::Arc::new(move |repo, number, label, on| {
+            sink.lock().unwrap().push(format!("{repo}#{number} {}{label}", if on { "+" } else { "-" }));
+            outcome.clone()
+        });
+        log
+    }
+
+    /// Your PR in a repo whose merge bot reads `automerge 🚀` and `automerge`, out of draft, green.
+    fn merge_bot_pr(number: u64, labels: &[&str], review: Review) -> PullRequest {
+        let mut pr = mine(number, "sha1");
+        pr.is_draft = false;
+        pr.review = review;
+        pr.checks = vec![check("build", CheckState::Passed)];
+        pr.labels = labels.iter().map(|l| l.to_string()).collect();
+        pr.feedback.kodiak = Some(crate::kodiak::Kodiak { automerge: vec!["automerge 🚀".into(), "automerge".into()], autoupdate: vec!["autoupdate".into()], update_always: false });
+        pr
+    }
+
+    #[test]
+    fn the_rail_and_a_tick_show_automerge_only_for_your_prs_in_repos_with_a_merge_bot() {
+        let (_root, mut app, _, _) = autopilot_app();
+        app.apply_prs(Ok(vec![merge_bot_pr(1, &[], Review::Required)]));
+        let out = render(&app, 170, 44);
+        assert!(out.contains("automerge ○"), "off: the bot will not merge it\n{out}");
+        assert!(out.contains("[ ] automerge"), "{out}");
+        app.apply_prs(Ok(vec![merge_bot_pr(1, &["automerge 🚀"], Review::Required)]));
+        let out = render(&app, 170, 44);
+        assert!(out.contains("automerge on ◔") && out.contains("[x] automerge"), "{out}");
+        let mut plain = mine(2, "b");
+        plain.is_draft = false;
+        app.apply_prs(Ok(vec![plain]));
+        let out = render(&app, 170, 44);
+        assert!(!out.contains("automerge"), "no bot config, nothing about automerge:\n{out}");
+        let mut someone_elses = merge_bot_pr(3, &[], Review::Required);
+        someone_elses.feedback.mine = false;
+        app.apply_prs(Ok(vec![someone_elses]));
+        let out = render(&app, 170, 44);
+        assert!(out.contains("automerge ○") && !out.contains("[ ] automerge"), "the step shows but only your own PR can be ticked:\n{out}");
+        assert_readable(&app, 170, 44, "automerge shown");
+    }
+
+    #[test]
+    fn turning_automerge_on_asks_first_says_what_is_in_the_way_and_adds_the_repos_own_label() {
+        let (_root, mut app, _, _) = autopilot_app();
+        let calls = label_calls(&mut app, Ok(()));
+        app.apply_prs(Ok(vec![merge_bot_pr(1, &[], Review::Required)]));
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "[ ] automerge");
+        app.on_click(x + 2, y);
+        assert!(calls.lock().unwrap().is_empty(), "the click only asks");
+        let out = render(&app, 170, 44);
+        for want in ["Turn on automerge?", "merges it by itself once it is approved", "adds the label \"automerge", "it would wait: it needs an approval", "[ y Turn on automerge ]"] {
+            assert!(out.contains(want), "missing {want:?}:\n{out}");
+        }
+        assert_readable(&app, 170, 44, "the automerge question");
+        app.on_key(KeyCode::Char('n'), false);
+        assert!(calls.lock().unwrap().is_empty() && app.confirm.is_none(), "no without a yes");
+        app.focus = Focus::Prs;
+        app.on_key(KeyCode::Char('g'), false);
+        let out = render(&app, 170, 44);
+        let (yx, yy) = find(&out, "[ y Turn on automerge ]");
+        app.on_click(yx + 2, yy);
+        wait_for_notice(&mut app, "automerge is on");
+        assert_eq!(*calls.lock().unwrap(), vec!["acme/api#1 +automerge 🚀".to_string()], "the first label the repo names, exactly");
+        assert!(app.current_notice().is_some_and(|n| n.contains("added \"automerge 🚀\"")), "{:?}", app.current_notice());
+    }
+
+    #[test]
+    fn the_question_says_when_nothing_is_in_the_way_and_a_failure_is_reported() {
+        let (_root, mut app, _, _) = autopilot_app();
+        app.apply_prs(Ok(vec![merge_bot_pr(1, &[], Review::Approved)]));
+        app.focus = Focus::Prs;
+        app.on_key(KeyCode::Char('g'), false);
+        assert!(render(&app, 170, 44).contains("nothing is in the way: it can merge straight away"));
+        app.on_key(KeyCode::Enter, false);
+        wait_for_notice(&mut app, "could not turn automerge on");
+        let notice = app.current_notice().unwrap().to_string();
+        assert!(notice.contains("acme/api#1") && notice.contains("no network in tests"), "{notice}");
+    }
+
+    #[test]
+    fn turning_automerge_off_takes_every_matching_label_away_at_once_without_asking() {
+        let (_root, mut app, _, _) = autopilot_app();
+        let calls = label_calls(&mut app, Ok(()));
+        app.apply_prs(Ok(vec![merge_bot_pr(1, &["automerge 🚀", "bug", "automerge"], Review::Required)]));
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "[x] automerge");
+        app.on_click(x + 2, y);
+        assert!(app.confirm.is_none(), "taking it off needs no question");
+        wait_for_notice(&mut app, "automerge is off");
+        assert_eq!(*calls.lock().unwrap(), vec!["acme/api#1 -automerge 🚀".to_string(), "acme/api#1 -automerge".to_string()], "only the bot's labels, not `bug`");
+        let failing = label_calls(&mut app, Err("GitHub answered 403: Resource not accessible".into()));
+        app.on_key(KeyCode::Char('g'), false);
+        wait_for_notice(&mut app, "could not turn automerge off");
+        assert_eq!(failing.lock().unwrap().len(), 1, "it stops at the first refusal");
+    }
+
+    #[test]
+    fn automerge_is_not_offered_for_a_pr_that_is_not_yours_or_has_no_merge_bot() {
+        let (_root, mut app, _, _) = autopilot_app();
+        let calls = label_calls(&mut app, Ok(()));
+        let mut plain = mine(1, "a");
+        plain.is_draft = false;
+        app.apply_prs(Ok(vec![plain]));
+        app.focus = Focus::Prs;
+        app.on_key(KeyCode::Char('g'), false);
+        assert!(app.confirm.is_none() && calls.lock().unwrap().is_empty());
+        assert!(app.current_notice().is_some_and(|n| n.contains("a .kodiak.toml")), "{:?}", app.current_notice());
+    }
+
+    #[test]
+    fn the_sheet_says_why_a_labelled_pr_has_not_merged_and_the_palette_and_tooltip_know_the_tick() {
+        let (_root, mut app, _, _) = autopilot_app();
+        app.apply_prs(Ok(vec![merge_bot_pr(1, &["automerge 🚀"], Review::Required)]));
+        app.focus = Focus::Prs;
+        app.pr_sheet = true;
+        let out = render(&app, 170, 50);
+        assert!(out.contains("Automerge") && out.contains("on: the merge bot is waiting, because it needs an approval"), "{out}");
+        app.pr_sheet = false;
+        app.apply_prs(Ok(vec![merge_bot_pr(1, &["automerge 🚀"], Review::Approved)]));
+        app.pr_sheet = true;
+        assert!(render(&app, 170, 50).contains("nothing is in the way, so the merge bot merges it next"));
+        app.pr_sheet = false;
+        app.apply_prs(Ok(vec![merge_bot_pr(1, &[], Review::Approved)]));
+        app.pr_sheet = true;
+        assert!(render(&app, 170, 50).contains("off (its label is \"automerge"), "the sheet names the repo's own label");
+        app.pr_sheet = false;
+        open_palette_with(&mut app, "automerge");
+        assert!(render(&app, 170, 44).contains("Turn on automerge for acme/api#1"));
+        app.on_key(KeyCode::Enter, false);
+        assert!(app.confirm.as_ref().is_some_and(|c| c.automerge.is_some()), "the palette asks first too");
+        app.confirm = None;
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "[ ] automerge");
+        app.on_hover(x + 2, y);
+        assert!(render(&app, 170, 44).lines().last().unwrap().contains("automerge: the merge bot merges this PR by itself"), "the tip says what it does");
     }
 
     #[test]

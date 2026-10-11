@@ -6,6 +6,7 @@ mod durations;
 mod finish;
 mod fixstate;
 mod herdr;
+mod kodiak;
 mod loading;
 mod palette;
 mod panel;

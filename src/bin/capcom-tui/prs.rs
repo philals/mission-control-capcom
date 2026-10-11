@@ -144,6 +144,9 @@ pub struct Feedback {
     pub cancelled: Vec<String>,
     #[serde(default)]
     pub merge: MergeState,
+    /// What the repository's merge bot is set up to do (None when it has none, or we could not tell).
+    #[serde(default)]
+    pub kodiak: Option<crate::kodiak::Kodiak>,
 }
 
 pub fn is_copilot(login: &str) -> bool {
@@ -167,6 +170,58 @@ impl PullRequest {
     /// Something is wrong with the PR that its author has to act on: a failing check or a merge conflict.
     pub fn is_red(&self) -> bool {
         !self.real_failures().is_empty() || self.feedback.merge == MergeState::Conflicting
+    }
+
+    pub fn has_label(&self, name: &str) -> bool {
+        self.labels.iter().any(|l| l.eq_ignore_ascii_case(name))
+    }
+
+    /// The labels that turn automerge on in this PR's repo (none when it has no merge bot).
+    pub fn automerge_labels(&self) -> &[String] {
+        self.feedback.kodiak.as_ref().map_or(&[], |k| k.automerge.as_slice())
+    }
+
+    pub fn automerge_on(&self) -> bool {
+        self.automerge_labels().iter().any(|l| self.has_label(l))
+    }
+
+    /// The merge bot keeps this PR's branch up to date, so capcom need not: it updates every PR in the repo,
+    /// or this one has its update label. Without its config, a label that looks like one of its labels counts.
+    pub fn bot_updates(&self) -> bool {
+        match &self.feedback.kodiak {
+            Some(k) => k.update_always || k.autoupdate.iter().any(|l| self.has_label(l)),
+            None => self.labels.iter().any(|l| {
+                let l = l.to_lowercase();
+                l.contains("autoupdate") || l.contains("automerge")
+            }),
+        }
+    }
+
+    /// Why a PR would not merge right now, in a few words, or None when nothing is in the way.
+    pub fn merge_blocker(&self) -> Option<String> {
+        let blocking = self.labels.iter().find(|l| {
+            let l = l.to_lowercase().replace(['\u{2019}', '-'], "'").replace(' ', "");
+            l.contains("donotmerge") || l.contains("don'tmerge") || l.contains("dontmerge")
+        });
+        if self.is_draft {
+            Some("it is a draft".into())
+        } else if let Some(label) = blocking {
+            Some(format!("it is labelled \"{label}\""))
+        } else if self.feedback.merge == MergeState::Conflicting {
+            Some("it has merge conflicts".into())
+        } else if !self.real_failures().is_empty() {
+            Some("a check is failing".into())
+        } else if self.checks.iter().any(|c| matches!(c.state, CheckState::Running | CheckState::Queued)) {
+            Some("checks are still running".into())
+        } else if self.review == Review::ChangesRequested {
+            Some("changes were requested".into())
+        } else if self.review == Review::Required {
+            Some("it needs an approval".into())
+        } else if self.feedback.merge == MergeState::Behind {
+            Some("it is behind the base branch".into())
+        } else {
+            None
+        }
     }
 
     /// How much the PR needs its author, most first: 0 red (a failing check or a conflict), 1 something
@@ -360,6 +415,7 @@ fn parse_feedback(node: &Value) -> Feedback {
             (Some("MERGEABLE"), _) | (_, Some("CLEAN" | "UNSTABLE" | "HAS_HOOKS" | "BLOCKED")) => MergeState::Clean,
             _ => MergeState::Unknown,
         },
+        kodiak: None,
     }
 }
 
@@ -571,11 +627,13 @@ impl PrSource for SharedSource {
 pub struct GhSource {
     pub query: String,
     pub rate: Mutex<Option<Rate>>,
+    /// Each repo's merge bot settings, looked up now and then.
+    kodiak: crate::kodiak::Cache,
 }
 
 impl GhSource {
     pub fn new(query: String) -> GhSource {
-        GhSource { query, rate: Mutex::new(None) }
+        GhSource { query, rate: Mutex::new(None), kodiak: crate::kodiak::Cache::default() }
     }
 
     fn graphql(&self, query: &str, vars: &Value) -> Result<String> {
@@ -607,6 +665,10 @@ impl GhSource {
                 Err(_) => {}
             }
         }
+        let mut repos: Vec<String> = prs.iter().filter(|(_, pr)| pr.feedback.mine).map(|(_, pr)| pr.repo.clone()).collect();
+        repos.sort();
+        repos.dedup();
+        apply_kodiak(&mut prs, &self.kodiak.lookup(&repos, &crate::kodiak::fetch));
         *self.rate.lock().expect("rate lock") = rate;
         Ok(prs.into_iter().map(|(_, pr)| pr).collect())
     }
@@ -631,6 +693,15 @@ impl GhSource {
             "GitHub's hourly GraphQL budget is used up; capcom waits until {}",
             reset_at.with_timezone(&chrono::Local).format("%H:%M")
         )
+    }
+}
+
+/// Give each PR the merge bot settings of its repo.
+fn apply_kodiak(prs: &mut [(Option<String>, PullRequest)], configs: &std::collections::HashMap<String, Option<crate::kodiak::Kodiak>>) {
+    for (_, pr) in prs.iter_mut() {
+        if let Some(Some(config)) = configs.get(&pr.repo) {
+            pr.feedback.kodiak = Some(config.clone());
+        }
     }
 }
 
@@ -1043,6 +1114,85 @@ mod tests {
         assert_eq!(rank(&quiet), 6);
         let pending_elsewhere = pr_with(vec![ok(CheckState::Passed), check_of("UI Tests", CheckState::Queued, true)]);
         assert_eq!(rank(&pending_elsewhere), 6, "a status waiting on a person is not 'running'");
+    }
+
+    fn kodiak_with(automerge: &[&str], autoupdate: &[&str], always: bool) -> crate::kodiak::Kodiak {
+        crate::kodiak::Kodiak {
+            automerge: automerge.iter().map(|s| s.to_string()).collect(),
+            autoupdate: autoupdate.iter().map(|s| s.to_string()).collect(),
+            update_always: always,
+        }
+    }
+
+    #[test]
+    fn automerge_is_on_when_the_pr_has_one_of_the_labels_its_repos_bot_reads() {
+        let mut pr = pr_with(vec![]);
+        assert!(pr.automerge_labels().is_empty() && !pr.automerge_on(), "no bot config, no automerge");
+        pr.feedback.kodiak = Some(kodiak_with(&["automerge 🚀", "automerge"], &[], false));
+        assert!(!pr.automerge_on());
+        pr.labels = vec!["Automerge".into()];
+        assert!(pr.automerge_on(), "a label matches whatever its case");
+        pr.labels = vec!["automerge 🚀 extra".into(), "bug".into()];
+        assert!(!pr.automerge_on(), "only the exact names count");
+    }
+
+    #[test]
+    fn the_bot_updating_a_pr_comes_from_the_repos_config_not_from_how_a_label_looks() {
+        let mut pr = pr_with(vec![]);
+        pr.labels = vec!["autoupdate".into()];
+        assert!(pr.bot_updates(), "no config: a label that looks like the bot's counts");
+        pr.labels = vec![];
+        assert!(!pr.bot_updates());
+        pr.feedback.kodiak = Some(kodiak_with(&["automerge"], &["autoupdate"], true));
+        assert!(pr.bot_updates(), "update.always: every PR");
+        pr.feedback.kodiak = Some(kodiak_with(&["automerge 🚀"], &[], false));
+        pr.labels = vec!["automerge 🚀".into()];
+        assert!(!pr.bot_updates(), "this repo's bot does not update branches, whatever the label says");
+        pr.feedback.kodiak = Some(kodiak_with(&["automerge"], &["autoupdate 🚀"], false));
+        pr.labels = vec!["autoupdate 🚀".into()];
+        assert!(pr.bot_updates(), "the label the repo names, emoji and all");
+        pr.labels = vec!["autoupdate".into()];
+        assert!(!pr.bot_updates(), "a different spelling is not that repo's label");
+    }
+
+    #[test]
+    fn why_a_pr_would_not_merge_is_said_in_order_of_what_matters() {
+        let mut pr = pr_with(vec![check_of("build", CheckState::Passed, false)]);
+        pr.is_draft = false;
+        pr.review = Review::Approved;
+        assert_eq!(pr.merge_blocker(), None, "approved, green, not behind: nothing in the way");
+        pr.review = Review::Required;
+        assert_eq!(pr.merge_blocker().as_deref(), Some("it needs an approval"));
+        pr.feedback.merge = MergeState::Behind;
+        assert_eq!(pr.merge_blocker().as_deref(), Some("it needs an approval"), "approval comes before being behind");
+        pr.review = Review::Approved;
+        assert_eq!(pr.merge_blocker().as_deref(), Some("it is behind the base branch"));
+        pr.checks.push(check_of("e2e", CheckState::Running, false));
+        assert_eq!(pr.merge_blocker().as_deref(), Some("checks are still running"));
+        pr.checks.push(check_of("lint", CheckState::Failed, false));
+        assert_eq!(pr.merge_blocker().as_deref(), Some("a check is failing"));
+        pr.feedback.merge = MergeState::Conflicting;
+        assert_eq!(pr.merge_blocker().as_deref(), Some("it has merge conflicts"));
+        pr.labels = vec!["Don't merge on a Friday".into()];
+        assert_eq!(pr.merge_blocker().as_deref(), Some("it is labelled \"Don't merge on a Friday\""));
+        pr.labels = vec!["DO NOT MERGE".into()];
+        assert!(pr.merge_blocker().unwrap().contains("DO NOT MERGE"));
+        pr.is_draft = true;
+        assert_eq!(pr.merge_blocker().as_deref(), Some("it is a draft"), "a draft is the first thing in the way");
+        let mut pending_elsewhere = pr_with(vec![check_of("UI Tests", CheckState::Queued, true)]);
+        pending_elsewhere.is_draft = false;
+        pending_elsewhere.review = Review::Approved;
+        assert_eq!(pending_elsewhere.merge_blocker().as_deref(), Some("checks are still running"), "a pending status counts against merging, as GitHub counts it");
+    }
+
+    #[test]
+    fn each_pr_gets_the_settings_of_its_own_repo() {
+        let mut prs = vec![(None, pr_with(vec![])), (None, pr_with(vec![]))];
+        prs[1].1.repo = "acme/web".into();
+        let configs: std::collections::HashMap<String, Option<crate::kodiak::Kodiak>> =
+            [("acme/widgets".to_string(), None), ("acme/web".to_string(), Some(kodiak_with(&["automerge"], &[], false)))].into_iter().collect();
+        apply_kodiak(&mut prs, &configs);
+        assert!(prs[0].1.feedback.kodiak.is_none() && prs[1].1.feedback.kodiak.is_some());
     }
 
     #[test]

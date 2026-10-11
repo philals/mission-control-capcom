@@ -41,6 +41,7 @@ pub enum Action {
     PrAutoReview(String),
     PrReady(String),
     PrDraft(String),
+    PrAutoMerge(String),
 }
 
 #[derive(Clone, Debug)]
@@ -127,6 +128,9 @@ pub fn pr_entries(row: &PrRow) -> Vec<Entry> {
     }
     if let Some(on) = row.auto_review {
         list.push(entry(format!("Turn {} auto-review for {id}", if on { "off" } else { "on" }), "v", Action::PrAutoReview(url.clone())));
+    }
+    if let Some(on) = row.automerge {
+        list.push(entry(format!("Turn {} automerge for {id}", if on { "off" } else { "on" }), "g", Action::PrAutoMerge(url.clone())));
     }
     match row.live.map(|pr| pr.is_draft) {
         Some(true) => list.push(entry(format!("Mark {id} ready for review"), "m", Action::PrReady(url))),

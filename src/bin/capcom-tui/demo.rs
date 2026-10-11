@@ -101,6 +101,11 @@ fn check(workflow: &str, name: &str, state: CheckState, minutes_ago: i64, minute
     }
 }
 
+/// The merge bot settings of the demo repos (invented).
+fn kodiak() -> crate::kodiak::Kodiak {
+    crate::kodiak::Kodiak { automerge: vec!["automerge 🚀".into()], autoupdate: vec!["autoupdate".into()], update_always: false }
+}
+
 fn pull_requests() -> Vec<PullRequest> {
     vec![
         PullRequest {
@@ -112,6 +117,7 @@ fn pull_requests() -> Vec<PullRequest> {
                 threads: ["a", "b"].iter().map(|id| Thread { id: id.to_string(), resolved: false, outdated: false, by_copilot: true }).collect(),
                 cancelled: vec![],
                 merge: crate::prs::MergeState::Conflicting,
+                kodiak: Some(kodiak()),
             },
             repo: "acme/web".into(),
             number: 212,
@@ -131,7 +137,7 @@ fn pull_requests() -> Vec<PullRequest> {
             ],
         },
         PullRequest {
-            feedback: Feedback { mine: true, head: "4be7710".into(), copilot: CopilotState::Requested, ..Feedback::default() },
+            feedback: Feedback { mine: true, head: "4be7710".into(), copilot: CopilotState::Requested, kodiak: Some(kodiak()), ..Feedback::default() },
             repo: "acme/worker".into(),
             number: 41,
             title: "feat: DEMO-102 add the audit log export job (T1)".into(),
@@ -148,13 +154,13 @@ fn pull_requests() -> Vec<PullRequest> {
             ],
         },
         PullRequest {
-            feedback: Default::default(),
+            feedback: Feedback { mine: true, head: "c0ffee1".into(), kodiak: Some(kodiak()), ..Feedback::default() },
             repo: "acme/web".into(),
             number: 215,
             title: "docs: explain the notification digest settings".into(),
             url: "https://github.com/acme/web/pull/215".into(),
             is_draft: false,
-            labels: vec!["docs".into()],
+            labels: vec!["docs".into(), "automerge 🚀".into()],
             review: Review::Required,
             comments: 0,
             updated_at: ago(45),

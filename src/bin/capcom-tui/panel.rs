@@ -19,6 +19,7 @@ const COPY_BUTTON: &str = "[ copy ]";
 const AGENT_BUTTON: &str = "[ agent ]";
 const CONFIRM_YES: &str = "[ y Mark ready ]";
 const CONFIRM_YES_DRAFT: &str = "[ y Turn into a draft ]";
+const CONFIRM_YES_MERGE: &str = "[ y Turn on automerge ]";
 const CONFIRM_NO: &str = "[ n Cancel ]";
 pub const SHEET_STAGE_OPEN: &str = "[ open ]";
 
@@ -26,6 +27,7 @@ pub const SHEET_STAGE_OPEN: &str = "[ open ]";
 enum Btn {
     AutoFix,
     AutoReview,
+    AutoMerge,
     Agent,
     Copy,
     Details,
@@ -46,6 +48,9 @@ fn buttons(row: &PrRow) -> Vec<(Btn, String, Style)> {
     }
     if let Some(on) = row.auto_review {
         list.push((Btn::AutoReview, tick(on, "auto-review"), tick_style(on)));
+    }
+    if let Some(on) = row.automerge {
+        list.push((Btn::AutoMerge, tick(on, "automerge"), tick_style(on)));
     }
     if row.has_agent {
         list.push((Btn::Agent, AGENT_BUTTON.to_string(), cyan));
@@ -421,7 +426,12 @@ fn rail(pr: &PullRequest, now: DateTime<Utc>, durations: &Durations, width: usiz
         MergeState::Unknown => (Step::Pending, "merge".to_string()),
     };
     let ready = if pr.is_draft { (Step::Pending, "draft".to_string()) } else { (Step::Done, "ready".to_string()) };
-    let mut steps = vec![ready, ci, copilot, threads, approval, merge];
+    let mut steps = vec![ready, ci, copilot, threads, approval];
+    if !pr.automerge_labels().is_empty() {
+        // on: the merge bot is waiting for the rest to be in place; off: it will not merge it
+        steps.push(if pr.automerge_on() { (Step::Going, "automerge on".to_string()) } else { (Step::Pending, "automerge".to_string()) });
+    }
+    steps.push(merge);
     let wide = |steps: &[(Step, String)]| steps.iter().map(|(_, t)| t.chars().count() + 2).sum::<usize>() + steps.len().saturating_sub(1) * 3;
     while wide(&steps) + 4 > width {
         // done steps are old news; steps not reached yet come next; what is wrong or going stays
@@ -709,6 +719,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
                 let target = match which {
                     Btn::AutoFix => Target::PrAuto(i),
                     Btn::AutoReview => Target::PrReview(i),
+                    Btn::AutoMerge => Target::PrMerge(i),
                     Btn::Agent => Target::PrAgent(i),
                     Btn::Copy => Target::PrCopy(i),
                     Btn::Details => Target::PrDetails(i),
@@ -788,7 +799,7 @@ pub fn draw_confirm(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         return;
     };
     let w = (area.width * 60 / 100).max(44).min(area.width);
-    let h = 8.min(area.height);
+    let h = if confirm.automerge.is_some() { 10 } else { 8 }.min(area.height);
     let rect = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
     let inner = w.saturating_sub(2) as usize;
     let mut lines = vec![
@@ -799,12 +810,18 @@ pub fn draw_confirm(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         lines.push(Line::from(Span::styled(format!(" {t}"), Style::new().add_modifier(Modifier::BOLD))));
     }
     lines.push(Line::raw(""));
-    let (note, heading, yes_text) = if confirm.to_draft {
+    let merge_label = confirm.automerge.clone();
+    let (note, heading, yes_text) = if merge_label.is_some() {
+        (" The merge bot merges it by itself once it is approved and its checks pass.", " Turn on automerge? ", CONFIRM_YES_MERGE)
+    } else if confirm.to_draft {
         (" A draft cannot be merged: auto-merge stops until it is ready again.", " Turn back into a draft? ", CONFIRM_YES_DRAFT)
     } else {
         (" Reviewers are notified when it leaves draft.", " Mark ready for review? ", CONFIRM_YES)
     };
     lines.push(Line::from(Span::styled(note, dim())));
+    if let Some(label) = &merge_label {
+        lines.push(Line::from(Span::styled(format!(" It adds the label \"{label}\". {}", confirm.note), dim())));
+    }
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(ORANGE))
@@ -851,6 +868,17 @@ pub fn draw_sheet(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
                     Waiting::Nothing => "all checks green (no review is required)",
                 };
                 lines.push(label_row("Waiting", words.into()));
+            }
+            if let Some(kodiak) = pr.feedback.kodiak.as_ref().filter(|k| !k.automerge.is_empty()) {
+                let words = if pr.automerge_on() {
+                    match pr.merge_blocker() {
+                        Some(why) => format!("on: the merge bot is waiting, because {why}"),
+                        None => "on: nothing is in the way, so the merge bot merges it next".to_string(),
+                    }
+                } else {
+                    format!("off (its label is {})", kodiak.automerge.iter().map(|l| format!("\"{l}\"")).collect::<Vec<_>>().join(" or "))
+                };
+                lines.push(label_row("Automerge", words));
             }
             let labels = if pr.labels.is_empty() { "none".to_string() } else { pr.labels.join(", ") };
             lines.push(label_row("Labels", labels));
