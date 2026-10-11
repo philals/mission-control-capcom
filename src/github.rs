@@ -108,6 +108,14 @@ impl Client {
         let url = format!("{}/{}", self.base, path.trim_start_matches('/'));
         let authorization = format!("Bearer {token}");
         let result = match (method, body) {
+            ("PUT", Some(body)) => self
+                .agent
+                .put(&url)
+                .header("Authorization", &authorization)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("Content-Type", "application/json")
+                .send(body),
             ("POST", Some(body)) => self
                 .agent
                 .post(&url)
@@ -169,6 +177,33 @@ impl Client {
 
     pub fn graphql_budget(&self) -> Option<Budget> {
         *self.graphql_budget.lock().expect("budget lock")
+    }
+
+    /// Merge the base branch into a PR's branch, as the "Update branch" button does. GitHub does it on
+    /// its side and answers at once; `expected_head` makes it refuse if the branch has moved meanwhile.
+    pub fn update_branch(&self, repo: &str, number: u64, expected_head: &str) -> Result<()> {
+        let valid = |s: &str| !matches!(s, "" | "." | "..") && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+        let Some((owner, name)) = repo.split_once('/').filter(|(o, n)| valid(o) && valid(n)) else {
+            bail!("not a repository name: {repo}");
+        };
+        if expected_head.is_empty() || !expected_head.chars().all(|c| c.is_ascii_hexdigit()) {
+            bail!("not a commit id: {expected_head}");
+        }
+        let path = format!("repos/{owner}/{name}/pulls/{number}/update-branch");
+        let body = json!({ "expected_head_sha": expected_head }).to_string();
+        match self.send("PUT", &path, Some(&body)) {
+            Some(Ok(reply)) => reply_text(reply).map(|_| ()),
+            Some(Err(e)) => Err(e),
+            None => gh_output(&[
+                "api".to_string(),
+                "--method".to_string(),
+                "PUT".to_string(),
+                path,
+                "-f".to_string(),
+                format!("expected_head_sha={expected_head}"),
+            ])
+            .map(|_| ()),
+        }
     }
 }
 
@@ -240,6 +275,11 @@ pub fn rest(path: &str) -> Result<String> {
 /// Run a GraphQL query; the answer is the JSON text (errors GitHub reports are inside it).
 pub fn graphql(query: &str, variables: &Value) -> Result<String> {
     client().graphql(query, variables)
+}
+
+/// Bring a PR's branch up to date with its base, without an agent (see `Client::update_branch`).
+pub fn update_branch(repo: &str, number: u64, expected_head: &str) -> Result<()> {
+    client().update_branch(repo, number, expected_head)
 }
 
 /// The GraphQL budget as of the last answer that carried it.
@@ -325,6 +365,31 @@ mod tests {
         assert!(err.to_ascii_lowercase().contains("rate limit"), "{err}");
         let (base, _) = serve(response("401 Unauthorized", "", "{\"message\":\"Bad credentials\"}"));
         assert!(Client::for_test(&base, Some("t")).rest("user").unwrap_err().to_string().contains("gh auth login"));
+    }
+
+    #[test]
+    fn updating_a_branch_puts_to_the_update_branch_path_with_the_head_it_expects() {
+        let (base, seen) = serve(response("202 Accepted", "", "{\"message\":\"Updating pull request branch.\"}"));
+        Client::for_test(&base, Some("secret-token")).update_branch("acme/api", 7, "9def33a22ac3").unwrap();
+        let request = seen.recv().unwrap();
+        assert!(request.starts_with("PUT /repos/acme/api/pulls/7/update-branch HTTP/1.1"), "{request}");
+        assert!(request.to_ascii_lowercase().contains("authorization: bearer secret-token"), "{request}");
+        let body: Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body["expected_head_sha"], "9def33a22ac3");
+        let (base, _) = serve(response("422 Unprocessable Entity", "", "{\"message\":\"merge conflict between base and head\"}"));
+        let err = Client::for_test(&base, Some("t")).update_branch("acme/api", 7, "abc123").unwrap_err().to_string();
+        assert!(err.contains("422") && err.contains("merge conflict"), "{err}");
+    }
+
+    #[test]
+    fn updating_a_branch_refuses_odd_repository_names_and_commit_ids() {
+        let client = Client::for_test("http://127.0.0.1:9", Some("t"));
+        for repo in ["acme", "../api", "acme/..", "acme/ap i", "a/b/c", "/api"] {
+            assert!(client.update_branch(repo, 1, "abc123").is_err(), "{repo}");
+        }
+        for head in ["", "xyz", "abc 123", "abc;rm"] {
+            assert!(client.update_branch("acme/api", 1, head).is_err(), "{head:?}");
+        }
     }
 
     #[test]
