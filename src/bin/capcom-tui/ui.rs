@@ -3698,6 +3698,27 @@ mod tests {
     }
 
     #[test]
+    fn a_selected_row_is_blue_and_only_a_pr_waiting_for_a_reviewer_has_a_green_row() {
+        let blue = |c: ratatui::style::Color| matches!(c, ratatui::style::Color::Rgb(r, g, b) if b > g && b > r);
+        let green = |c: ratatui::style::Color| matches!(c, ratatui::style::Color::Rgb(r, g, b) if g > b && g > r);
+        assert!(blue(theme::SELECT) && !green(theme::SELECT), "the selection must not look like the GO tint");
+        assert!(green(theme::GO_ROW), "the GO tint is green");
+        let (_root, mut app) = two_stories();
+        let mut draft = pr_with(1, "A draft that is running", Review::Required, true, CheckState::Running);
+        draft.url = "https://github.com/acme/api/pull/1".into();
+        app.apply_prs(Ok(vec![draft]));
+        app.focus = Focus::Prs;
+        let mut term = Terminal::new(TestBackend::new(170, 44)).unwrap();
+        term.draw(|f| draw(f, &app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let text = render(&app, 170, 44);
+        let (_, y) = find(&text, "A draft that is running");
+        let backgrounds: Vec<_> = (0..170).map(|x| buf[(x, y)].bg).collect();
+        assert!(backgrounds.contains(&theme::SELECT), "the selected row is drawn on the selection colour");
+        assert!(!backgrounds.contains(&theme::GO_ROW), "and a draft that is still running is never given the GO tint");
+    }
+
+    #[test]
     fn prs_are_listed_by_how_much_they_need_you_and_ties_keep_their_order() {
         let (_root, mut app) = two_stories();
         app.apply_prs(Ok(vec![
