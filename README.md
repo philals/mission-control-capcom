@@ -42,7 +42,7 @@ If that sounds like you, great. If not, treat this as a worked example: fork it,
 - **Local files are the source of truth.** Each story is a folder with a `board.json`, a `story.md` and one markdown file per task. Jira only ever receives the subtasks, once, if you say yes.
 - **Task statuses:** `todo → planning → planned → implementing → done`, plus `dropped`, and a `blocked` flag. A task can skip planning (`todo → implementing`) for spikes and manual testing. `done` means every expected PR is merged.
 - **Story statuses:** `in_progress → in_review → done`, moved by `/story-review` once every task is finished.
-- **PRs are always drafts, and never stacked.** You mark them ready and merge them yourself; nothing is merged for you.
+- **PRs are always drafts, and never stacked.** You mark them ready and merge them yourself; capcom never merges anything (it can add or remove your merge bot's automerge label, but only when you tick it and confirm).
 - **A task can need several PRs.** List a repo once per expected PR (`--repos api,api,ui` means two PRs in `api` and one in `ui`); the task cannot finish until all of them exist and are merged.
 
 Design notes: [docs/design.md](docs/design.md). Command reference: [docs/reference.md](docs/reference.md).
@@ -122,6 +122,7 @@ If you use [Herdr](https://herdr.dev), `capcom-tui` run inside a Herdr pane can 
 
 - **No project data in this repo.** Your stories live in the folder you choose. The examples and tests use invented names (`acme/widgets`, `PROJ-123`, `DEMO-101`).
 - **One credential, in memory only.** capcom asks your `gh` for its token (`gh auth token`) once when it starts, keeps it in memory, and sends it only to `api.github.com` over HTTPS. It never writes it to disk or logs it. Calling the API directly instead of starting `gh` for every request is what keeps the board light on CPU (about 2 ms a call instead of about 150 ms). If you would rather capcom never held the token, set `CAPCOM_NO_NATIVE_HTTP=1`: every GitHub call then goes through the `gh` command, as before. Marking a PR ready and asking Copilot for a review always use `gh`.
+- **What it changes on GitHub** is only what you click or tick: a PR's draft or ready state, a Copilot review request, its automerge label, and with auto-fix ticked, bringing a branch up to date or asking an agent to fix it.
 - **No telemetry.** The only calls are to GitHub and, when you ask the skills to, your Atlassian MCP server to Jira.
 - **What is written to disk:** the boards (only by `capcom`, under a lock), your panel sizes, and a small cache of GitHub results that is readable only by you and tidied after a day.
 - **Found a vulnerability?** See [SECURITY.md](SECURITY.md).

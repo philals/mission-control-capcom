@@ -1228,7 +1228,7 @@
 <text x="209.6" y="399.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">2</text>
 <text x="570.8" y="399.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">↻</text>
 <text x="587.6" y="399.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="654.8" y="399.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">07:29:51</text>
+<text x="654.8" y="399.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">08:12:16</text>
 <text x="755.6" y="399.5" fill="#f3ebd6" font-weight="700" textLength="42.0" lengthAdjust="spacing">STORY</text>
 <text x="806.0" y="399.5" fill="#f3ebd6" font-weight="700" textLength="33.6" lengthAdjust="spacing">RUNS</text>
 <text x="848.0" y="399.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">&amp;</text>
@@ -1237,7 +1237,7 @@
 <text x="932.0" y="399.5" fill="#f3ebd6" font-weight="700" textLength="8.4" lengthAdjust="spacing">3</text>
 <text x="1100.0" y="399.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">↻</text>
 <text x="1116.8" y="399.5" fill="#b8ae94" textLength="58.8" lengthAdjust="spacing">updated</text>
-<text x="1184.0" y="399.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">07:29:51</text>
+<text x="1184.0" y="399.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">08:12:16</text>
 <text x="33.2" y="417.5" fill="#f3ebd6" font-weight="700" textLength="33.6" lengthAdjust="spacing">(not</text>
 <text x="75.2" y="417.5" fill="#f3ebd6" font-weight="700" textLength="16.8" lengthAdjust="spacing">in</text>
 <text x="100.4" y="417.5" fill="#f3ebd6" font-weight="700" textLength="33.6" lengthAdjust="spacing">your</text>
@@ -1312,18 +1312,18 @@
 <text x="176.0" y="525.5" fill="#ff806c" textLength="50.4" lengthAdjust="spacing">failed</text>
 <text x="234.8" y="525.5" fill="#ff806c" textLength="8.4" lengthAdjust="spacing">✗</text>
 <text x="251.6" y="525.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">·</text>
-<text x="268.4" y="525.5" fill="#84f0a0" textLength="58.8" lengthAdjust="spacing">copilot</text>
-<text x="335.6" y="525.5" fill="#84f0a0" textLength="8.4" lengthAdjust="spacing">●</text>
-<text x="352.4" y="525.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">·</text>
-<text x="369.2" y="525.5" fill="#ff806c" textLength="58.8" lengthAdjust="spacing">threads</text>
-<text x="436.4" y="525.5" fill="#ff806c" textLength="8.4" lengthAdjust="spacing">2</text>
-<text x="453.2" y="525.5" fill="#ff806c" textLength="8.4" lengthAdjust="spacing">✗</text>
-<text x="470.0" y="525.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">·</text>
-<text x="486.8" y="525.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">approved</text>
-<text x="562.4" y="525.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">○</text>
-<text x="579.2" y="525.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">·</text>
-<text x="596.0" y="525.5" fill="#ff806c" textLength="75.6" lengthAdjust="spacing">conflicts</text>
-<text x="680.0" y="525.5" fill="#ff806c" textLength="8.4" lengthAdjust="spacing">✗</text>
+<text x="268.4" y="525.5" fill="#ff806c" textLength="58.8" lengthAdjust="spacing">threads</text>
+<text x="335.6" y="525.5" fill="#ff806c" textLength="8.4" lengthAdjust="spacing">2</text>
+<text x="352.4" y="525.5" fill="#ff806c" textLength="8.4" lengthAdjust="spacing">✗</text>
+<text x="369.2" y="525.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">·</text>
+<text x="386.0" y="525.5" fill="#b8ae94" textLength="67.2" lengthAdjust="spacing">approved</text>
+<text x="461.6" y="525.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">○</text>
+<text x="478.4" y="525.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">·</text>
+<text x="495.2" y="525.5" fill="#b8ae94" textLength="75.6" lengthAdjust="spacing">automerge</text>
+<text x="579.2" y="525.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">○</text>
+<text x="596.0" y="525.5" fill="#b8ae94" textLength="8.4" lengthAdjust="spacing">·</text>
+<text x="612.8" y="525.5" fill="#ff806c" textLength="75.6" lengthAdjust="spacing">conflicts</text>
+<text x="696.8" y="525.5" fill="#ff806c" textLength="8.4" lengthAdjust="spacing">✗</text>
 <text x="764.0" y="525.5" fill="#ffd24a" font-weight="700" textLength="75.6" lengthAdjust="spacing">[RUNNING]</text>
 <text x="864.8" y="525.5" fill="#8cc2ff" textLength="67.2" lengthAdjust="spacing">acme/web</text>
 <text x="948.8" y="525.5" fill="#f3ebd6" font-weight="700" textLength="84.0" lengthAdjust="spacing">Continuous</text>
@@ -1332,19 +1332,16 @@
 <text x="1167.2" y="525.5" fill="#8cc2ff" font-weight="700" textLength="67.2" lengthAdjust="spacing">WATCHING</text>
 <text x="50.0" y="543.5" fill="#84f0a0" textLength="8.4" lengthAdjust="spacing">✓</text>
 <text x="66.8" y="543.5" fill="#84f0a0" textLength="8.4" lengthAdjust="spacing">2</text>
-<text x="92.0" y="543.5" fill="#ff806c" textLength="8.4" lengthAdjust="spacing">✗</text>
-<text x="108.8" y="543.5" fill="#ff806c" textLength="8.4" lengthAdjust="spacing">1</text>
-<text x="134.0" y="543.5" fill="#ffd24a" textLength="8.4" lengthAdjust="spacing">◔</text>
-<text x="150.8" y="543.5" fill="#ffd24a" textLength="8.4" lengthAdjust="spacing">1</text>
-<text x="176.0" y="543.5" fill="#ff9a3c" textLength="8.4" lengthAdjust="spacing">●</text>
-<text x="192.8" y="543.5" fill="#ff9a3c" textLength="8.4" lengthAdjust="spacing">1</text>
-<text x="218.0" y="543.5" fill="#ff9a3c" textLength="8.4" lengthAdjust="spacing">…</text>
-<text x="234.8" y="543.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
-<text x="251.6" y="543.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
-<text x="268.4" y="543.5" fill="#8cc2ff" textLength="67.2" lengthAdjust="spacing">auto-fix</text>
-<text x="344.0" y="543.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
-<text x="360.8" y="543.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
-<text x="377.6" y="543.5" fill="#8cc2ff" textLength="92.4" lengthAdjust="spacing">auto-review</text>
+<text x="92.0" y="543.5" fill="#ff806c" textLength="16.8" lengthAdjust="spacing">✗…</text>
+<text x="117.2" y="543.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
+<text x="134.0" y="543.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
+<text x="150.8" y="543.5" fill="#8cc2ff" textLength="67.2" lengthAdjust="spacing">auto-fix</text>
+<text x="226.4" y="543.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
+<text x="243.2" y="543.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
+<text x="260.0" y="543.5" fill="#8cc2ff" textLength="92.4" lengthAdjust="spacing">auto-review</text>
+<text x="360.8" y="543.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
+<text x="377.6" y="543.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>
+<text x="394.4" y="543.5" fill="#8cc2ff" textLength="75.6" lengthAdjust="spacing">automerge</text>
 <text x="478.4" y="543.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">[</text>
 <text x="495.2" y="543.5" fill="#8cc2ff" textLength="42.0" lengthAdjust="spacing">agent</text>
 <text x="545.6" y="543.5" fill="#8cc2ff" textLength="8.4" lengthAdjust="spacing">]</text>

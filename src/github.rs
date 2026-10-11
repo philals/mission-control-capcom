@@ -108,6 +108,13 @@ impl Client {
         let url = format!("{}/{}", self.base, path.trim_start_matches('/'));
         let authorization = format!("Bearer {token}");
         let result = match (method, body) {
+            ("DELETE", None) => self
+                .agent
+                .delete(&url)
+                .header("Authorization", &authorization)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .call(),
             ("PUT", Some(body)) => self
                 .agent
                 .put(&url)
@@ -179,13 +186,39 @@ impl Client {
         *self.graphql_budget.lock().expect("budget lock")
     }
 
+    /// Put a label on a PR (issues and pull requests share labels).
+    pub fn add_label(&self, repo: &str, number: u64, label: &str) -> Result<()> {
+        let (owner, name) = split_repo(repo)?;
+        check_label(label)?;
+        let path = format!("repos/{owner}/{name}/issues/{number}/labels");
+        let body = json!({ "labels": [label] }).to_string();
+        match self.send("POST", &path, Some(&body)) {
+            Some(Ok(reply)) => reply_text(reply).map(|_| ()),
+            Some(Err(e)) => Err(e),
+            None => gh_output(&["api".to_string(), "--method".to_string(), "POST".to_string(), path, "-f".to_string(), format!("labels[]={label}")]).map(|_| ()),
+        }
+    }
+
+    /// Take a label off a PR. A label that is not there is already as asked.
+    pub fn remove_label(&self, repo: &str, number: u64, label: &str) -> Result<()> {
+        let (owner, name) = split_repo(repo)?;
+        check_label(label)?;
+        let path = format!("repos/{owner}/{name}/issues/{number}/labels/{}", percent_encode(label));
+        let result = match self.send("DELETE", &path, None) {
+            Some(Ok(reply)) => reply_text(reply).map(|_| ()),
+            Some(Err(e)) => Err(e),
+            None => gh_output(&["api".to_string(), "--method".to_string(), "DELETE".to_string(), path]).map(|_| ()),
+        };
+        match result {
+            Err(e) if format!("{e:#}").contains("404") => Ok(()),
+            other => other,
+        }
+    }
+
     /// Merge the base branch into a PR's branch, as the "Update branch" button does. GitHub does it on
     /// its side and answers at once; `expected_head` makes it refuse if the branch has moved meanwhile.
     pub fn update_branch(&self, repo: &str, number: u64, expected_head: &str) -> Result<()> {
-        let valid = |s: &str| !matches!(s, "" | "." | "..") && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-        let Some((owner, name)) = repo.split_once('/').filter(|(o, n)| valid(o) && valid(n)) else {
-            bail!("not a repository name: {repo}");
-        };
+        let (owner, name) = split_repo(repo)?;
         if expected_head.is_empty() || !expected_head.chars().all(|c| c.is_ascii_hexdigit()) {
             bail!("not a commit id: {expected_head}");
         }
@@ -238,6 +271,26 @@ fn gh_rest(path: &str) -> Result<String> {
     gh_output(&["api".to_string(), path.to_string()])
 }
 
+/// `owner/name` as its two parts, refusing anything that is not a plain repository name.
+fn split_repo(repo: &str) -> Result<(&str, &str)> {
+    let valid = |s: &str| !matches!(s, "" | "." | "..") && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    repo.split_once('/').filter(|(o, n)| valid(o) && valid(n)).ok_or_else(|| anyhow!("not a repository name: {repo}"))
+}
+
+/// Text made safe to put in a URL path: letters, digits and `-._~` stay, every other byte becomes `%XX`.
+fn percent_encode(text: &str) -> String {
+    text.bytes()
+        .map(|b| if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') { (b as char).to_string() } else { format!("%{b:02X}") })
+        .collect()
+}
+
+fn check_label(label: &str) -> Result<()> {
+    if label.trim().is_empty() || label.chars().count() > 100 || label.chars().any(char::is_control) {
+        bail!("not a label name: {label:?}");
+    }
+    Ok(())
+}
+
 /// The `gh api graphql` arguments for a query and its variables: a string is `-f name=value`, a
 /// list is one `-f name[]=value` for each item.
 pub fn gh_graphql_args(query: &str, variables: &Value) -> Vec<String> {
@@ -280,6 +333,16 @@ pub fn graphql(query: &str, variables: &Value) -> Result<String> {
 /// Bring a PR's branch up to date with its base, without an agent (see `Client::update_branch`).
 pub fn update_branch(repo: &str, number: u64, expected_head: &str) -> Result<()> {
     client().update_branch(repo, number, expected_head)
+}
+
+/// Put a label on a PR.
+pub fn add_label(repo: &str, number: u64, label: &str) -> Result<()> {
+    client().add_label(repo, number, label)
+}
+
+/// Take a label off a PR.
+pub fn remove_label(repo: &str, number: u64, label: &str) -> Result<()> {
+    client().remove_label(repo, number, label)
 }
 
 /// The GraphQL budget as of the last answer that carried it.
@@ -389,6 +452,39 @@ mod tests {
         }
         for head in ["", "xyz", "abc 123", "abc;rm"] {
             assert!(client.update_branch("acme/api", 1, head).is_err(), "{head:?}");
+        }
+    }
+
+    #[test]
+    fn a_label_is_added_with_a_post_and_removed_with_a_delete_whose_path_is_encoded() {
+        let (base, seen) = serve(response("200 OK", "", "[]"));
+        Client::for_test(&base, Some("secret-token")).add_label("acme/api", 7, "automerge 🚀").unwrap();
+        let request = seen.recv().unwrap();
+        assert!(request.starts_with("POST /repos/acme/api/issues/7/labels HTTP/1.1"), "{request}");
+        let body: Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body["labels"][0], "automerge 🚀");
+        let (base, seen) = serve(response("200 OK", "", "[]"));
+        Client::for_test(&base, Some("secret-token")).remove_label("acme/api", 7, "automerge 🚀").unwrap();
+        let request = seen.recv().unwrap();
+        assert!(request.starts_with("DELETE /repos/acme/api/issues/7/labels/automerge%20%F0%9F%9A%80 HTTP/1.1"), "{request}");
+        assert!(request.to_ascii_lowercase().contains("authorization: bearer secret-token"));
+        let (base, _) = serve(response("404 Not Found", "", "{\"message\":\"Label does not exist\"}"));
+        assert!(Client::for_test(&base, Some("t")).remove_label("acme/api", 7, "gone").is_ok(), "a label that is not there is as asked");
+        let (base, _) = serve(response("403 Forbidden", "", "{\"message\":\"Resource not accessible\"}"));
+        assert!(Client::for_test(&base, Some("t")).add_label("acme/api", 7, "x").unwrap_err().to_string().contains("403"));
+    }
+
+    #[test]
+    fn labels_and_paths_are_checked_and_encoded() {
+        assert_eq!(percent_encode("automerge"), "automerge");
+        assert_eq!(percent_encode("do not/merge?"), "do%20not%2Fmerge%3F");
+        assert_eq!(percent_encode("a-b_c.d~e"), "a-b_c.d~e");
+        let client = Client::for_test("http://127.0.0.1:9", Some("t"));
+        for repo in ["acme", "../api", "a/b/c"] {
+            assert!(client.add_label(repo, 1, "x").is_err() && client.remove_label(repo, 1, "x").is_err(), "{repo}");
+        }
+        for label in ["", "  ", "line\nbreak"] {
+            assert!(client.add_label("acme/api", 1, label).is_err(), "{label:?}");
         }
     }
 

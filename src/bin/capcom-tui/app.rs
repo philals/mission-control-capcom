@@ -96,6 +96,8 @@ pub enum Target {
     PrReview(usize),
     /// The `[x] auto-fix` tick box on one PR.
     PrAuto(usize),
+    /// The `[x] automerge` tick box on one PR: its merge bot's automerge label.
+    PrMerge(usize),
     ToggleAutoFix,
     ToggleAutoCopilot,
     /// The go/no-go light in the header: click to select the first red PR.
@@ -266,14 +268,6 @@ pub struct FixNeed {
     pub only_behind: bool,
 }
 
-/// A PR with one of these labels is kept up to date by the merge bot (Kodiak's `autoupdate`, or `automerge`).
-fn bot_updates(pr: &PullRequest) -> bool {
-    pr.labels.iter().any(|l| {
-        let l = l.to_lowercase();
-        l.contains("autoupdate") || l.contains("automerge")
-    })
-}
-
 /// Asking an agent only to bring a branch up to date waits this long after the last such ask, so a busy
 /// repo's every merge does not start a new round.
 const BEHIND_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(15 * 60);
@@ -298,6 +292,8 @@ pub struct PrRow<'a> {
     pub auto: Option<bool>,
     /// Whether Copilot is asked to review this PR by itself (None for a PR that is not yours).
     pub auto_review: Option<bool>,
+    /// Whether the merge bot's automerge label is on this PR (None for a PR that is not yours or a repo without the bot).
+    pub automerge: Option<bool>,
     /// What capcom has asked the agent so far, such as `⟳ fix round 2/5 sent 3m ago`.
     pub fix: Option<String>,
 }
@@ -378,6 +374,10 @@ pub struct Confirm {
     pub title: String,
     /// Back to draft, rather than ready for review.
     pub to_draft: bool,
+    /// Put this label on the PR (turn automerge on) instead of changing draft or ready.
+    pub automerge: Option<String>,
+    /// What is in the way right now, or that nothing is, for a question that has consequences.
+    pub note: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -546,6 +546,12 @@ fn gh_request_copilot(url: &str) -> Result<(), String> {
     }
 }
 
+/// Put a label on a PR, or take it off.
+fn gh_set_label(repo: &str, number: u64, label: &str, on: bool) -> Result<(), String> {
+    let result = if on { capcom::github::add_label(repo, number, label) } else { capcom::github::remove_label(repo, number, label) };
+    result.map_err(|e| format!("{e:#}"))
+}
+
 /// Bring a PR's branch up to date with its base through GitHub, as the "Update branch" button does.
 fn gh_update_branch(repo: &str, number: u64, head: &str) -> Result<(), String> {
     capcom::github::update_branch(repo, number, head).map_err(|e| format!("{e:#}"))
@@ -620,6 +626,8 @@ pub struct App {
     pub copilot_requester: Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>,
     /// How a branch that is only behind its base is brought up to date, without an agent: repo, number, the head it should be at.
     pub branch_updater: Arc<dyn Fn(&str, u64, &str) -> Result<(), String> + Send + Sync>,
+    /// Puts a label on a PR (true) or takes it off (false): repo, number, label.
+    pub labeler: Arc<dyn Fn(&str, u64, &str, bool) -> Result<(), String> + Send + Sync>,
     fix_seen: HashMap<String, String>,
     pub(crate) fix_rounds: HashMap<String, (u32, std::time::Instant)>,
     /// When each PR was last asked about nothing but being behind its base.
@@ -719,6 +727,7 @@ impl App {
             fix_store: None,
             copilot_requester: Arc::new(gh_request_copilot),
             branch_updater: Arc::new(gh_update_branch),
+            labeler: Arc::new(gh_set_label),
             fix_seen: HashMap::new(),
             fix_rounds: HashMap::new(),
             behind_asked: HashMap::new(),
@@ -1197,7 +1206,7 @@ impl App {
         let conflicts = pr.feedback.merge == MergeState::Conflicting;
         // Behind the base: bring it up to date, but not while checks run (a push cancels them) and not on a
         // PR whose merge bot keeps it up to date already.
-        let behind = pr.feedback.merge == MergeState::Behind && pr.settled() && !bot_updates(pr);
+        let behind = pr.feedback.merge == MergeState::Behind && pr.settled() && !pr.bot_updates();
         if failing.is_empty() && threads.is_empty() && !conflicts && !behind {
             return None;
         }
@@ -2055,6 +2064,7 @@ impl App {
                         has_agent: self.pr_owner(&p.url).is_some() || self.pr_link(&p.url).is_some(),
                         auto: p.feedback.mine.then(|| self.autofix_on(&p.url)),
                         auto_review: p.feedback.mine.then(|| self.autocopilot_on(&p.url)),
+                        automerge: Some(p).filter(|p| p.feedback.mine && !p.automerge_labels().is_empty()).map(|p| p.automerge_on()),
                         fix: self.fix_label(&p.url),
                     })
                     .collect();
@@ -2089,6 +2099,7 @@ impl App {
                             has_agent: true,
                             auto: live.filter(|p| p.feedback.mine).map(|p| self.autofix_on(&p.url)),
                             auto_review: live.filter(|p| p.feedback.mine).map(|p| self.autocopilot_on(&p.url)),
+                            automerge: live.filter(|p| p.feedback.mine && !p.automerge_labels().is_empty()).map(|p| p.automerge_on()),
                             fix: self.fix_label(&pr.url),
                         });
                     }
@@ -2167,7 +2178,7 @@ impl App {
     /// Ask whether to mark a draft ready for review.
     pub fn ask_mark_ready(&mut self, index: usize) {
         let confirm = self.pr_rows().get(index).and_then(|r| {
-            r.live.filter(|p| p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone(), to_draft: false })
+            r.live.filter(|p| p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone(), to_draft: false, automerge: None, note: String::new() })
         });
         if confirm.is_some() {
             self.confirm = confirm;
@@ -2177,11 +2188,47 @@ impl App {
     /// Ask whether to turn a ready PR back into a draft.
     pub fn ask_mark_draft(&mut self, index: usize) {
         let confirm = self.pr_rows().get(index).and_then(|r| {
-            r.live.filter(|p| !p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone(), to_draft: true })
+            r.live.filter(|p| !p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone(), to_draft: true, automerge: None, note: String::new() })
         });
         if confirm.is_some() {
             self.confirm = confirm;
         }
+    }
+
+    /// The `[x] automerge` tick: turning it off takes the label away at once; turning it on asks first,
+    /// because the merge bot then merges the PR by itself.
+    pub fn toggle_pr_automerge(&mut self, index: usize) {
+        let Some(row) = self.pr_rows().into_iter().nth(index) else {
+            return;
+        };
+        let Some(pr) = row.live.filter(|p| p.feedback.mine && !p.automerge_labels().is_empty()) else {
+            self.set_notice("automerge needs your own PR in a repo whose merge bot is set up (a .kodiak.toml)".into());
+            return;
+        };
+        let (url, id, title, repo, number) = (row.url.clone(), pr_id(&row), pr.title.clone(), pr.repo.clone(), pr.number);
+        if pr.automerge_on() {
+            let on: Vec<String> = pr.automerge_labels().iter().filter(|l| pr.has_label(l)).cloned().collect();
+            let (labeler, done) = (self.labeler.clone(), self.ready_done.0.clone());
+            let wake = self.feed.as_ref().map(|(_, w)| w.clone());
+            self.set_notice(format!("turning automerge off for {id}…"));
+            std::thread::spawn(move || {
+                let failed = on.iter().find_map(|label| labeler(&repo, number, label, false).err());
+                let _ = done.send(match failed {
+                    None => Ok(format!("automerge is off for {id} (took off {})", on.iter().map(|l| format!("\"{l}\"")).collect::<Vec<_>>().join(", "))),
+                    Some(e) => Err(format!("could not turn automerge off: {id}: {e}")),
+                });
+                if let Some(wake) = wake {
+                    let _ = wake.send(());
+                }
+            });
+            return;
+        }
+        let label = pr.automerge_labels()[0].clone();
+        let note = match pr.merge_blocker() {
+            Some(why) => format!("Right now it would wait: {why}."),
+            None => "Right now nothing is in the way: it can merge straight away.".to_string(),
+        };
+        self.confirm = Some(Confirm { url, id, title, to_draft: false, automerge: Some(label), note });
     }
 
     /// The `[DRAFT]`/`[READY]` badge and the `m` key: the other state, after asking.
@@ -2197,6 +2244,10 @@ impl App {
         let Some(confirm) = self.confirm.take() else {
             return;
         };
+        if let Some(label) = confirm.automerge.clone() {
+            self.add_automerge_label(confirm, label);
+            return;
+        }
         self.set_notice(format!("{} {}…", if confirm.to_draft { "turning" } else { "marking" }, if confirm.to_draft { format!("{} back into a draft", confirm.id) } else { format!("{} ready", confirm.id) }));
         let change = if confirm.to_draft { self.drafter.clone() } else { self.readier.clone() };
         let done = self.ready_done.0.clone();
@@ -2207,6 +2258,26 @@ impl App {
                 (Ok(()), true) => Ok(format!("{} is a draft again", confirm.id)),
                 (Err(e), false) => Err(format!("could not mark ready: {}: {e}", confirm.id)),
                 (Err(e), true) => Err(format!("could not turn it back into a draft: {}: {e}", confirm.id)),
+            };
+            let _ = done.send(result);
+            if let Some(wake) = wake {
+                let _ = wake.send(());
+            }
+        });
+    }
+
+    fn add_automerge_label(&mut self, confirm: Confirm, label: String) {
+        let Some((repo, number)) = url_parts(&confirm.url) else {
+            self.set_notice("not a pull request link".into());
+            return;
+        };
+        self.set_notice(format!("turning automerge on for {}…", confirm.id));
+        let (labeler, done) = (self.labeler.clone(), self.ready_done.0.clone());
+        let wake = self.feed.as_ref().map(|(_, w)| w.clone());
+        std::thread::spawn(move || {
+            let result = match labeler(&repo, number, &label, true) {
+                Ok(()) => Ok(format!("automerge is on for {} (added \"{label}\")", confirm.id)),
+                Err(e) => Err(format!("could not turn automerge on: {}: {e}", confirm.id)),
             };
             let _ = done.send(result);
             if let Some(wake) = wake {
@@ -2736,6 +2807,10 @@ impl App {
                 self.ask_toggle_draft(self.pr_sel);
                 return false;
             }
+            KeyCode::Char('g') if self.focus == Focus::Prs => {
+                self.toggle_pr_automerge(self.pr_sel);
+                return false;
+            }
             KeyCode::Char('o') if self.focus == Focus::Runs => {
                 self.open_selected_run();
                 return false;
@@ -2902,6 +2977,7 @@ impl App {
             Action::PrAutoReview(url) => on_pr(self, &url, &|app, i| app.toggle_pr_review(i)),
             Action::PrReady(url) => on_pr(self, &url, &|app, i| app.ask_mark_ready(i)),
             Action::PrDraft(url) => on_pr(self, &url, &|app, i| app.ask_mark_draft(i)),
+            Action::PrAutoMerge(url) => on_pr(self, &url, &|app, i| app.toggle_pr_automerge(i)),
         }
         false
     }
@@ -2914,7 +2990,7 @@ impl App {
         let target = self.hit(x, y);
         self.close_overlays();
         let pr = match target {
-            Some(Target::Pr(i) | Target::PrDetails(i) | Target::PrCopy(i) | Target::PrAgent(i) | Target::PrReview(i) | Target::PrAuto(i) | Target::PrBadge(i) | Target::OpenCheck(i, _)) => Some(i),
+            Some(Target::Pr(i) | Target::PrDetails(i) | Target::PrCopy(i) | Target::PrAgent(i) | Target::PrReview(i) | Target::PrAuto(i) | Target::PrMerge(i) | Target::PrBadge(i) | Target::OpenCheck(i, _)) => Some(i),
             _ => None,
         };
         if let Some(i) = pr {
@@ -2951,6 +3027,7 @@ impl App {
         Some(match self.hover_target? {
             Target::PrAuto(_) => "auto-fix: when CI fails or Copilot comments, ask this PR's agent to fix it (t)",
             Target::PrReview(_) => "auto-review: ask Copilot to review this PR, once (v)",
+            Target::PrMerge(_) => "automerge: the merge bot merges this PR by itself once it is approved and green; this adds or removes its label (g)",
             Target::PrAgent(_) => "go to the agent that made this PR (a)",
             Target::PrCopy(_) => "copy the link of this PR (c)",
             Target::PrDetails(_) => "every check, the state and the link (Enter)",
@@ -3086,6 +3163,12 @@ impl App {
                 self.toggle_pr_review(i);
                 return;
             }
+            Some(Target::PrMerge(i)) => {
+                self.set_focus(Focus::Prs);
+                self.pr_sel = i;
+                self.toggle_pr_automerge(i);
+                return;
+            }
             Some(Target::ToggleAutoFix) => {
                 self.toggle_autofix();
                 return;
@@ -3187,7 +3270,7 @@ impl App {
             return;
         }
         let target = self.hit(x, y);
-        if matches!(target, Some(Target::Pr(_) | Target::PrDetails(_) | Target::PrAgent(_) | Target::PrReview(_) | Target::PrAuto(_) | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::PrPanel | Target::OpenCheck(..))) {
+        if matches!(target, Some(Target::Pr(_) | Target::PrDetails(_) | Target::PrAgent(_) | Target::PrReview(_) | Target::PrAuto(_) | Target::PrMerge(_) | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::PrPanel | Target::OpenCheck(..))) {
             self.set_focus(Focus::Prs);
             self.pr_move(delta);
             return;
