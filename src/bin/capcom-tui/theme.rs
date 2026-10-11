@@ -10,7 +10,8 @@ use ratatui::Frame;
 pub const BG: Color = Color::Rgb(0x14, 0x18, 0x1a);
 /// The title and key strips, like the blue of a Mercury-era console.
 pub const HEADER: Color = Color::Rgb(0x0d, 0x2c, 0x5c);
-pub const SELECT: Color = Color::Rgb(0x2b, 0x3b, 0x34);
+/// The selected row: a slate blue, so green on a row means one thing only (a PR that is green and waiting for a reviewer).
+pub const SELECT: Color = Color::Rgb(0x26, 0x37, 0x4f);
 /// The row under the pointer: lighter than the background, quieter than a selection.
 pub const HOVER: Color = Color::Rgb(0x1f, 0x29, 0x2d);
 /// Row tint for a PR that is green and waiting for a reviewer: a dark console green.
