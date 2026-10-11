@@ -257,6 +257,27 @@ pub struct RunData {
     pub disabled: bool,
 }
 
+/// What to ask a PR's agent to fix, and why.
+pub struct FixNeed {
+    /// The state of the PR that is being asked about: the same state is never asked twice.
+    pub fingerprint: String,
+    pub why: String,
+    /// Nothing is wrong but the branch being behind its base.
+    pub only_behind: bool,
+}
+
+/// A PR with one of these labels is kept up to date by the merge bot (Kodiak's `autoupdate`, or `automerge`).
+fn bot_updates(pr: &PullRequest) -> bool {
+    pr.labels.iter().any(|l| {
+        let l = l.to_lowercase();
+        l.contains("autoupdate") || l.contains("automerge")
+    })
+}
+
+/// Asking an agent only to bring a branch up to date waits this long after the last such ask, so a busy
+/// repo's every merge does not start a new round.
+const BEHIND_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
 /// Rows with nothing to do (this rank and below) are shown as one line unless selected.
 pub const QUIET_FROM: u8 = 5;
 
@@ -564,6 +585,8 @@ pub struct App {
     pub copilot_requester: Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>,
     fix_seen: HashMap<String, String>,
     pub(crate) fix_rounds: HashMap<String, (u32, std::time::Instant)>,
+    /// When each PR was last asked about nothing but being behind its base.
+    pub(crate) behind_asked: HashMap<String, std::time::Instant>,
     fix_stall_checked: std::collections::HashSet<String>,
     copilot_tried: std::collections::HashSet<String>,
     /// (PR url, session that made it) for PRs that are on no task.
@@ -659,6 +682,7 @@ impl App {
             copilot_requester: Arc::new(gh_request_copilot),
             fix_seen: HashMap::new(),
             fix_rounds: HashMap::new(),
+            behind_asked: HashMap::new(),
             fix_stall_checked: std::collections::HashSet::new(),
             copilot_tried: std::collections::HashSet::new(),
             pr_links: Vec::new(),
@@ -1122,7 +1146,8 @@ impl App {
 
     /// What is wrong with one of your PRs that an agent could fix: failing checks (once CI has
     /// settled) and Copilot's unresolved comments (once its review is in). `(fingerprint, why)`.
-    pub fn fix_needed(pr: &PullRequest) -> Option<(String, String)> {
+    /// What is wrong with a PR that its agent should be asked to fix, if anything.
+    pub fn fix_needed(pr: &PullRequest) -> Option<FixNeed> {
         use crate::prs::{CopilotState, MergeState};
         if !pr.feedback.mine {
             return None;
@@ -1131,7 +1156,10 @@ impl App {
         let mut threads: Vec<String> =
             if pr.feedback.copilot == CopilotState::Requested { Vec::new() } else { pr.copilot_open().iter().map(|t| t.id.clone()).collect() };
         let conflicts = pr.feedback.merge == MergeState::Conflicting;
-        if failing.is_empty() && threads.is_empty() && !conflicts {
+        // Behind the base: bring it up to date, but not while checks run (a push cancels them) and not on a
+        // PR whose merge bot keeps it up to date already.
+        let behind = pr.feedback.merge == MergeState::Behind && pr.settled() && !bot_updates(pr);
+        if failing.is_empty() && threads.is_empty() && !conflicts && !behind {
             return None;
         }
         failing.sort();
@@ -1146,9 +1174,19 @@ impl App {
         if conflicts {
             why.push("merge conflicts with the default branch".to_string());
         }
+        if behind {
+            why.push("the branch is behind the default branch".to_string());
+        }
         let state = format!("{}|{}|{}", pr.feedback.head, failing.join(","), threads.join(","));
-        // a conflict is its own state, so clearing it (or a new one) is a new ask; no conflict leaves the key as it was
-        Some((if conflicts { format!("{state}|conflict") } else { state }, why.join(" and ")))
+        // a conflict, or being behind, is its own state, so clearing it (or a new one) is a new ask; neither leaves the key as it was
+        let fingerprint = if conflicts {
+            format!("{state}|conflict")
+        } else if behind {
+            format!("{state}|behind")
+        } else {
+            state
+        };
+        Some(FixNeed { fingerprint, why: why.join(" and "), only_behind: behind && failing.is_empty() && threads.is_empty() })
     }
 
     /// Auto-fix is on for this PR and the agent has been asked about what is wrong with it.
@@ -1217,12 +1255,17 @@ impl App {
                         std::thread::spawn(move || store.clear(&url));
                     }
                 }
-                Some((fingerprint, why)) => {
-                    if self.fix_seen.get(&pr.url) == Some(&fingerprint) {
-                        self.check_stalled(pr, &fingerprint, &store);
+                Some(need) => {
+                    if self.fix_seen.get(&pr.url) == Some(&need.fingerprint) {
+                        self.check_stalled(pr, &need.fingerprint, &store);
+                    } else if need.only_behind && self.behind_asked.get(&pr.url).is_some_and(|at| at.elapsed() < BEHIND_COOLDOWN) {
+                        // asked to update this branch a moment ago: the next look will do
                     } else {
-                        self.fix_seen.insert(pr.url.clone(), fingerprint.clone());
-                        self.dispatch_fix(pr, fingerprint, why);
+                        if need.only_behind {
+                            self.behind_asked.insert(pr.url.clone(), std::time::Instant::now());
+                        }
+                        self.fix_seen.insert(pr.url.clone(), need.fingerprint.clone());
+                        self.dispatch_fix(pr, need.fingerprint, need.why);
                     }
                 }
             }

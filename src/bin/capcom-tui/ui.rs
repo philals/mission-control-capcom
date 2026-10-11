@@ -2360,8 +2360,84 @@ mod tests {
         behind.feedback.merge = crate::prs::MergeState::Behind;
         app.apply_prs(Ok(vec![behind]));
         settle(&mut app);
-        assert_eq!(fake.resumes.lock().unwrap().len(), 1, "merely behind the base is not worth an ask");
+        assert_eq!(fake.resumes.lock().unwrap().len(), 2, "a branch behind its base is asked about too");
         assert!(render(&app, 170, 44).contains("behind the base"));
+    }
+
+    fn behind(number: u64, head: &str) -> PullRequest {
+        let mut pr = mine(number, head);
+        pr.feedback.merge = crate::prs::MergeState::Behind;
+        pr
+    }
+
+    #[test]
+    fn a_branch_that_is_only_behind_its_base_gets_one_ask_to_bring_it_up_to_date() {
+        let (_root, mut app, fake, _) = autopilot_app();
+        app.autofix = true;
+        app.apply_prs(Ok(vec![behind(1, "sha1")]));
+        settle(&mut app);
+        {
+            let asks = fake.resumes.lock().unwrap();
+            assert_eq!(asks.len(), 1);
+            let prompt = asks[0].prompt.clone().unwrap();
+            assert!(prompt.starts_with("/pr-address https://github.com/acme/api/pull/1") && prompt.contains("the branch is behind the default branch"), "{prompt}");
+        }
+        app.apply_prs(Ok(vec![behind(1, "sha1")]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 1, "the same state is not asked twice");
+        app.apply_prs(Ok(vec![mine(1, "sha2")]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 1, "up to date: nothing to ask");
+    }
+
+    #[test]
+    fn nothing_is_asked_about_a_behind_branch_while_checks_run_or_when_the_merge_bot_keeps_it_updated() {
+        let (_root, mut app, fake, _) = autopilot_app();
+        app.autofix = true;
+        let mut running = behind(1, "sha1");
+        running.checks[2].state = CheckState::Running;
+        app.apply_prs(Ok(vec![running.clone()]));
+        settle(&mut app);
+        assert!(fake.resumes.lock().unwrap().is_empty(), "a push now would cancel the run");
+        running.checks[2].state = CheckState::Passed;
+        app.apply_prs(Ok(vec![running]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 1, "settled, so it is asked");
+        for label in ["autoupdate", "automerge 🚀"] {
+            let mut bot = behind(2, "sha1");
+            bot.labels = vec![label.into()];
+            app.apply_prs(Ok(vec![bot]));
+            settle(&mut app);
+        }
+        assert_eq!(fake.resumes.lock().unwrap().len(), 1, "Kodiak updates labelled PRs itself");
+        let mut pending_elsewhere = behind(3, "sha1");
+        pending_elsewhere.checks.push(Check { name: "UI Tests".into(), workflow: None, state: CheckState::Queued, started_at: None, completed_at: None, url: None, external: true });
+        app.apply_prs(Ok(vec![pending_elsewhere]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 2, "a status waiting on a person does not hold it back");
+    }
+
+    #[test]
+    fn asking_again_only_to_update_a_branch_waits_for_a_cooldown() {
+        let (_root, mut app, fake, _) = autopilot_app();
+        app.autofix = true;
+        let url = "https://github.com/acme/api/pull/1".to_string();
+        app.apply_prs(Ok(vec![behind(1, "sha1")]));
+        settle(&mut app);
+        app.apply_prs(Ok(vec![mine(1, "sha2")]));
+        settle(&mut app);
+        app.apply_prs(Ok(vec![behind(1, "sha3")]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 1, "master moved again straight after the update: wait");
+        app.behind_asked.insert(url, std::time::Instant::now() - std::time::Duration::from_secs(16 * 60));
+        app.apply_prs(Ok(vec![behind(1, "sha3")]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 2, "after the cooldown it asks");
+        let mut failing = red(1, "sha4");
+        failing.feedback.merge = crate::prs::MergeState::Behind;
+        app.apply_prs(Ok(vec![failing]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 3, "a failing check is never held back by the cooldown");
     }
 
     #[test]
