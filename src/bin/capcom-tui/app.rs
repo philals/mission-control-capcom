@@ -443,6 +443,8 @@ pub enum AppMsg {
     FixSent(String, u32),
     /// The ask did not happen (agent busy, state file locked): look again on the next poll.
     FixRetry(String),
+    /// Updating the branch ran into a merge conflict, which is for an agent: (PR link, state, reason).
+    UpdateConflict(String, String, String),
 }
 
 /// Automatic rounds of "fix this PR" per PR before capcom gives up and tells you.
@@ -530,6 +532,11 @@ fn gh_request_copilot(url: &str) -> Result<(), String> {
     }
 }
 
+/// Bring a PR's branch up to date with its base through GitHub, as the "Update branch" button does.
+fn gh_update_branch(repo: &str, number: u64, head: &str) -> Result<(), String> {
+    capcom::github::update_branch(repo, number, head).map_err(|e| format!("{e:#}"))
+}
+
 pub struct App {
     pub root: PathBuf,
     pub keys: Vec<String>,
@@ -595,6 +602,8 @@ pub struct App {
     pub autocopilot_prs: HashMap<String, bool>,
     pub fix_store: Option<FixStore>,
     pub copilot_requester: Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>,
+    /// How a branch that is only behind its base is brought up to date, without an agent: repo, number, the head it should be at.
+    pub branch_updater: Arc<dyn Fn(&str, u64, &str) -> Result<(), String> + Send + Sync>,
     fix_seen: HashMap<String, String>,
     pub(crate) fix_rounds: HashMap<String, (u32, std::time::Instant)>,
     /// When each PR was last asked about nothing but being behind its base.
@@ -692,6 +701,7 @@ impl App {
             attention: crate::attention::Attention::new(),
             fix_store: None,
             copilot_requester: Arc::new(gh_request_copilot),
+            branch_updater: Arc::new(gh_update_branch),
             fix_seen: HashMap::new(),
             fix_rounds: HashMap::new(),
             behind_asked: HashMap::new(),
@@ -1277,7 +1287,12 @@ impl App {
                             self.behind_asked.insert(pr.url.clone(), std::time::Instant::now());
                         }
                         self.fix_seen.insert(pr.url.clone(), need.fingerprint.clone());
-                        self.dispatch_fix(pr, need.fingerprint, need.why);
+                        if need.only_behind {
+                            // a plain merge needs no agent (and none of its tokens): GitHub does it
+                            self.update_branch(pr, need.fingerprint, need.why);
+                        } else {
+                            self.dispatch_fix(pr, need.fingerprint, need.why);
+                        }
                     }
                 }
             }
@@ -1296,6 +1311,41 @@ impl App {
                 notify("CAPCOM: the agent has not acted", &format!("{name} looks the same {STALL_MINUTES} minutes after it was asked to fix it"));
                 let _ = done.send(AppMsg::Notice(format!("{name}: no change {STALL_MINUTES} minutes after the agent was asked: it may be stuck")));
             }
+        });
+    }
+
+    /// Bring a branch that is only behind its base up to date by asking GitHub to merge the base in. An
+    /// agent is asked only if that runs into a merge conflict, which takes judgement.
+    fn update_branch(&mut self, pr: &PullRequest, fingerprint: String, why: String) {
+        let Some(store) = self.fix_store.clone() else {
+            return;
+        };
+        let (url, repo, number, head) = (pr.url.clone(), pr.repo.clone(), pr.number, pr.feedback.head.clone());
+        let name = format!("{repo}#{number}");
+        let (updater, done) = (self.branch_updater.clone(), self.launch_done.0.clone());
+        std::thread::spawn(move || match store.claim(&url, &fingerprint, MAX_FIX_ROUNDS, false) {
+            Claim::Same => {}
+            Claim::Busy => {
+                let _ = done.send(AppMsg::FixRetry(url));
+            }
+            Claim::GaveUp => {
+                let _ = done.send(AppMsg::Notice(format!("{name}: still behind after {MAX_FIX_ROUNDS} automatic updates: over to you")));
+            }
+            Claim::Go { undo, .. } => match updater(&repo, number, &head) {
+                Ok(()) => {
+                    let _ = done.send(AppMsg::Notice(format!("brought {name} up to date with its base branch (no agent needed)")));
+                }
+                Err(e) if e.to_lowercase().contains("conflict") => {
+                    store.undo(&url, undo);
+                    let reason = format!("{why}, and updating it runs into a merge conflict");
+                    let _ = done.send(AppMsg::UpdateConflict(url, fingerprint, reason));
+                }
+                Err(e) => {
+                    store.undo(&url, undo);
+                    let _ = done.send(AppMsg::Notice(format!("could not update {name}: {e}")));
+                    let _ = done.send(AppMsg::FixRetry(url));
+                }
+            },
         });
     }
 
@@ -2396,6 +2446,11 @@ impl App {
                 }
                 AppMsg::FixRetry(url) => {
                     self.fix_seen.remove(&url);
+                }
+                AppMsg::UpdateConflict(url, fingerprint, reason) => {
+                    if let Some(pr) = self.prs.items.iter().find(|p| p.url == url).cloned() {
+                        self.dispatch_fix(&pr, fingerprint, reason);
+                    }
                 }
                 AppMsg::Cleanup(id) => {
                     let title = self.board.as_ref().and_then(|b| b.task(&id)).map_or(String::new(), |t| t.title.clone());
