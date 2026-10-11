@@ -317,6 +317,18 @@ fn pr_id(row: &PrRow) -> String {
     row.number.map_or(row.repo.clone(), |n| format!("{}#{n}", row.repo))
 }
 
+/// Where a click on a PR goes: its diff (`…/pull/12/files`), not the conversation. Anything that is
+/// not a PR link, or already points somewhere inside the PR, is left alone.
+pub fn pr_diff_url(url: &str) -> String {
+    let trimmed = url.trim_end_matches('/');
+    let is_pr = trimmed.rsplit_once("/pull/").is_some_and(|(_, tail)| !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()));
+    if is_pr {
+        format!("{trimmed}/files")
+    } else {
+        url.to_string()
+    }
+}
+
 fn same_url(a: &str, b: &str) -> bool {
     a.trim_end_matches('/') == b.trim_end_matches('/')
 }
@@ -2027,7 +2039,7 @@ impl App {
     }
 
     pub fn open_pr(&self, index: usize) {
-        let url = self.pr_rows().get(index).map(|r| r.url.clone());
+        let url = self.pr_rows().get(index).map(|r| pr_diff_url(&r.url));
         if let Some(url) = url {
             (self.opener)(&url);
         }
@@ -2413,7 +2425,7 @@ impl App {
     }
 
     pub fn open_selected_pr(&self) {
-        let url = self.pr_rows().get(self.pr_sel).map(|r| r.url.clone());
+        let url = self.pr_rows().get(self.pr_sel).map(|r| pr_diff_url(&r.url));
         if let Some(url) = url {
             (self.opener)(&url);
         }
@@ -3674,7 +3686,7 @@ mod tests {
         app.on_key(KeyCode::Enter, false);
         assert!(app.pr_sheet);
         app.on_key(KeyCode::Char('o'), false);
-        assert_eq!(*log.borrow(), vec![URL12.to_string()]);
+        assert_eq!(*log.borrow(), vec![format!("{URL12}/files")], "o opens the diff");
         assert!(!app.on_key(KeyCode::Esc, false));
         assert!(!app.pr_sheet);
         assert_eq!(app.focus, Focus::Prs);
