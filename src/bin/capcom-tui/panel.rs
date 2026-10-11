@@ -19,7 +19,6 @@ const COPY_BUTTON: &str = "[ copy ]";
 const AGENT_BUTTON: &str = "[ agent ]";
 const CONFIRM_YES: &str = "[ y Mark ready ]";
 const CONFIRM_YES_DRAFT: &str = "[ y Turn into a draft ]";
-const CONFIRM_YES_MERGE: &str = "[ y Turn on automerge ]";
 const CONFIRM_NO: &str = "[ n Cancel ]";
 pub const SHEET_STAGE_OPEN: &str = "[ open ]";
 
@@ -799,7 +798,7 @@ pub fn draw_confirm(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         return;
     };
     let w = (area.width * 60 / 100).max(44).min(area.width);
-    let h = if confirm.automerge.is_some() { 10 } else { 8 }.min(area.height);
+    let h = 8.min(area.height);
     let rect = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
     let inner = w.saturating_sub(2) as usize;
     let mut lines = vec![
@@ -810,18 +809,12 @@ pub fn draw_confirm(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         lines.push(Line::from(Span::styled(format!(" {t}"), Style::new().add_modifier(Modifier::BOLD))));
     }
     lines.push(Line::raw(""));
-    let merge_label = confirm.automerge.clone();
-    let (note, heading, yes_text) = if merge_label.is_some() {
-        (" The merge bot merges it by itself once it is approved and its checks pass.", " Turn on automerge? ", CONFIRM_YES_MERGE)
-    } else if confirm.to_draft {
+    let (note, heading, yes_text) = if confirm.to_draft {
         (" A draft cannot be merged: auto-merge stops until it is ready again.", " Turn back into a draft? ", CONFIRM_YES_DRAFT)
     } else {
         (" Reviewers are notified when it leaves draft.", " Mark ready for review? ", CONFIRM_YES)
     };
     lines.push(Line::from(Span::styled(note, dim())));
-    if let Some(label) = &merge_label {
-        lines.push(Line::from(Span::styled(format!(" It adds the label \"{label}\". {}", confirm.note), dim())));
-    }
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(ORANGE))

@@ -374,10 +374,6 @@ pub struct Confirm {
     pub title: String,
     /// Back to draft, rather than ready for review.
     pub to_draft: bool,
-    /// Put this label on the PR (turn automerge on) instead of changing draft or ready.
-    pub automerge: Option<String>,
-    /// What is in the way right now, or that nothing is, for a question that has consequences.
-    pub note: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2178,7 +2174,7 @@ impl App {
     /// Ask whether to mark a draft ready for review.
     pub fn ask_mark_ready(&mut self, index: usize) {
         let confirm = self.pr_rows().get(index).and_then(|r| {
-            r.live.filter(|p| p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone(), to_draft: false, automerge: None, note: String::new() })
+            r.live.filter(|p| p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone(), to_draft: false })
         });
         if confirm.is_some() {
             self.confirm = confirm;
@@ -2188,15 +2184,14 @@ impl App {
     /// Ask whether to turn a ready PR back into a draft.
     pub fn ask_mark_draft(&mut self, index: usize) {
         let confirm = self.pr_rows().get(index).and_then(|r| {
-            r.live.filter(|p| !p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone(), to_draft: true, automerge: None, note: String::new() })
+            r.live.filter(|p| !p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone(), to_draft: true })
         });
         if confirm.is_some() {
             self.confirm = confirm;
         }
     }
 
-    /// The `[x] automerge` tick: turning it off takes the label away at once; turning it on asks first,
-    /// because the merge bot then merges the PR by itself.
+    /// The `[x] automerge` tick: on adds the repo's first automerge label, off takes every one away. No question either way.
     pub fn toggle_pr_automerge(&mut self, index: usize) {
         let Some(row) = self.pr_rows().into_iter().nth(index) else {
             return;
@@ -2205,7 +2200,7 @@ impl App {
             self.set_notice("automerge needs your own PR in a repo whose merge bot is set up (a .kodiak.toml)".into());
             return;
         };
-        let (url, id, title, repo, number) = (row.url.clone(), pr_id(&row), pr.title.clone(), pr.repo.clone(), pr.number);
+        let (url, id, repo, number) = (row.url.clone(), pr_id(&row), pr.repo.clone(), pr.number);
         if pr.automerge_on() {
             let on: Vec<String> = pr.automerge_labels().iter().filter(|l| pr.has_label(l)).cloned().collect();
             let (labeler, done) = (self.labeler.clone(), self.ready_done.0.clone());
@@ -2224,11 +2219,7 @@ impl App {
             return;
         }
         let label = pr.automerge_labels()[0].clone();
-        let note = match pr.merge_blocker() {
-            Some(why) => format!("Right now it would wait: {why}."),
-            None => "Right now nothing is in the way: it can merge straight away.".to_string(),
-        };
-        self.confirm = Some(Confirm { url, id, title, to_draft: false, automerge: Some(label), note });
+        self.add_automerge_label(&url, &id, label);
     }
 
     /// The `[DRAFT]`/`[READY]` badge and the `m` key: the other state, after asking.
@@ -2244,10 +2235,6 @@ impl App {
         let Some(confirm) = self.confirm.take() else {
             return;
         };
-        if let Some(label) = confirm.automerge.clone() {
-            self.add_automerge_label(confirm, label);
-            return;
-        }
         self.set_notice(format!("{} {}…", if confirm.to_draft { "turning" } else { "marking" }, if confirm.to_draft { format!("{} back into a draft", confirm.id) } else { format!("{} ready", confirm.id) }));
         let change = if confirm.to_draft { self.drafter.clone() } else { self.readier.clone() };
         let done = self.ready_done.0.clone();
@@ -2266,18 +2253,19 @@ impl App {
         });
     }
 
-    fn add_automerge_label(&mut self, confirm: Confirm, label: String) {
-        let Some((repo, number)) = url_parts(&confirm.url) else {
+    fn add_automerge_label(&mut self, url: &str, id: &str, label: String) {
+        let id = id.to_string();
+        let Some((repo, number)) = url_parts(url) else {
             self.set_notice("not a pull request link".into());
             return;
         };
-        self.set_notice(format!("turning automerge on for {}…", confirm.id));
+        self.set_notice(format!("turning automerge on for {id}…"));
         let (labeler, done) = (self.labeler.clone(), self.ready_done.0.clone());
         let wake = self.feed.as_ref().map(|(_, w)| w.clone());
         std::thread::spawn(move || {
             let result = match labeler(&repo, number, &label, true) {
-                Ok(()) => Ok(format!("automerge is on for {} (added \"{label}\")", confirm.id)),
-                Err(e) => Err(format!("could not turn automerge on: {}: {e}", confirm.id)),
+                Ok(()) => Ok(format!("automerge is on for {id} (added \"{label}\")")),
+                Err(e) => Err(format!("could not turn automerge on: {id}: {e}")),
             };
             let _ = done.send(result);
             if let Some(wake) = wake {

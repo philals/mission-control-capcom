@@ -962,7 +962,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("W", "slow polling while this pane is not in focus: on or off (saved)".into()),
         row("m", "mark the selected draft ready for review, or turn a ready PR back into a draft (asks first)".into()),
         row("t / v", "tick auto-fix / auto-review on the selected pull request".into()),
-        row("g", "automerge on the selected pull request: its merge bot's label, on (asks first) or off".into()),
+        row("g", "automerge on the selected pull request: its merge bot's label, on or off".into()),
         row("a", "go to the agent that made the selected pull request".into()),
         row("d", "show or hide completed stories (list)".into()),
         row("Esc  b", "back to the list, or close a sheet".into()),
@@ -2661,39 +2661,25 @@ mod tests {
     }
 
     #[test]
-    fn turning_automerge_on_asks_first_says_what_is_in_the_way_and_adds_the_repos_own_label() {
+    fn turning_automerge_on_adds_the_repos_own_label_at_once_without_asking() {
         let (_root, mut app, _, _) = autopilot_app();
         let calls = label_calls(&mut app, Ok(()));
         app.apply_prs(Ok(vec![merge_bot_pr(1, &[], Review::Required)]));
         let out = render(&app, 170, 44);
         let (x, y) = find(&out, "[ ] automerge");
         app.on_click(x + 2, y);
-        assert!(calls.lock().unwrap().is_empty(), "the click only asks");
-        let out = render(&app, 170, 44);
-        for want in ["Turn on automerge?", "merges it by itself once it is approved", "adds the label \"automerge", "it would wait: it needs an approval", "[ y Turn on automerge ]"] {
-            assert!(out.contains(want), "missing {want:?}:\n{out}");
-        }
-        assert_readable(&app, 170, 44, "the automerge question");
-        app.on_key(KeyCode::Char('n'), false);
-        assert!(calls.lock().unwrap().is_empty() && app.confirm.is_none(), "no without a yes");
-        app.focus = Focus::Prs;
-        app.on_key(KeyCode::Char('g'), false);
-        let out = render(&app, 170, 44);
-        let (yx, yy) = find(&out, "[ y Turn on automerge ]");
-        app.on_click(yx + 2, yy);
+        assert!(app.confirm.is_none(), "no question");
         wait_for_notice(&mut app, "automerge is on");
         assert_eq!(*calls.lock().unwrap(), vec!["acme/api#1 +automerge 🚀".to_string()], "the first label the repo names, exactly");
         assert!(app.current_notice().is_some_and(|n| n.contains("added \"automerge 🚀\"")), "{:?}", app.current_notice());
     }
 
     #[test]
-    fn the_question_says_when_nothing_is_in_the_way_and_a_failure_is_reported() {
+    fn a_failure_to_turn_automerge_on_is_reported() {
         let (_root, mut app, _, _) = autopilot_app();
         app.apply_prs(Ok(vec![merge_bot_pr(1, &[], Review::Approved)]));
         app.focus = Focus::Prs;
         app.on_key(KeyCode::Char('g'), false);
-        assert!(render(&app, 170, 44).contains("nothing is in the way: it can merge straight away"));
-        app.on_key(KeyCode::Enter, false);
         wait_for_notice(&mut app, "could not turn automerge on");
         let notice = app.current_notice().unwrap().to_string();
         assert!(notice.contains("acme/api#1") && notice.contains("no network in tests"), "{notice}");
@@ -2746,15 +2732,15 @@ mod tests {
         app.pr_sheet = true;
         assert!(render(&app, 170, 50).contains("off (its label is \"automerge"), "the sheet names the repo's own label");
         app.pr_sheet = false;
-        open_palette_with(&mut app, "automerge");
-        assert!(render(&app, 170, 44).contains("Turn on automerge for acme/api#1"));
-        app.on_key(KeyCode::Enter, false);
-        assert!(app.confirm.as_ref().is_some_and(|c| c.automerge.is_some()), "the palette asks first too");
-        app.confirm = None;
         let out = render(&app, 170, 44);
         let (x, y) = find(&out, "[ ] automerge");
         app.on_hover(x + 2, y);
         assert!(render(&app, 170, 44).lines().last().unwrap().contains("automerge: the merge bot merges this PR by itself"), "the tip says what it does");
+        open_palette_with(&mut app, "automerge");
+        assert!(render(&app, 170, 44).contains("Turn on automerge for acme/api#1"));
+        app.on_key(KeyCode::Enter, false);
+        assert!(app.confirm.is_none(), "the palette does not ask either");
+        wait_for_notice(&mut app, "could not turn automerge on");
     }
 
     #[test]
