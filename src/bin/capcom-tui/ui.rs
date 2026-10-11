@@ -988,7 +988,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{App, BottomTab, Focus, Screen};
+    use crate::app::{pr_diff_url, App, BottomTab, Focus, Screen};
     use ratatui::crossterm::event::KeyCode;
     use crate::runs::{Batch, Job, Run, RunState};
     use crate::prs::{Check, CheckState, PullRequest, Review};
@@ -1560,7 +1560,7 @@ mod tests {
         let out = render(&app, 170, 44);
         let (x, y) = find(&out, "Unrelated chore");
         app.on_click(x, y);
-        assert_eq!(*log.borrow(), vec!["https://github.com/acme/api/pull/99".to_string()]);
+        assert_eq!(*log.borrow(), vec!["https://github.com/acme/api/pull/99/files".to_string()], "a click goes straight to the diff");
         let out = render(&app, 170, 44);
         let (x, y) = find(&out, "Unrelated chore");
         app.on_click(x, y);
@@ -1568,7 +1568,7 @@ mod tests {
         assert!(!app.pr_sheet);
         let (x, y) = find(&out, "Add notices");
         app.on_click(x, y);
-        assert_eq!(log.borrow().last().map(String::as_str), Some("https://github.com/acme/widgets/pull/12"), "a PR that needs you opens at the first click");
+        assert_eq!(log.borrow().last().map(String::as_str), Some("https://github.com/acme/widgets/pull/12/files"), "a PR that needs you opens at the first click");
     }
 
     #[test]
@@ -1586,7 +1586,7 @@ mod tests {
         assert!(out.contains("Ready for review"), "{out}");
         let (bx, by) = find(&out, "[ o Open in browser ]");
         app.on_click(bx + 3, by);
-        assert_eq!(*log.borrow(), vec!["https://github.com/acme/widgets/pull/12".to_string()]);
+        assert_eq!(*log.borrow(), vec!["https://github.com/acme/widgets/pull/12/files".to_string()]);
         assert!(app.pr_sheet, "opening the browser keeps the sheet");
         app.on_click(0, 0);
         assert!(!app.pr_sheet);
@@ -1662,6 +1662,25 @@ mod tests {
         assert_eq!(*copied.borrow(), vec!["https://github.com/acme/widgets/pull/12".to_string()]);
         assert!(opened.borrow().is_empty());
         assert!(render(&app, 170, 44).contains("copied acme/widgets#12"));
+    }
+
+    #[test]
+    fn a_click_goes_to_the_diff_but_a_copied_link_and_a_check_without_a_link_stay_on_the_pr() {
+        assert_eq!(pr_diff_url("https://github.com/acme/api/pull/7"), "https://github.com/acme/api/pull/7/files");
+        assert_eq!(pr_diff_url("https://github.com/acme/api/pull/7/"), "https://github.com/acme/api/pull/7/files");
+        assert_eq!(pr_diff_url("https://github.com/acme/api/pull/7/files"), "https://github.com/acme/api/pull/7/files", "already inside the PR");
+        assert_eq!(pr_diff_url("https://github.com/acme/api/pull/7/checks"), "https://github.com/acme/api/pull/7/checks");
+        assert_eq!(pr_diff_url("https://github.com/acme/api/actions/runs/7"), "https://github.com/acme/api/actions/runs/7", "not a PR");
+        assert_eq!(pr_diff_url("https://github.com/acme/api/pull/x"), "https://github.com/acme/api/pull/x");
+        let (_root, mut app) = with_prs();
+        let opened = recorder(&mut app);
+        let copied = copies(&mut app);
+        app.focus = Focus::Prs;
+        app.pr_sel = 0;
+        app.on_key(KeyCode::Char('c'), false);
+        assert_eq!(*copied.borrow(), vec!["https://github.com/acme/widgets/pull/12".to_string()], "the link you copy is the PR's own page");
+        app.on_key(KeyCode::Char('o'), false);
+        assert_eq!(*opened.borrow(), vec!["https://github.com/acme/widgets/pull/12/files".to_string()]);
     }
 
     #[test]
@@ -2223,7 +2242,7 @@ mod tests {
         let (mx, my) = find(&out, "Open acme/api#99 on GitHub");
         assert!(mx.abs_diff(x) < 12 && my.abs_diff(y) < 6, "it opens by the click: menu at ({mx},{my}), click at ({x},{y})");
         app.on_click(mx + 2, my);
-        assert_eq!(*opened.borrow(), vec!["https://github.com/acme/api/pull/99".to_string()]);
+        assert_eq!(*opened.borrow(), vec!["https://github.com/acme/api/pull/99/files".to_string()]);
         assert!(app.palette.is_none());
         app.on_right_click(x + 3, y);
         app.on_key(KeyCode::Char('j'), false);
@@ -3845,7 +3864,7 @@ mod tests {
         let (x, y) = find(&out, "Add notices");
         assert_eq!(find(&out, "acme/widgets#12").1, y + 1, "the repo line directly follows a one-line title");
         app.on_click(x, y);
-        assert_eq!(*log.borrow(), vec!["https://github.com/acme/widgets/pull/12".to_string()]);
+        assert_eq!(*log.borrow(), vec!["https://github.com/acme/widgets/pull/12/files".to_string()]);
     }
 
     fn runs_x(out: &str) -> u16 {
