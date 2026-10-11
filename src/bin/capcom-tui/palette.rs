@@ -40,6 +40,7 @@ pub enum Action {
     PrAutoFix(String),
     PrAutoReview(String),
     PrReady(String),
+    PrDraft(String),
 }
 
 #[derive(Clone, Debug)]
@@ -127,8 +128,10 @@ pub fn pr_entries(row: &PrRow) -> Vec<Entry> {
     if let Some(on) = row.auto_review {
         list.push(entry(format!("Turn {} auto-review for {id}", if on { "off" } else { "on" }), "v", Action::PrAutoReview(url.clone())));
     }
-    if row.live.is_some_and(|pr| pr.is_draft) {
-        list.push(entry(format!("Mark {id} ready for review"), "m", Action::PrReady(url)));
+    match row.live.map(|pr| pr.is_draft) {
+        Some(true) => list.push(entry(format!("Mark {id} ready for review"), "m", Action::PrReady(url))),
+        Some(false) => list.push(entry(format!("Turn {id} back into a draft"), "m", Action::PrDraft(url))),
+        None => {}
     }
     list
 }

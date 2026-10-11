@@ -1724,23 +1724,124 @@ mod tests {
         assert_eq!(calls.lock().unwrap().len(), 1);
     }
 
+    fn draft_calls(app: &mut App) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let sink = log.clone();
+        app.drafter = std::sync::Arc::new(move |url| {
+            sink.lock().unwrap().push(url.to_string());
+            Ok(())
+        });
+        log
+    }
+
     #[test]
-    fn keys_answer_the_confirmation_and_ready_prs_have_no_clickable_badge() {
+    fn keys_answer_the_confirmation_for_a_draft_and_nothing_changes_without_a_yes() {
         let (_root, mut app) = with_prs();
         let calls = ready_calls(&mut app);
+        let drafts = draft_calls(&mut app);
+        app.focus = Focus::Prs;
+        app.pr_sel = 2;
+        app.on_key(KeyCode::Char('m'), false);
+        assert!(app.confirm.as_ref().is_some_and(|c| !c.to_draft), "a draft is asked about becoming ready");
+        let out = render(&app, 170, 44);
+        assert!(out.contains("Mark ready for review?") && out.contains("[ y Mark ready ]") && out.contains("Reviewers are notified"), "{out}");
+        app.on_key(KeyCode::Esc, false);
+        assert!(app.confirm.is_none() && calls.lock().unwrap().is_empty() && drafts.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_ready_pr_is_turned_back_into_a_draft_only_after_asking() {
+        let (_root, mut app) = with_prs();
+        let calls = ready_calls(&mut app);
+        let drafts = draft_calls(&mut app);
         app.focus = Focus::Prs;
         app.pr_sel = 0;
         app.on_key(KeyCode::Char('m'), false);
-        assert!(app.confirm.is_none(), "a ready pull request is not asked about");
+        assert!(app.confirm.as_ref().is_some_and(|c| c.to_draft), "a ready PR is asked about going back to draft");
+        let out = render(&app, 170, 44);
+        assert!(out.contains("Turn back into a draft?") && out.contains("[ y Turn into a draft ]") && out.contains("auto-merge stops"), "{out}");
+        assert!(out.contains("acme/widgets#12") && out.contains("Add notices"), "it says which PR:\n{out}");
+        assert_readable(&app, 170, 44, "the back-to-draft question");
+        app.on_key(KeyCode::Char('n'), false);
+        assert!(app.confirm.is_none() && drafts.lock().unwrap().is_empty(), "no without a yes");
+        app.on_key(KeyCode::Char('m'), false);
+        app.on_key(KeyCode::Char('y'), false);
+        wait_for_notice(&mut app, "draft again");
+        assert_eq!(*drafts.lock().unwrap(), vec!["https://github.com/acme/widgets/pull/12".to_string()]);
+        assert!(calls.lock().unwrap().is_empty(), "the other direction was not called");
+        assert!(app.current_notice().is_some_and(|n| n.contains("acme/widgets#12 is a draft again")), "{:?}", app.current_notice());
+    }
+
+    #[test]
+    fn clicking_the_ready_badge_asks_and_the_yes_button_turns_it_into_a_draft() {
+        let (_root, mut app) = with_prs();
+        let drafts = draft_calls(&mut app);
         let out = render(&app, 170, 44);
         let (x, y) = find(&out, "[READY]");
         app.on_click(x + 2, y);
-        assert!(app.confirm.is_none());
-        app.pr_sel = 2;
-        app.on_key(KeyCode::Char('m'), false);
-        assert!(app.confirm.is_some());
+        assert!(app.confirm.as_ref().is_some_and(|c| c.to_draft && c.id == "acme/widgets#12"));
+        assert!(drafts.lock().unwrap().is_empty(), "the click only asks");
+        let out = render(&app, 170, 44);
+        let (yx, yy) = find(&out, "[ y Turn into a draft ]");
+        app.on_click(yx + 2, yy);
+        wait_for_notice(&mut app, "draft again");
+        assert_eq!(drafts.lock().unwrap().len(), 1);
+        // and the draft badge still goes the other way
+        let calls = ready_calls(&mut app);
+        let out = render(&app, 170, 44);
+        let (dx, dy) = find(&out, "[DRAFT]");
+        app.on_click(dx + 2, dy);
+        assert!(app.confirm.as_ref().is_some_and(|c| !c.to_draft));
+        app.on_key(KeyCode::Enter, false);
+        wait_for_notice(&mut app, "ready for review");
+        assert_eq!(calls.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_refusal_turning_a_pr_into_a_draft_is_reported_and_a_pr_not_in_the_list_is_not_asked_about() {
+        let (_root, mut app) = with_prs();
+        app.drafter = std::sync::Arc::new(|_| Err("not permitted".into()));
+        app.pr_sel = 0;
+        app.ask_mark_draft(0);
+        app.confirm_ready();
+        wait_for_notice(&mut app, "could not");
+        let notice = app.current_notice().unwrap().to_string();
+        assert!(notice.contains("could not turn it back into a draft") && notice.contains("acme/widgets#12") && notice.contains("not permitted"), "{notice}");
+        app.ask_mark_draft(2);
+        assert!(app.confirm.is_none(), "#99 is already a draft");
+        app.open_story("PROJ-2");
         app.on_key(KeyCode::Esc, false);
-        assert!(app.confirm.is_none() && calls.lock().unwrap().is_empty());
+        let (_root, mut off) = with_prs();
+        off.focus = Focus::Prs;
+        off.apply_prs(Ok(vec![]));
+        off.ask_toggle_draft(0);
+        assert!(off.confirm.is_none());
+    }
+
+    #[test]
+    fn the_palette_menu_and_tooltip_offer_both_directions() {
+        let (_root, mut app) = with_prs();
+        app.focus = Focus::Prs;
+        app.pr_sel = 0;
+        open_palette_with(&mut app, "draft");
+        let out = render(&app, 170, 44);
+        assert!(out.contains("Turn acme/widgets#12 back into a draft") && !out.contains("Mark acme/widgets#12 ready"), "{out}");
+        let drafts = draft_calls(&mut app);
+        app.on_key(KeyCode::Enter, false);
+        assert!(app.confirm.as_ref().is_some_and(|c| c.to_draft), "the palette asks first too");
+        assert!(drafts.lock().unwrap().is_empty());
+        app.confirm = None;
+        app.pr_sel = 2;
+        open_palette_with(&mut app, "ready");
+        assert!(render(&app, 170, 44).contains("Mark acme/api#99 ready for review"));
+        app.on_key(KeyCode::Esc, false);
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "[READY]");
+        app.on_hover(x + 2, y);
+        assert!(render(&app, 170, 44).lines().last().unwrap().contains("turn this PR back into a draft"), "the tip says what the click does");
+        let (x, y) = find(&out, "[DRAFT]");
+        app.on_hover(x + 2, y);
+        assert!(render(&app, 170, 44).lines().last().unwrap().contains("mark this draft ready for review"));
     }
 
     #[test]
