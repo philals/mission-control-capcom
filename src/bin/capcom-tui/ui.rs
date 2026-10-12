@@ -2778,7 +2778,7 @@ mod tests {
         let (_root, mut app, fake, _) = autopilot_app();
         app.autofix = true;
         let mut cancelled = red(1, "a");
-        cancelled.feedback.cancelled = vec![cancelled.checks[0].name.clone()];
+        cancelled.checks[0].state = CheckState::Cancelled;
         let mut running = red(2, "b");
         running.checks.push(Check { name: "slow".into(), workflow: None, state: CheckState::Running, started_at: None, completed_at: None, url: None, external: false });
         let mut pending = with_open_comment(mine(3, "c"), "T1");
