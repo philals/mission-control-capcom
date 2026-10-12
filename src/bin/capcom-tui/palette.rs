@@ -43,6 +43,7 @@ pub enum Action {
     PrDraft(String),
     PrAutoMerge(String),
     PrUnpaste(String),
+    FinishStory,
 }
 
 #[derive(Clone, Debug)]
@@ -169,6 +170,13 @@ pub fn entries_for(app: &App) -> Vec<Entry> {
         if app.selected_task().is_some() {
             list.push(entry("Sync this story's PR states from GitHub", "R", Action::SyncStory));
         }
+    }
+    let open_story = match app.screen {
+        Screen::List => app.visible_stories().get(app.list_sel).copied(),
+        Screen::Board => app.keys.get(app.story).and_then(|k| app.stories.iter().find(|s| &s.key == k)),
+    };
+    if let Some(story) = open_story.filter(|s| s.status != capcom::model::StoryStatus::Done) {
+        list.push(entry(format!("Mark {} done (skips the review)", story.key), "D", Action::FinishStory));
     }
     list.push(entry("Jump to the first red PR", "", Action::JumpToRed));
     list.push(entry("Refresh GitHub now", "r", Action::RefreshGithub));
