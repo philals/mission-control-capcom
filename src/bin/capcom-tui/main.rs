@@ -16,6 +16,7 @@ mod runs;
 mod runs_ui;
 mod settings;
 mod svg;
+mod taskdoc;
 mod theme;
 mod ui;
 

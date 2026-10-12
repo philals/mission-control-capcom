@@ -568,6 +568,9 @@ pub struct App {
     pub col: usize,
     pub row: [usize; MAX_COLUMNS],
     pub detail: bool,
+    /// How far the task sheet's summary is scrolled, and the furthest it can go (set when it is drawn).
+    pub detail_scroll: usize,
+    pub detail_max: std::cell::Cell<usize>,
     pub help: bool,
     pub updated: String,
     pub hits: RefCell<Vec<(Rect, Target)>>,
@@ -688,6 +691,8 @@ impl App {
             col: 0,
             row: [0; MAX_COLUMNS],
             detail: false,
+            detail_scroll: 0,
+            detail_max: std::cell::Cell::new(0),
             help: false,
             updated: now(),
             hits: RefCell::new(Vec::new()),
@@ -1012,6 +1017,26 @@ impl App {
         if let Some(key) = key {
             self.finish_story(&key);
         }
+    }
+
+    pub fn open_detail(&mut self) {
+        self.detail = true;
+        self.detail_scroll = 0;
+    }
+
+    /// Scroll the task sheet's summary, never past its end.
+    pub fn scroll_detail(&mut self, delta: i32) {
+        let max = self.detail_max.get();
+        self.detail_scroll = (self.detail_scroll as i64 + i64::from(delta)).clamp(0, max as i64) as usize;
+    }
+
+    /// What the selected task's file says: the text of its markdown file in the open story's folder.
+    pub fn task_doc(&self, task: &Task) -> Option<String> {
+        let file = std::path::Path::new(&task.file);
+        if file.is_absolute() || file.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return None;
+        }
+        std::fs::read_to_string(self.root.join(self.keys.get(self.story)?).join(file)).ok()
     }
 
     /// A story card dropped on another column.
@@ -2003,7 +2028,7 @@ impl App {
                         self.start_work(&id, status);
                     }
                 }
-                _ if drag.open => self.detail = true,
+                _ if drag.open => self.open_detail(),
                 _ => {}
             }
             return;
@@ -2832,6 +2857,19 @@ impl App {
                 self.close_overlays();
                 return false;
             }
+            KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') | KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End
+                if self.detail && !self.help && !self.pr_sheet && !self.run_sheet =>
+            {
+                match code {
+                    KeyCode::Up | KeyCode::Char('k') => self.scroll_detail(-1),
+                    KeyCode::Down | KeyCode::Char('j') => self.scroll_detail(1),
+                    KeyCode::PageUp => self.scroll_detail(-10),
+                    KeyCode::PageDown => self.scroll_detail(10),
+                    KeyCode::Home => self.scroll_detail(i32::MIN / 2),
+                    _ => self.scroll_detail(i32::MAX / 2),
+                }
+                return false;
+            }
             KeyCode::Char('>') => {
                 self.resize_split(5);
                 return false;
@@ -2990,7 +3028,8 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') => self.move_row(1),
             KeyCode::Char('[') => self.switch_story(-1),
             KeyCode::Char(']') => self.switch_story(1),
-            KeyCode::Enter | KeyCode::Char(' ') => self.detail = !self.detail,
+            KeyCode::Enter | KeyCode::Char(' ') if self.detail => self.detail = false,
+            KeyCode::Enter | KeyCode::Char(' ') => self.open_detail(),
             KeyCode::Char('p') => self.start_selected(Status::Planning),
             KeyCode::Char('i') => self.start_selected(Status::Implementing),
             KeyCode::Char('x') => self.finish_selected(),
@@ -3082,7 +3121,7 @@ impl App {
             Action::PlanTask => self.start_selected(Status::Planning),
             Action::ImplementTask => self.start_selected(Status::Implementing),
             Action::FinishTask => self.finish_selected(),
-            Action::TaskDetails => self.detail = true,
+            Action::TaskDetails => self.open_detail(),
             Action::PrOpen(url) => on_pr(self, &url, &|app, i| app.open_pr(i)),
             Action::PrCopy(url) => on_pr(self, &url, &|app, i| app.copy_pr(i)),
             Action::PrDetails(url) => on_pr(self, &url, &|app, _| app.pr_sheet = true),
@@ -3379,6 +3418,10 @@ impl App {
             if let Some(p) = &mut self.palette {
                 p.move_sel(delta);
             }
+            return;
+        }
+        if self.detail && !self.help && !self.pr_sheet && !self.run_sheet {
+            self.scroll_detail(delta.signum() * 3);
             return;
         }
         if self.detail || self.help || self.pr_sheet || self.run_sheet {
