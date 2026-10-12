@@ -964,6 +964,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("t / v", "tick auto-fix / auto-review on the selected pull request".into()),
         row("g", "automerge on the selected pull request: its merge bot's label, on or off".into()),
         row("a", "go to the agent that made the selected pull request".into()),
+        row("paste  u", "paste a pull request link to follow someone else's PR like your own (auto-fix starts off); u stops following a pasted one".into()),
         row("d", "show or hide completed stories (list)".into()),
         row("Esc  b", "back to the list, or close a sheet".into()),
         row("r", "reload now (it also reloads by itself)".into()),
@@ -2627,6 +2628,82 @@ mod tests {
     }
 
     /// Your PR in a repo whose merge bot reads `automerge 🚀` and `automerge`, out of draft, green.
+
+    fn pasted_pr(number: u64, head: &str) -> PullRequest {
+        let mut pr = red(number, head);
+        pr.feedback.mine = false;
+        pr.feedback.pasted = true;
+        pr
+    }
+
+    #[test]
+    fn pasting_a_pr_link_follows_it_with_auto_fix_off_even_when_auto_fix_is_on_by_default() {
+        let (root, mut app, fake, _) = autopilot_app();
+        app.settings_path = Some(root.path().join("tui.json"));
+        app.autofix = true;
+        app.autocopilot = true;
+        app.on_paste("https://github.com/acme/api/pull/7/files\n");
+        assert!(app.current_notice().is_some_and(|n| n.contains("added acme/api#7") && n.contains("auto-fix is off")), "{:?}", app.current_notice());
+        assert_eq!(crate::settings::load(app.settings_path.as_ref().unwrap()).pasted_prs, vec!["https://github.com/acme/api/pull/7".to_string()], "remembered for next time");
+        app.on_paste("https://github.com/acme/api/pull/7");
+        assert!(app.current_notice().is_some_and(|n| n.contains("already in the list")));
+        app.apply_prs(Ok(vec![pasted_pr(7, "sha1")]));
+        settle(&mut app);
+        assert!(fake.resumes.lock().unwrap().is_empty(), "someone else's red PR is left alone until you tick auto-fix");
+        let out = render(&app, 170, 44);
+        assert!(out.contains("pasted") && out.contains("[ ] auto-fix"), "it has the same ticks as your own:\n{out}");
+        app.focus = Focus::Prs;
+        app.on_key(KeyCode::Char('t'), false);
+        app.apply_prs(Ok(vec![pasted_pr(7, "sha1")]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 1, "ticked: the agent is asked like for your own PR");
+    }
+
+    #[test]
+    fn a_pasted_pr_gets_the_automerge_tick_and_a_pr_that_is_not_pasted_or_yours_does_not() {
+        let (_root, mut app, _, _) = autopilot_app();
+        let mut pasted = merge_bot_pr(1, &[], Review::Required);
+        pasted.feedback.mine = false;
+        pasted.feedback.pasted = true;
+        app.apply_prs(Ok(vec![pasted]));
+        assert!(render(&app, 170, 44).contains("[ ] automerge"));
+        let mut stranger = merge_bot_pr(2, &[], Review::Required);
+        stranger.feedback.mine = false;
+        app.apply_prs(Ok(vec![stranger]));
+        assert!(!render(&app, 170, 44).contains("[ ] automerge"));
+    }
+
+    #[test]
+    fn u_takes_a_pasted_pr_out_again_and_refuses_for_one_that_was_not_pasted() {
+        let (root, mut app, _, _) = autopilot_app();
+        app.settings_path = Some(root.path().join("tui.json"));
+        app.on_paste("https://github.com/acme/api/pull/7");
+        app.apply_prs(Ok(vec![pasted_pr(7, "sha1"), mine(1, "sha2")]));
+        app.focus = Focus::Prs;
+        app.pr_sel = app.pr_rows().iter().position(|r| r.number == Some(1)).unwrap();
+        app.on_key(KeyCode::Char('u'), false);
+        assert!(app.current_notice().is_some_and(|n| n.contains("only a PR you pasted")), "{:?}", app.current_notice());
+        app.pr_sel = app.pr_rows().iter().position(|r| r.number == Some(7)).unwrap();
+        app.on_key(KeyCode::Char('u'), false);
+        assert!(app.pr_rows().iter().all(|r| r.number != Some(7)));
+        assert!(crate::settings::load(app.settings_path.as_ref().unwrap()).pasted_prs.is_empty());
+    }
+
+    #[test]
+    fn a_pasted_pr_the_feed_reports_gone_is_forgotten_with_a_notice() {
+        let (root, mut app, _, _) = autopilot_app();
+        app.settings_path = Some(root.path().join("tui.json"));
+        let shared = std::sync::Arc::new(std::sync::Mutex::new(crate::prs::Pasted::default()));
+        app.attach_pasted(shared.clone());
+        app.on_paste("https://github.com/acme/api/pull/7");
+        assert_eq!(shared.lock().unwrap().urls.len(), 1, "the feed is told what to look up");
+        shared.lock().unwrap().gone.push("https://github.com/acme/api/pull/7".into());
+        app.poll_feed();
+        assert!(app.current_notice().is_some_and(|n| n.contains("acme/api#7") && n.contains("no longer followed")), "{:?}", app.current_notice());
+        assert!(shared.lock().unwrap().urls.is_empty());
+        assert!(crate::settings::load(app.settings_path.as_ref().unwrap()).pasted_prs.is_empty());
+    }
+
     fn merge_bot_pr(number: u64, labels: &[&str], review: Review) -> PullRequest {
         let mut pr = mine(number, "sha1");
         pr.is_draft = false;

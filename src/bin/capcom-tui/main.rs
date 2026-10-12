@@ -176,11 +176,15 @@ fn main() -> Result<()> {
         app.prs.disabled = true;
     } else {
         let cadence = prs::Cadence::default();
-        let live: Arc<dyn prs::PrSource> = Arc::new(prs::GhSource::new(cli.pr_query.clone()));
-        let source: Arc<dyn prs::PrSource> = match shared_cache() {
+        let gh = Arc::new(prs::GhSource::new(cli.pr_query.clone()));
+        let live: Arc<dyn prs::PrSource> = gh.clone();
+        let listed: Arc<dyn prs::PrSource> = match shared_cache() {
             Some(cache) => Arc::new(prs::SharedSource::new(live, cache, &cli.pr_query, cadence)),
             None => live,
         };
+        let pasted = Arc::new(Mutex::new(prs::Pasted::default()));
+        app.attach_pasted(pasted.clone());
+        let source: Arc<dyn prs::PrSource> = Arc::new(prs::WithPasted { inner: listed, gh, pasted });
         let (rx, wake) = prs::spawn_with(source, cadence, app.attention.clone());
         wakes.push(wake.clone());
         app.attach_feed(rx, wake);

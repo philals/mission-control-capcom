@@ -15,7 +15,18 @@ pub const DEFAULT_QUERY: &str =
 
 /// The PR list. `reviewThreads` is left out on purpose: GitHub charges for the largest result a
 /// connection could return, so 50 threads each with a comment, on up to 50 PRs, cost about 28 points a poll.
-const GRAPHQL: &str = r#"query($q: String!) { rateLimit { cost remaining resetAt } search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { id number title url isDraft viewerDidAuthor headRefOid mergeable mergeStateStatus updatedAt reviewDecision comments { totalCount } reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on Bot { login } } } } latestReviews(first: 20) { nodes { author { login } state submittedAt } } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { workflow { name } } } } ... on StatusContext { context state targetUrl } } } } } } } }"#;
+/// What is asked of every PR, in the search and in a lookup by number.
+macro_rules! pr_fields {
+    () => {
+        r#"id number title url isDraft viewerDidAuthor headRefOid mergeable mergeStateStatus updatedAt reviewDecision comments { totalCount } reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on Bot { login } } } } latestReviews(first: 20) { nodes { author { login } state submittedAt } } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { workflow { name } } } } ... on StatusContext { context state targetUrl } } } }"#
+    };
+}
+
+const GRAPHQL: &str = concat!(
+    "query($q: String!) { rateLimit { cost remaining resetAt } search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { ",
+    pr_fields!(),
+    " } } } }"
+);
 
 /// The conversations, asked only for the few PRs Copilot has reviewed.
 const THREADS_GRAPHQL: &str = r#"query($ids: [ID!]!) { rateLimit { cost remaining resetAt } nodes(ids: $ids) { ... on PullRequest { id reviewThreads(first: 50) { nodes { id isResolved isOutdated comments(first: 1) { nodes { author { login } } } } } } } }"#;
@@ -137,8 +148,11 @@ pub struct Thread {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Feedback {
-    /// You wrote this PR (capcom only ever acts on those).
+    /// You wrote this PR.
     pub mine: bool,
+    /// You pasted this PR in: it is someone else's, but capcom treats it like yours (auto-fix starts off).
+    #[serde(default)]
+    pub pasted: bool,
     pub head: String,
     pub copilot: CopilotState,
     pub copilot_reviewed_at: Option<String>,
@@ -155,6 +169,11 @@ pub fn is_copilot(login: &str) -> bool {
 }
 
 impl PullRequest {
+    /// A PR capcom acts on: one you wrote, or one you pasted in.
+    pub fn managed(&self) -> bool {
+        self.feedback.mine || self.feedback.pasted
+    }
+
     /// Unresolved conversations started by Copilot.
     pub fn copilot_open(&self) -> Vec<&Thread> {
         self.feedback.threads.iter().filter(|t| t.by_copilot && !t.resolved).collect()
@@ -404,6 +423,7 @@ fn parse_feedback(node: &Value) -> Feedback {
     let threads = parse_threads(node);
     Feedback {
         mine: node.get("viewerDidAuthor").and_then(Value::as_bool).unwrap_or(false),
+        pasted: false,
         head: text(node, "/headRefOid").unwrap_or_default(),
         copilot: if requested {
             CopilotState::Requested
@@ -517,6 +537,53 @@ pub fn parse_page(json: &str) -> Result<Page> {
     };
     let prs = nodes.iter().filter_map(|n| parse_pr(n).map(|pr| (text(n, "/id"), pr))).collect();
     Ok(Page { prs, rate: parse_rate(&value) })
+}
+
+/// The owner, repository and number of a pull request link (`…/pull/12`, also with `/files` after it).
+pub fn pr_ref(url: &str) -> Option<(String, String, u64)> {
+    let rest = url.trim().strip_prefix("https://github.com/")?;
+    let mut parts = rest.split('/');
+    let (owner, name) = (parts.next()?, parts.next()?);
+    if parts.next()? != "pull" {
+        return None;
+    }
+    let number: u64 = parts.next()?.parse().ok()?;
+    let valid = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    (valid(owner) && valid(name) && number > 0).then(|| (owner.to_string(), name.to_string(), number))
+}
+
+/// One query for several PRs by number; the names and numbers travel as variables, never in the text.
+fn lookup_query(refs: &[(String, String, u64)]) -> (String, Value) {
+    let mut declared = Vec::new();
+    let mut body = String::new();
+    let mut vars = serde_json::Map::new();
+    for (i, (owner, name, number)) in refs.iter().enumerate() {
+        declared.push(format!("$o{i}: String!, $r{i}: String!, $n{i}: Int!"));
+        body.push_str(&format!(" p{i}: repository(owner: $o{i}, name: $r{i}) {{ pullRequest(number: $n{i}) {{ state {} }} }}", pr_fields!()));
+        vars.insert(format!("o{i}"), Value::from(owner.as_str()));
+        vars.insert(format!("r{i}"), Value::from(name.as_str()));
+        vars.insert(format!("n{i}"), Value::from(*number));
+    }
+    (format!("query({}) {{ rateLimit {{ cost remaining resetAt }}{body} }}", declared.join(", ")), Value::Object(vars))
+}
+
+/// The answer to `lookup_query`: for each PR asked about, the PR if it is open (marked as pasted), else
+/// None (merged, closed, or not found).
+fn parse_lookup(json: &str, count: usize) -> Result<(Vec<Option<(Option<String>, PullRequest)>>, Option<Rate>)> {
+    let value: Value = serde_json::from_str(json).context("parsing gh output")?;
+    let Some(data) = value.get("data").filter(|d| d.is_object()) else {
+        let message = text(&value, "/errors/0/message").unwrap_or_else(|| "unexpected response from GitHub".to_string());
+        bail!("{message}");
+    };
+    let found = (0..count)
+        .map(|i| {
+            let node = data.pointer(&format!("/p{i}/pullRequest")).filter(|n| text(n, "/state").as_deref() == Some("OPEN"))?;
+            let mut pr = parse_pr(node)?;
+            pr.feedback.pasted = true;
+            Some((text(node, "/id"), pr))
+        })
+        .collect();
+    Ok((found, parse_rate(&value)))
 }
 
 #[cfg(test)]
@@ -649,6 +716,14 @@ impl GhSource {
         let page = parse_page(&self.graphql(GRAPHQL, &serde_json::json!({ "q": self.query }))?)?;
         let mut rate = page.rate;
         let mut prs = page.prs;
+        self.enrich(&mut prs, &mut rate)?;
+        *self.rate.lock().expect("rate lock") = rate;
+        Ok(prs.into_iter().map(|(_, pr)| pr).collect())
+    }
+
+    /// Add what the list query leaves out: the conversations of Copilot-reviewed PRs, and each repo's
+    /// merge bot settings.
+    fn enrich(&self, prs: &mut Vec<(Option<String>, PullRequest)>, rate: &mut Option<Rate>) -> Result<()> {
         let reviewed: Vec<String> = prs
             .iter()
             .filter(|(_, pr)| pr.feedback.copilot == CopilotState::Reviewed)
@@ -660,7 +735,7 @@ impl GhSource {
             // the list is still worth showing without the conversations, so only a spent budget stops it
             match self.graphql(THREADS_GRAPHQL, &vars).and_then(|json| parse_threads_answer(&json)) {
                 Ok((threads, more)) => {
-                    merge_threads(&mut prs, &threads);
+                    merge_threads(prs, &threads);
                     if let (Some(first), Some(second)) = (rate.as_mut(), more) {
                         first.cost += second.cost;
                         first.remaining = second.remaining;
@@ -670,11 +745,30 @@ impl GhSource {
                 Err(_) => {}
             }
         }
-        let mut repos: Vec<String> = prs.iter().filter(|(_, pr)| pr.feedback.mine).map(|(_, pr)| pr.repo.clone()).collect();
+        let mut repos: Vec<String> = prs.iter().filter(|(_, pr)| pr.managed()).map(|(_, pr)| pr.repo.clone()).collect();
         repos.sort();
         repos.dedup();
-        apply_kodiak(&mut prs, &self.kodiak.lookup(&repos, &crate::kodiak::fetch));
-        *self.rate.lock().expect("rate lock") = rate;
+        apply_kodiak(prs, &self.kodiak.lookup(&repos, &crate::kodiak::fetch));
+        Ok(())
+    }
+
+    /// The pasted PRs, looked up by number: those that are still open, each marked as pasted.
+    pub fn fetch_pasted(&self, urls: &[String]) -> Result<Vec<PullRequest>> {
+        let refs: Vec<(String, String, u64)> = urls.iter().filter_map(|u| pr_ref(u)).collect();
+        if refs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (query, vars) = lookup_query(&refs);
+        let result = self.graphql(&query, &vars).and_then(|json| parse_lookup(&json, refs.len()));
+        let (found, mut rate) = match result {
+            Err(e) if is_rate_limited(&format!("{e:#}")) => return Err(self.limited()),
+            other => other?,
+        };
+        let mut prs: Vec<(Option<String>, PullRequest)> = found.into_iter().flatten().collect();
+        match self.enrich(&mut prs, &mut rate) {
+            Err(e) if is_rate_limited(&format!("{e:#}")) => return Err(self.limited()),
+            other => other?,
+        }
         Ok(prs.into_iter().map(|(_, pr)| pr).collect())
     }
 
@@ -732,6 +826,54 @@ impl PrSource for GhSource {
             Err(e) if is_rate_limited(&format!("{e:#}")) => Err(self.limited()),
             other => other,
         }
+    }
+}
+
+/// The PRs pasted into the panel, shared between the board and the feed. The feed notes the ones GitHub
+/// says are no longer open (merged, closed, gone) in `gone` and drops them, so the board can say so.
+#[derive(Debug, Default)]
+pub struct Pasted {
+    pub urls: Vec<String>,
+    pub gone: Vec<String>,
+}
+
+/// A source that adds the pasted PRs to what `inner` lists. Each copy of capcom has its own, so they are
+/// looked up here and never through the cache the copies share.
+pub struct WithPasted {
+    pub inner: Arc<dyn PrSource>,
+    pub gh: Arc<GhSource>,
+    pub pasted: Arc<Mutex<Pasted>>,
+}
+
+impl WithPasted {
+    fn add(&self, mut prs: Vec<PullRequest>) -> Result<Vec<PullRequest>> {
+        let urls = self.pasted.lock().expect("pasted lock").urls.clone();
+        if urls.is_empty() {
+            return Ok(prs);
+        }
+        let extra = self.gh.fetch_pasted(&urls)?;
+        let open = |url: &str| extra.iter().any(|p| p.url.trim_end_matches('/').eq_ignore_ascii_case(url.trim_end_matches('/')));
+        let mut shared = self.pasted.lock().expect("pasted lock");
+        let gone: Vec<String> = urls.iter().filter(|u| !open(u)).cloned().collect();
+        shared.urls.retain(|u| !gone.contains(u));
+        shared.gone.extend(gone);
+        prs.retain(|p| !extra.iter().any(|e| e.url.eq_ignore_ascii_case(&p.url)));
+        prs.extend(extra);
+        Ok(prs)
+    }
+}
+
+impl PrSource for WithPasted {
+    fn rate(&self) -> Option<Rate> {
+        self.inner.rate()
+    }
+
+    fn fetch(&self) -> Result<Vec<PullRequest>> {
+        self.add(self.inner.fetch()?)
+    }
+
+    fn fetch_forced(&self) -> Result<Vec<PullRequest>> {
+        self.add(self.inner.fetch_forced()?)
     }
 }
 
@@ -981,6 +1123,32 @@ mod tests {
         let mut no_checks = green_pr(Review::Required);
         no_checks.checks.clear();
         assert_eq!(no_checks.waiting_for(), None);
+    }
+
+    #[test]
+    fn a_pull_request_link_names_its_repository_and_number_and_nothing_else_is_one() {
+        assert_eq!(pr_ref("https://github.com/acme/api/pull/12"), Some(("acme".into(), "api".into(), 12)));
+        assert_eq!(pr_ref("  https://github.com/acme/api/pull/12/files\n"), Some(("acme".into(), "api".into(), 12)));
+        for bad in ["https://github.com/acme/api/actions/runs/12", "https://github.com/acme/api/pull/x", "https://github.com/acme/api/pull/0", "http://github.com/acme/api/pull/1", "https://github.com/ac me/api/pull/1", "https://github.com/acme/api/issues/1", "nonsense"] {
+            assert_eq!(pr_ref(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_lookup_sends_names_and_numbers_as_variables_and_reads_only_open_prs_as_pasted() {
+        let refs = vec![("acme".to_string(), "api".to_string(), 1), ("acme".to_string(), "web".to_string(), 2), ("acme".to_string(), "gone".to_string(), 3)];
+        let (query, vars) = lookup_query(&refs);
+        assert!(!query.contains("acme") && !query.contains("web"), "nothing typed is spliced into the query text");
+        assert_eq!((vars["o1"].as_str(), vars["r1"].as_str(), vars["n1"].as_u64()), (Some("acme"), Some("web"), Some(2)));
+        let open = r#"{"state":"OPEN","id":"X1","number":1,"title":"One","url":"https://github.com/acme/api/pull/1","isDraft":false,"viewerDidAuthor":false,"repository":{"nameWithOwner":"acme/api"}}"#;
+        let merged = open.replace("OPEN", "MERGED");
+        let json = format!(r#"{{"data":{{"rateLimit":{{"cost":1,"remaining":4990,"resetAt":"2026-10-12T01:00:00Z"}},"p0":{{"pullRequest":{open}}},"p1":{{"pullRequest":{merged}}},"p2":{{"pullRequest":null}}}}}}"#);
+        let (found, rate) = parse_lookup(&json, 3).unwrap();
+        let first = found[0].as_ref().unwrap();
+        assert!(first.1.feedback.pasted && !first.1.feedback.mine && first.1.managed());
+        assert!(found[1].is_none() && found[2].is_none(), "merged and not-found PRs are not listed");
+        assert_eq!(rate.map(|r| r.remaining), Some(4990));
+        assert!(parse_lookup(r#"{"errors":[{"message":"Bad credentials"}]}"#, 1).unwrap_err().to_string().contains("Bad credentials"));
     }
 
     #[test]

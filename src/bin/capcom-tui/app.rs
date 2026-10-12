@@ -294,6 +294,8 @@ pub struct PrRow<'a> {
     pub auto_review: Option<bool>,
     /// Whether the merge bot's automerge label is on this PR (None for a PR that is not yours or a repo without the bot).
     pub automerge: Option<bool>,
+    /// You pasted this PR in, so it can be taken out again (u).
+    pub pasted: bool,
     /// What capcom has asked the agent so far, such as `⟳ fix round 2/5 sent 3m ago`.
     pub fix: Option<String>,
 }
@@ -645,6 +647,9 @@ pub struct App {
     pub auto_sync: bool,
     checker: Option<(Sender<pr_state::Msg>, Receiver<Lookups>)>,
     watched: Vec<String>,
+    /// Links of the PRs pasted into the PR panel.
+    pasted: Vec<String>,
+    pasted_shared: Option<Arc<Mutex<crate::prs::Pasted>>>,
     pub started: std::time::Instant,
     /// How long each check usually takes, for the "of ~4m" on a running one.
     pub durations: crate::durations::Durations,
@@ -740,6 +745,8 @@ impl App {
             auto_sync: false,
             checker: None,
             watched: Vec::new(),
+            pasted: Vec::new(),
+            pasted_shared: None,
             started: std::time::Instant::now(),
             durations: crate::durations::Durations::default(),
             durations_path: None,
@@ -1088,6 +1095,7 @@ impl App {
                 PrMsg::Result(result) => self.apply_prs(result),
             }
         }
+        self.drop_gone_pasted();
         any
     }
 
@@ -1173,7 +1181,7 @@ impl App {
         let now: std::collections::HashMap<String, Option<String>> =
             items.iter().map(|p| (p.url.clone(), p.feedback.copilot_reviewed_at.clone())).collect();
         if let Some(before) = self.copilot_seen.take() {
-            for pr in items.iter().filter(|p| p.feedback.mine) {
+            for pr in items.iter().filter(|p| p.managed()) {
                 let Some(at) = &pr.feedback.copilot_reviewed_at else {
                     continue;
                 };
@@ -1193,7 +1201,7 @@ impl App {
     /// What is wrong with a PR that its agent should be asked to fix, if anything.
     pub fn fix_needed(pr: &PullRequest) -> Option<FixNeed> {
         use crate::prs::{CopilotState, MergeState};
-        if !pr.feedback.mine {
+        if !pr.managed() {
             return None;
         }
         let mut failing: Vec<String> = if pr.settled() { pr.real_failures().iter().map(|c| c.name.clone()).collect() } else { Vec::new() };
@@ -1272,7 +1280,7 @@ impl App {
         let Some(store) = self.fix_store.clone() else {
             return;
         };
-        for pr in items.iter().filter(|p| p.feedback.mine) {
+        for pr in items.iter().filter(|p| p.managed()) {
             if self.autocopilot_on(&pr.url)
                 && pr.feedback.copilot == crate::prs::CopilotState::None
                 && self.copilot_tried.insert(pr.url.clone())
@@ -1413,7 +1421,7 @@ impl App {
 
     /// Whether the agent is asked to fix this PR by itself: its own tick, else the default.
     pub fn autofix_on(&self, url: &str) -> bool {
-        self.autofix_prs.get(url).copied().unwrap_or(self.autofix)
+        self.autofix_prs.get(url).copied().unwrap_or(self.autofix && !self.is_pasted(url))
     }
 
     /// The tick box on one PR: switches auto-fix for that PR only, and looks at it straight away.
@@ -1443,7 +1451,7 @@ impl App {
 
     /// Whether Copilot is asked to review this PR by itself: its own tick, else the default.
     pub fn autocopilot_on(&self, url: &str) -> bool {
-        self.autocopilot_prs.get(url).copied().unwrap_or(self.autocopilot)
+        self.autocopilot_prs.get(url).copied().unwrap_or(self.autocopilot && !self.is_pasted(url))
     }
 
     /// The tick box on one PR: ask Copilot to review it (now, if it has not reviewed yet).
@@ -1526,6 +1534,77 @@ impl App {
             *current = wanted;
             drop(current);
             let _ = wake.send(());
+        }
+    }
+
+    pub fn attach_pasted(&mut self, shared: Arc<Mutex<crate::prs::Pasted>>) {
+        self.pasted_shared = Some(shared);
+    }
+
+    /// Hand the pasted links to the feed and have it look right away.
+    fn sync_pasted(&self) {
+        let Some(shared) = &self.pasted_shared else {
+            return;
+        };
+        shared.lock().expect("pasted lock").urls = self.pasted.clone();
+        if let Some((_, wake)) = &self.feed {
+            let _ = wake.send(());
+        }
+    }
+
+    pub fn is_pasted(&self, url: &str) -> bool {
+        self.pasted.iter().any(|u| u.trim_end_matches('/').eq_ignore_ascii_case(url.trim_end_matches('/')))
+    }
+
+    /// A PR pasted into the panel: it is followed like your own, but auto-fix and auto-review start off.
+    pub fn add_pasted_pr(&mut self, url: &str) {
+        let name = url_parts(url).map_or_else(|| url.to_string(), |(repo, n)| format!("{repo}#{n}"));
+        if self.prs.disabled {
+            self.set_notice("the PR panel is off (started with --no-prs), so nothing can be added".into());
+            return;
+        }
+        if self.is_pasted(url) || self.prs.items.iter().any(|p| p.feedback.mine && same_url(&p.url, url)) {
+            self.set_notice(format!("{name} is already in the list"));
+            return;
+        }
+        self.pasted.push(url.to_string());
+        self.save_settings();
+        self.sync_pasted();
+        self.set_notice(format!("added {name}: auto-fix is off for it (t turns it on); u takes it out again"));
+    }
+
+    /// `u` on a pasted PR: stop following it.
+    pub fn unpaste_pr(&mut self, index: usize) {
+        let Some((url, pasted)) = self.pr_rows().get(index).map(|r| (r.url.clone(), r.pasted)) else {
+            return;
+        };
+        if !pasted {
+            self.set_notice("only a PR you pasted in can be taken out of the list".into());
+            return;
+        }
+        self.forget_pasted(&url);
+        self.prs.items.retain(|p| !same_url(&p.url, &url));
+        self.pr_clamp();
+        self.set_notice(format!("stopped following {}", url_parts(&url).map_or(url.clone(), |(repo, n)| format!("{repo}#{n}"))));
+    }
+
+    fn forget_pasted(&mut self, url: &str) {
+        self.pasted.retain(|u| !same_url(u, url));
+        self.autofix_prs.remove(url);
+        self.autocopilot_prs.remove(url);
+        self.save_settings();
+        self.sync_pasted();
+    }
+
+    /// Pasted PRs the feed found no longer open: forget them, and say so.
+    fn drop_gone_pasted(&mut self) {
+        let Some(shared) = &self.pasted_shared else {
+            return;
+        };
+        let gone = std::mem::take(&mut shared.lock().expect("pasted lock").gone);
+        for url in gone {
+            self.forget_pasted(&url);
+            self.set_notice(format!("{} is merged, closed or gone: no longer followed", url_parts(&url).map_or(url.clone(), |(repo, n)| format!("{repo}#{n}"))));
         }
     }
 
@@ -1755,6 +1834,7 @@ impl App {
             autocopilot: self.autocopilot,
             autocopilot_prs: self.autocopilot_prs.iter().map(|(u, on)| (u.clone(), *on)).collect(),
             slow_when_away: self.attention.slow_when_away(),
+            pasted_prs: self.pasted.clone(),
         }
     }
 
@@ -1773,6 +1853,8 @@ impl App {
         self.autocopilot = saved.autocopilot;
         self.autocopilot_prs = saved.autocopilot_prs.into_iter().collect();
         self.attention.set_slow_when_away(saved.slow_when_away);
+        self.pasted = saved.pasted_prs;
+        self.sync_pasted();
         self.sync_watched();
         for (slot, weight) in self.col_weights.iter_mut().zip(saved.columns) {
             *slot = weight;
@@ -2054,13 +2136,14 @@ impl App {
                         repo: p.repo.clone(),
                         number: Some(p.number),
                         title: p.title.clone(),
-                        tag: self.pr_tag(&p.url),
+                        tag: self.pr_tag(&p.url).or_else(|| p.feedback.pasted.then(|| "pasted".to_string())),
                         board_state: None,
                         owner: self.pr_owner(&p.url),
                         has_agent: self.pr_owner(&p.url).is_some() || self.pr_link(&p.url).is_some(),
-                        auto: p.feedback.mine.then(|| self.autofix_on(&p.url)),
-                        auto_review: p.feedback.mine.then(|| self.autocopilot_on(&p.url)),
-                        automerge: Some(p).filter(|p| p.feedback.mine && !p.automerge_labels().is_empty()).map(|p| p.automerge_on()),
+                        auto: p.managed().then(|| self.autofix_on(&p.url)),
+                        auto_review: p.managed().then(|| self.autocopilot_on(&p.url)),
+                        automerge: Some(p).filter(|p| p.managed() && !p.automerge_labels().is_empty()).map(|p| p.automerge_on()),
+                        pasted: p.feedback.pasted,
                         fix: self.fix_label(&p.url),
                     })
                     .collect();
@@ -2093,9 +2176,10 @@ impl App {
                             board_state: Some(pr.state),
                             owner: self.pr_owner(&pr.url),
                             has_agent: true,
-                            auto: live.filter(|p| p.feedback.mine).map(|p| self.autofix_on(&p.url)),
-                            auto_review: live.filter(|p| p.feedback.mine).map(|p| self.autocopilot_on(&p.url)),
-                            automerge: live.filter(|p| p.feedback.mine && !p.automerge_labels().is_empty()).map(|p| p.automerge_on()),
+                            auto: live.filter(|p| p.managed()).map(|p| self.autofix_on(&p.url)),
+                            auto_review: live.filter(|p| p.managed()).map(|p| self.autocopilot_on(&p.url)),
+                            automerge: live.filter(|p| p.managed() && !p.automerge_labels().is_empty()).map(|p| p.automerge_on()),
+                            pasted: live.is_some_and(|p| p.feedback.pasted),
                             fix: self.fix_label(&pr.url),
                         });
                     }
@@ -2196,8 +2280,8 @@ impl App {
         let Some(row) = self.pr_rows().into_iter().nth(index) else {
             return;
         };
-        let Some(pr) = row.live.filter(|p| p.feedback.mine && !p.automerge_labels().is_empty()) else {
-            self.set_notice("automerge needs your own PR in a repo whose merge bot is set up (a .kodiak.toml)".into());
+        let Some(pr) = row.live.filter(|p| p.managed() && !p.automerge_labels().is_empty()) else {
+            self.set_notice("automerge needs your own or a pasted PR in a repo whose merge bot is set up (a .kodiak.toml)".into());
             return;
         };
         let (url, id, repo, number) = (row.url.clone(), pr_id(&row), pr.repo.clone(), pr.number);
@@ -2494,6 +2578,11 @@ impl App {
     }
 
     pub fn on_paste(&mut self, text: &str) {
+        if let Some((owner, name, number)) = crate::prs::pr_ref(text) {
+            self.new_story = None;
+            self.add_pasted_pr(&format!("https://github.com/{owner}/{name}/pull/{number}"));
+            return;
+        }
         if let Some((repo, id)) = parse_run_url(text) {
             self.new_story = None;
             self.add_watch(&repo, id);
@@ -2799,6 +2888,10 @@ impl App {
                 self.toggle_pr_automerge(self.pr_sel);
                 return false;
             }
+            KeyCode::Char('u') if self.focus == Focus::Prs => {
+                self.unpaste_pr(self.pr_sel);
+                return false;
+            }
             KeyCode::Char('o') if self.focus == Focus::Runs => {
                 self.open_selected_run();
                 return false;
@@ -2966,6 +3059,7 @@ impl App {
             Action::PrReady(url) => on_pr(self, &url, &|app, i| app.ask_mark_ready(i)),
             Action::PrDraft(url) => on_pr(self, &url, &|app, i| app.ask_mark_draft(i)),
             Action::PrAutoMerge(url) => on_pr(self, &url, &|app, i| app.toggle_pr_automerge(i)),
+            Action::PrUnpaste(url) => on_pr(self, &url, &|app, i| app.unpaste_pr(i)),
         }
         false
     }
