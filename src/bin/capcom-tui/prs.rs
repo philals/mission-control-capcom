@@ -363,6 +363,21 @@ fn parse_check(ctx: &Value) -> Option<Check> {
     }
 }
 
+/// A re-run leaves the older run of a check in the list beside the new one; GitHub shows only the newest,
+/// so an old failure must not stay red once the same check has passed. A run not started yet is the newest.
+fn latest_runs(checks: Vec<Check>) -> Vec<Check> {
+    let age = |c: &Check| (c.started_at.is_none(), c.started_at.clone());
+    let mut kept: Vec<Check> = Vec::with_capacity(checks.len());
+    for check in checks {
+        match kept.iter().position(|k| k.label() == check.label() && k.external == check.external) {
+            Some(i) if age(&check) >= age(&kept[i]) => kept[i] = check,
+            Some(_) => {}
+            None => kept.push(check),
+        }
+    }
+    kept
+}
+
 fn parse_threads(node: &Value) -> Vec<Thread> {
     let nodes = node.pointer("/reviewThreads/nodes").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
     nodes
@@ -419,7 +434,7 @@ fn parse_pr(node: &Value) -> Option<PullRequest> {
     let checks = node
         .pointer("/statusCheckRollup/contexts/nodes")
         .and_then(Value::as_array)
-        .map(|c| c.iter().filter_map(parse_check).collect())
+        .map(|c| latest_runs(c.iter().filter_map(parse_check).collect()))
         .unwrap_or_default();
     Some(PullRequest {
         repo: text(node, "/repository/nameWithOwner")?,
@@ -966,6 +981,21 @@ mod tests {
         let mut no_checks = green_pr(Review::Required);
         no_checks.checks.clear();
         assert_eq!(no_checks.waiting_for(), None);
+    }
+
+    #[test]
+    fn a_check_that_was_rerun_counts_only_by_its_newest_run() {
+        let run = |state, started: Option<&str>| Check { started_at: started.map(String::from), ..check_of("GreenPipeline", state, false) };
+        let kept = latest_runs(vec![
+            run(CheckState::Failed, Some("2026-10-12T18:23:02Z")),
+            run(CheckState::Passed, Some("2026-10-12T18:24:50Z")),
+            check_of("lint", CheckState::Passed, false),
+        ]);
+        assert_eq!(kept.iter().map(|c| (c.name.as_str(), c.state)).collect::<Vec<_>>(), vec![("GreenPipeline", CheckState::Passed), ("lint", CheckState::Passed)]);
+        let older_last = latest_runs(vec![run(CheckState::Passed, Some("2026-10-12T18:24:50Z")), run(CheckState::Failed, Some("2026-10-12T18:23:02Z"))]);
+        assert_eq!(older_last[0].state, CheckState::Passed, "the order GitHub lists them in does not matter");
+        let queued = latest_runs(vec![run(CheckState::Failed, Some("2026-10-12T18:23:02Z")), run(CheckState::Queued, None)]);
+        assert_eq!(queued[0].state, CheckState::Queued, "a re-run waiting to start replaces the old result");
     }
 
     #[test]
