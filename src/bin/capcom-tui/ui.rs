@@ -1,11 +1,11 @@
 use crate::theme;
 use crate::app::{App, AskKind, BottomTab, Column, Focus, Geometry, Screen, StorySummary, Target, STATUS_ORDER};
 use crate::prs::PullRequest;
-use crate::{panel, runs_ui};
+use crate::{panel, runs_ui, taskdoc};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Paragraph};
 use ratatui::Frame;
 use capcom::model::{Board, PrState, Status, StoryStatus, Task};
 use capcom::rules;
@@ -894,7 +894,9 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let (Some(task), Some(board)) = (app.selected_task(), &app.board) else {
         return;
     };
-    let rect = centered(area, 70, 70);
+    let rect = centered(area, 80, 85);
+    let inner = Rect::new(rect.x + 1, rect.y + 1, rect.width.saturating_sub(2), rect.height.saturating_sub(2));
+    let width = inner.width as usize;
     let deps: Vec<String> = task
         .depends_on
         .iter()
@@ -904,31 +906,57 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         })
         .collect();
     let or_none = |v: Vec<String>| if v.is_empty() { "none".to_string() } else { v.join(", ") };
+    let fact = |label: &str, value: String| row(label, trunc(&value, width.saturating_sub(12)));
     let mut lines = vec![
-        row("Status", task.status.as_str().to_string()),
-        row("Type", task.kind.as_str().to_string()),
+        fact("Status", task.status.as_str().to_string()),
+        fact("Type", task.kind.as_str().to_string()),
     ];
     if let Some(b) = &task.blocked {
         lines.push(Line::from(vec![
             Span::styled(format!("{:<12}", "Blocked"), Style::new().fg(theme::DIM)),
-            Span::styled(b.reason.clone(), Style::new().fg(theme::RED)),
+            Span::styled(trunc(&b.reason, width.saturating_sub(12)), Style::new().fg(theme::RED)),
         ]));
     }
-    lines.push(row("Depends on", or_none(deps)));
-    lines.push(row("Repos", or_none(if task.repos.is_empty() { vec![] } else { vec![rules::repo_summary(&task.repos)] })));
-    lines.push(row("Jira", task.jira_subtask.clone().unwrap_or_else(|| "none".into())));
+    lines.push(fact("Depends on", or_none(deps)));
+    lines.push(fact("Repos", or_none(if task.repos.is_empty() { vec![] } else { vec![rules::repo_summary(&task.repos)] })));
+    lines.push(fact("Jira", task.jira_subtask.clone().unwrap_or_else(|| "none".into())));
     if let Some(a) = &task.agent {
-        lines.push(row("Agent", format!("{} · {} · since {}", a.pane, a.skill, a.started_at)));
+        lines.push(fact("Agent", format!("{} · {} · since {}", a.pane, a.skill, a.started_at)));
     }
-    lines.push(row("File", task.file.clone()));
+    lines.push(fact("File", task.file.clone()));
     lines.push(Line::raw(""));
     lines.push(Line::from(Span::styled("PRs", Style::new().fg(theme::DIM))));
     if task.prs.is_empty() {
         lines.push(Line::raw("  none"));
     }
     for pr in &task.prs {
-        lines.push(Line::raw(format!("  {:<8} {}  {}", pr.state.as_str(), pr.repo, pr.url)));
+        lines.push(Line::raw(trunc(&format!("  {:<8} {}  {}", pr.state.as_str(), pr.repo, pr.url), width)));
     }
+    lines.push(Line::raw(""));
+    let head_height = (lines.len() as u16).min(inner.height);
+    let summary = app.task_doc(task).map_or_else(
+        || taskdoc::Summary { label: "Description", body: "The task file could not be read.".to_string() },
+        |doc| taskdoc::summary(&doc, task.status),
+    );
+    lines.push(Line::from(Span::styled(summary.label, Style::new().fg(theme::DIM))));
+    let head_height = (head_height + 1).min(inner.height);
+    let body = taskdoc::layout(&summary.body, width);
+    let room = inner.height.saturating_sub(head_height) as usize;
+    let max_scroll = body.len().saturating_sub(room);
+    app.detail_max.set(max_scroll);
+    let scroll = app.detail_scroll.min(max_scroll);
+    let mut all = lines;
+    for (kind, text) in body.iter().skip(scroll).take(room) {
+        all.push(match kind {
+            taskdoc::Kind::Heading => Line::from(Span::styled(text.clone(), Style::new().fg(theme::CYAN).add_modifier(Modifier::BOLD))),
+            _ => Line::raw(text.clone()),
+        });
+    }
+    let hint = if max_scroll > 0 {
+        format!(" ↑↓ PgUp PgDn scroll ({}/{}) · Esc or click outside to close ", scroll + 1, max_scroll + 1)
+    } else {
+        " Esc or click outside to close ".to_string()
+    };
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(theme::BLUE))
@@ -936,9 +964,9 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
             format!(" {} · {} ", task.id, task.title),
             Style::new().add_modifier(Modifier::BOLD),
         ))
-        .title_bottom(Span::styled(" Esc or click outside to close ", Style::new().fg(theme::DIM)));
+        .title_bottom(Span::styled(hint, Style::new().fg(theme::DIM)));
     theme::clear(f, rect);
-    f.render_widget(Paragraph::new(lines).block(block).wrap(Wrap { trim: false }), rect);
+    f.render_widget(Paragraph::new(all).block(block), rect);
     hits.push((rect, Target::Sheet));
 }
 
@@ -1079,6 +1107,63 @@ mod tests {
         let out = render(&app, 120, 40);
         assert!(out.contains("https://github.com/o/api/pull/7"), "{out}");
         assert!(out.contains("waiting on design"), "{out}");
+    }
+
+    fn write_task_file(root: &TempDir, id_prefix: &str, text: &str) {
+        let dir = root.path().join("PROJ-1/tasks");
+        let file = std::fs::read_dir(&dir).unwrap().filter_map(Result::ok).find(|e| e.file_name().to_string_lossy().starts_with(id_prefix)).unwrap().path();
+        std::fs::write(file, text).unwrap();
+    }
+
+    #[test]
+    fn the_task_sheet_shows_what_is_to_be_planned_or_the_plan_and_scrolls() {
+        let (root, mut app) = sample();
+        write_task_file(&root, "T1-", "# T1: Add endpoint\n\n## Description\n\nExpose the notices over REST.\n\n## Plan\n\n## Progress\n");
+        write_task_file(&root, "T3-", "# T3: Spike it\n\n## Description\n\nFind out whether the SDK works in a Lambda.\n\n## Plan\n\n## Progress\n");
+        let long_plan: String = (1..=60).map(|n| format!("- step {n} of the plan\n")).collect();
+        write_task_file(&root, "T2-", &format!("# T2: Wire UI\n\n## Description\n\nShow notices in the UI.\n\n## Plan\n\n### Approach\n\nUse the new endpoint.\n\n{long_plan}\n## Progress\n"));
+        app.col = 0;
+        app.row[0] = 0;
+        app.detail = true;
+        let out = render(&app, 120, 40);
+        assert!(out.contains("T3 · Spike it") && out.contains("To plan") && out.contains("Find out whether the SDK works"), "{out}");
+        app.col = 2;
+        app.row[2] = 0;
+        let out = render(&app, 120, 40);
+        assert!(out.contains("T1 · Add endpoint") && out.contains("no plan written yet") && out.contains("Expose the notices over REST."), "planned but nothing written: {out}");
+        app.row[2] = 1;
+        app.open_detail();
+        let out = render(&app, 120, 40);
+        assert!(out.contains("T2 · Wire UI"), "{out}");
+        let status = app.selected_task().unwrap().status;
+        assert!(status == Status::Planned && out.contains("Plan") && out.contains("Approach") && out.contains("Use the new endpoint.") && !out.contains("Show notices in the UI."), "{out}");
+        assert!(out.contains("step 1 of the plan") && !out.contains("step 60 of the plan") && out.contains("scroll"), "{out}");
+        app.on_key(KeyCode::End, false);
+        let out = render(&app, 120, 40);
+        assert!(out.contains("step 60 of the plan") && !out.contains("step 1 of the plan"), "{out}");
+        app.on_key(KeyCode::Home, false);
+        app.on_key(KeyCode::Char('j'), false);
+        app.on_scroll(10, 10, 1);
+        assert_eq!(app.detail_scroll, 4, "a line, then a wheel notch of three");
+        assert!(render(&app, 120, 40).contains("step 5 of the plan"));
+        app.on_key(KeyCode::Esc, false);
+        assert!(!app.detail);
+        app.open_detail();
+        assert_eq!(app.detail_scroll, 0, "opened afresh from the top");
+        assert_readable(&app, 120, 40, "the task sheet");
+    }
+
+    #[test]
+    fn a_task_whose_file_is_missing_or_empty_says_so_instead_of_breaking() {
+        let (root, mut app) = sample();
+        app.col = 2;
+        app.row[2] = 0;
+        app.detail = true;
+        let out = render(&app, 120, 40);
+        assert!(out.contains("Nothing written yet."), "{out}");
+        write_task_file(&root, "T1-", "");
+        std::fs::remove_file(root.path().join("PROJ-1/tasks").read_dir().unwrap().filter_map(Result::ok).find(|e| e.file_name().to_string_lossy().starts_with("T1-")).unwrap().path()).unwrap();
+        assert!(render(&app, 120, 40).contains("could not be read"));
     }
 
     #[test]
