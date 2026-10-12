@@ -111,6 +111,7 @@ fn pull_requests() -> Vec<PullRequest> {
         PullRequest {
             feedback: Feedback {
                 mine: true,
+                pasted: false,
                 head: "9f2c1ab".into(),
                 copilot: CopilotState::Reviewed,
                 copilot_reviewed_at: Some(ago(20)),
