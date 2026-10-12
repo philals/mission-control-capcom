@@ -984,6 +984,36 @@ impl App {
         }
     }
 
+    /// Put a story straight into DONE, skipping the review: for a story whose work is finished and which
+    /// needs no review. Every task must be done or dropped.
+    pub fn finish_story(&mut self, key: &str) {
+        let skipped = std::cell::Cell::new(false);
+        let result = store::update(&self.root, key, |b| {
+            if b.story.status == StoryStatus::InProgress {
+                rules::story_transition(b, StoryStatus::InReview)?;
+                skipped.set(true);
+            }
+            rules::story_transition(b, StoryStatus::Done)
+        });
+        match result {
+            Ok(()) => {
+                self.reload();
+                self.set_notice(format!("{key} is done{}", if skipped.get() { " (the review was skipped)" } else { "" }));
+            }
+            Err(e) => self.set_notice(format!("could not mark {key} done: {e:#}")),
+        }
+    }
+
+    pub fn finish_selected_story(&mut self) {
+        let key = match self.screen {
+            Screen::List => self.selected_story_key(),
+            Screen::Board => self.keys.get(self.story).cloned(),
+        };
+        if let Some(key) = key {
+            self.finish_story(&key);
+        }
+    }
+
     /// A story card dropped on another column.
     pub fn move_story(&mut self, index: usize, to: ListCol) {
         let Some((key, from, total)) = self.story_info(index) else {
@@ -1003,7 +1033,7 @@ impl App {
             )),
             (ListCol::Review | ListCol::Done, ListCol::Doing) => self.set_story_status(&key, StoryStatus::InProgress, "is back in DOING"),
             (ListCol::Review, ListCol::Done) => self.set_story_status(&key, StoryStatus::Done, "is done"),
-            (ListCol::Doing, ListCol::Done) => self.set_notice(format!("review {key} first: drag it to IN REVIEW")),
+            (ListCol::Doing, ListCol::Done) => self.finish_story(&key),
             (ListCol::Todo, _) => self.set_notice(format!("{key} has tasks that are not finished yet")),
             _ => self.set_notice(format!("{key} cannot move from {} to {}", from.label(), to.label())),
         }
@@ -2942,6 +2972,7 @@ impl App {
             KeyCode::Right | KeyCode::Char('l') => self.list_move_col(1),
             KeyCode::Enter | KeyCode::Char(' ') => self.open_selected(),
             KeyCode::Char('v') => self.review_selected(),
+            KeyCode::Char('D') => self.finish_selected_story(),
             KeyCode::Char('d') => self.toggle_hide_done(),
             KeyCode::Char('n') => self.open_new_story(),
             KeyCode::Char('r') => self.reload_now(),
@@ -2964,6 +2995,7 @@ impl App {
             KeyCode::Char('i') => self.start_selected(Status::Implementing),
             KeyCode::Char('x') => self.finish_selected(),
             KeyCode::Char('R') => self.sync_story_now(),
+            KeyCode::Char('D') => self.finish_selected_story(),
             KeyCode::Char('S') => self.toggle_auto_sync(),
             KeyCode::Char('r') => self.reload_now(),
             _ => {}
@@ -3044,6 +3076,7 @@ impl App {
             Action::ResetLayout => self.reset_layout(),
             Action::BackToList => self.back(),
             Action::SyncStory => self.sync_story_now(),
+            Action::FinishStory => self.finish_selected_story(),
             Action::Help => self.help = true,
             Action::Quit => return true,
             Action::PlanTask => self.start_selected(Status::Planning),
