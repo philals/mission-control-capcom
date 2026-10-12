@@ -273,6 +273,9 @@ fn summary_line(pr: &PullRequest) -> Vec<Span<'static>> {
     if c.queued > 0 {
         push(format!("● {}", c.queued), ORANGE);
     }
+    if c.cancelled > 0 {
+        push(format!("⊘ {} cancelled", c.cancelled), theme::DIM);
+    }
     if c.skipped > 0 {
         push(format!("⊘ {}", c.skipped), theme::DIM);
     }
@@ -297,6 +300,7 @@ fn stage_style(state: CheckState) -> (&'static str, Color, &'static str) {
         CheckState::Queued => ("●", ORANGE, "queued"),
         CheckState::Failed => ("✗", theme::RED, "failed"),
         CheckState::Passed => ("✓", theme::GREEN, "passed"),
+        CheckState::Cancelled => ("⊘", theme::DIM, "cancelled"),
         CheckState::Skipped => ("⊘", theme::DIM, "skipped"),
     }
 }

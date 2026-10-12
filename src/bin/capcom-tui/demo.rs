@@ -89,7 +89,7 @@ fn build_stories(root: &Path) {
 
 fn check(workflow: &str, name: &str, state: CheckState, minutes_ago: i64, minutes_taken: i64) -> Check {
     let started = Some(ago(minutes_ago));
-    let finished = matches!(state, CheckState::Passed | CheckState::Failed | CheckState::Skipped);
+    let finished = matches!(state, CheckState::Passed | CheckState::Failed | CheckState::Cancelled | CheckState::Skipped);
     Check {
         name: name.into(),
         workflow: Some(workflow.into()),
@@ -115,7 +115,6 @@ fn pull_requests() -> Vec<PullRequest> {
                 copilot: CopilotState::Reviewed,
                 copilot_reviewed_at: Some(ago(20)),
                 threads: ["a", "b"].iter().map(|id| Thread { id: id.to_string(), resolved: false, outdated: false, by_copilot: true }).collect(),
-                cancelled: vec![],
                 merge: crate::prs::MergeState::Conflicting,
                 kodiak: Some(kodiak()),
             },

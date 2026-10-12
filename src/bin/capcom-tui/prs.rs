@@ -50,6 +50,8 @@ pub enum CheckState {
     Running,
     Passed,
     Failed,
+    /// Stopped or superseded by a newer run: it says nothing about the code.
+    Cancelled,
     Skipped,
 }
 
@@ -83,6 +85,7 @@ pub struct Counts {
     pub running: usize,
     pub queued: usize,
     pub skipped: usize,
+    pub cancelled: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -140,8 +143,6 @@ pub struct Feedback {
     pub copilot: CopilotState,
     pub copilot_reviewed_at: Option<String>,
     pub threads: Vec<Thread>,
-    /// Checks that were cancelled or superseded rather than failed: they say nothing about the code.
-    pub cancelled: Vec<String>,
     #[serde(default)]
     pub merge: MergeState,
     /// What the repository's merge bot is set up to do (None when it has none, or we could not tell).
@@ -161,10 +162,7 @@ impl PullRequest {
 
     /// Checks that really failed, not ones that were cancelled.
     pub fn real_failures(&self) -> Vec<&Check> {
-        self.checks
-            .iter()
-            .filter(|c| c.state == CheckState::Failed && !self.feedback.cancelled.contains(&c.name))
-            .collect()
+        self.checks_in(CheckState::Failed)
     }
 
     /// Something is wrong with the PR that its author has to act on: a failing check or a merge conflict.
@@ -265,6 +263,7 @@ impl PullRequest {
                 CheckState::Running => c.running += 1,
                 CheckState::Queued => c.queued += 1,
                 CheckState::Skipped => c.skipped += 1,
+                CheckState::Cancelled => c.cancelled += 1,
             }
         }
         c
@@ -275,7 +274,7 @@ impl PullRequest {
     /// a check running, queued or failed, or no passing check at all.
     pub fn waiting_for(&self) -> Option<Waiting> {
         let c = self.counts();
-        if self.is_draft || c.failed + c.running + c.queued > 0 || c.passed == 0 {
+        if self.is_draft || c.failed + c.cancelled + c.running + c.queued > 0 || c.passed == 0 {
             return None;
         }
         match self.review {
@@ -305,6 +304,7 @@ impl PullRequest {
             CheckState::Running,
             CheckState::Queued,
             CheckState::Failed,
+            CheckState::Cancelled,
             CheckState::Passed,
             CheckState::Skipped,
         ])
@@ -320,7 +320,8 @@ fn check_state(status: &str, conclusion: &str) -> CheckState {
         "IN_PROGRESS" => CheckState::Running,
         "COMPLETED" => match conclusion {
             "SUCCESS" => CheckState::Passed,
-            "FAILURE" | "TIMED_OUT" | "STARTUP_FAILURE" | "CANCELLED" | "ACTION_REQUIRED" | "STALE" => CheckState::Failed,
+            "FAILURE" | "TIMED_OUT" | "STARTUP_FAILURE" | "ACTION_REQUIRED" => CheckState::Failed,
+            "CANCELLED" | "STALE" => CheckState::Cancelled,
             _ => CheckState::Skipped,
         },
         _ => CheckState::Queued,
@@ -386,16 +387,6 @@ fn parse_feedback(node: &Value) -> Feedback {
         .filter_map(|n| text(n, "/submittedAt"))
         .max();
     let threads = parse_threads(node);
-    let cancelled = node
-        .pointer("/statusCheckRollup/contexts/nodes")
-        .and_then(Value::as_array)
-        .map(|c| {
-            c.iter()
-                .filter(|n| matches!(text(n, "/conclusion").as_deref(), Some("CANCELLED" | "STALE")))
-                .filter_map(|n| text(n, "/name"))
-                .collect()
-        })
-        .unwrap_or_default();
     Feedback {
         mine: node.get("viewerDidAuthor").and_then(Value::as_bool).unwrap_or(false),
         head: text(node, "/headRefOid").unwrap_or_default(),
@@ -408,7 +399,6 @@ fn parse_feedback(node: &Value) -> Feedback {
         },
         copilot_reviewed_at: reviewed_at,
         threads,
-        cancelled,
         merge: match (text(node, "/mergeable").as_deref(), text(node, "/mergeStateStatus").as_deref()) {
             (Some("CONFLICTING"), _) | (_, Some("DIRTY")) => MergeState::Conflicting,
             (_, Some("BEHIND")) => MergeState::Behind,
@@ -979,8 +969,17 @@ mod tests {
     }
 
     #[test]
+    fn a_pr_whose_checks_were_only_cancelled_is_not_red_and_not_counted_as_failed() {
+        let pr = pr_with(vec![check_of("unit", CheckState::Cancelled, false), check_of("lint", CheckState::Passed, false)]);
+        assert_eq!((pr.counts().failed, pr.counts().cancelled), (0, 1));
+        assert!(!pr.is_red() && pr.real_failures().is_empty());
+        assert!(pr.open_checks().is_empty(), "a superseded run is not a stage to watch");
+        assert_eq!(pr.waiting_for(), None, "but nothing has passed in its place yet");
+    }
+
+    #[test]
     fn cancelled_and_action_required_checks_are_not_green() {
-        assert_eq!(check_state("COMPLETED", "CANCELLED"), CheckState::Failed);
+        assert_eq!(check_state("COMPLETED", "CANCELLED"), CheckState::Cancelled, "superseded, not broken");
         assert_eq!(check_state("COMPLETED", "ACTION_REQUIRED"), CheckState::Failed);
         assert_eq!(check_state("COMPLETED", "NEUTRAL"), CheckState::Skipped);
         assert_eq!(check_state("COMPLETED", "SKIPPED"), CheckState::Skipped);
