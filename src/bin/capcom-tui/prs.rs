@@ -23,7 +23,7 @@ macro_rules! pr_fields {
 }
 
 const GRAPHQL: &str = concat!(
-    "query($q: String!) { rateLimit { cost remaining resetAt } search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { ",
+    "query($q: String!) { rateLimit { cost remaining resetAt } search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { state ",
     pr_fields!(),
     " } } } }"
 );
@@ -563,7 +563,9 @@ pub fn parse_page(json: &str) -> Result<Page> {
             .unwrap_or_else(|| "unexpected response from GitHub".to_string());
         bail!("{message}");
     };
-    let prs = nodes.iter().filter_map(|n| parse_pr(n).map(|pr| (text(n, "/id"), pr))).collect();
+    // the search index lags a merge by a while; the PR's own state does not
+    let open = |n: &&Value| text(n, "/state").is_none_or(|s| s == "OPEN");
+    let prs = nodes.iter().filter(open).filter_map(|n| parse_pr(n).map(|pr| (text(n, "/id"), pr))).collect();
     Ok(Page { prs, rate: parse_rate(&value) })
 }
 
@@ -1193,6 +1195,14 @@ mod tests {
         assert_eq!(older_last[0].state, CheckState::Passed, "the order GitHub lists them in does not matter");
         let queued = latest_runs(vec![run(CheckState::Failed, Some("2026-10-12T18:23:02Z")), run(CheckState::Queued, None)]);
         assert_eq!(queued[0].state, CheckState::Queued, "a re-run waiting to start replaces the old result");
+    }
+
+    #[test]
+    fn a_merged_pr_the_search_still_lists_is_dropped() {
+        let node = |state: &str, n: u64| format!(r#"{{"state":"{state}","id":"X{n}","number":{n},"title":"T","url":"https://github.com/acme/api/pull/{n}","isDraft":false,"viewerDidAuthor":true,"repository":{{"nameWithOwner":"acme/api"}}}}"#);
+        let json = format!(r#"{{"data":{{"search":{{"nodes":[{},{},{}]}}}}}}"#, node("OPEN", 1), node("MERGED", 2), node("CLOSED", 3));
+        let numbers: Vec<u64> = parse(&json).unwrap().iter().map(|p| p.number).collect();
+        assert_eq!(numbers, vec![1]);
     }
 
     #[test]
