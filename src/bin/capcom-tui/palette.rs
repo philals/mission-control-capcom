@@ -33,6 +33,7 @@ pub enum Action {
     ImplementTask,
     FinishTask,
     TaskDetails,
+    TaskAgent,
     PrOpen(String),
     PrCopy(String),
     PrDetails(String),
@@ -149,6 +150,7 @@ pub fn pr_entries(row: &PrRow) -> Vec<Entry> {
 pub fn task_entries(id: &str) -> Vec<Entry> {
     vec![
         entry(format!("Details of {id}"), "Enter", Action::TaskDetails),
+        entry(format!("Go to the agent for {id}"), "a", Action::TaskAgent),
         entry(format!("Plan {id}"), "p", Action::PlanTask),
         entry(format!("Implement {id}"), "i", Action::ImplementTask),
         entry(format!("Finish {id} (checks its PRs)"), "x", Action::FinishTask),

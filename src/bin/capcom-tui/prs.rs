@@ -18,7 +18,7 @@ pub const DEFAULT_QUERY: &str =
 /// What is asked of every PR, in the search and in a lookup by number.
 macro_rules! pr_fields {
     () => {
-        r#"id number title url isDraft viewerDidAuthor headRefOid mergeable mergeStateStatus updatedAt reviewDecision comments { totalCount } reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on Bot { login } } } } latestReviews(first: 20) { nodes { author { login } state submittedAt } } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { workflow { name } } } } ... on StatusContext { context state targetUrl } } } }"#
+        r#"id number title url isDraft viewerDidAuthor headRefOid mergeable mergeStateStatus createdAt updatedAt reviewDecision comments { totalCount } reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on Bot { login } } } } latestReviews(first: 20) { nodes { author { login } state submittedAt } } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { workflow { name } } } } ... on StatusContext { context state targetUrl } } } }"#
     };
 }
 
@@ -110,6 +110,8 @@ pub struct PullRequest {
     pub review: Review,
     pub comments: u64,
     pub updated_at: String,
+    #[serde(default)]
+    pub created_at: String,
     pub checks: Vec<Check>,
     /// What GitHub knows about reviews and comments, and who wrote the PR.
     pub feedback: Feedback,
@@ -471,6 +473,7 @@ fn parse_pr(node: &Value) -> Option<PullRequest> {
         },
         comments: node.pointer("/comments/totalCount").and_then(Value::as_u64).unwrap_or(0),
         updated_at: text(node, "/updatedAt").unwrap_or_default(),
+        created_at: text(node, "/createdAt").unwrap_or_default(),
         checks,
         feedback: parse_feedback(node),
     })
@@ -1095,6 +1098,7 @@ mod tests {
             review,
             comments: 0,
             updated_at: "2026-10-08T01:00:00Z".into(),
+            created_at: "2026-10-08T01:00:00Z".into(),
             checks: vec![check(CheckState::Passed), check(CheckState::Passed), check(CheckState::Skipped)],
         }
     }

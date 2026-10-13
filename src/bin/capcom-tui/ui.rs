@@ -120,7 +120,7 @@ fn draw_hover(f: &mut Frame, app: &App, hits: &Hits) {
     };
     let button = matches!(
         target,
-        Target::PrAuto(_) | Target::PrReview(_) | Target::PrMerge(_) | Target::PrAgent(_) | Target::PrCopy(_) | Target::PrDetails(_) | Target::PrBadge(_)
+        Target::PrAuto(_) | Target::PrReview(_) | Target::PrMerge(_) | Target::PrAgent(_) | Target::TaskAgent | Target::PrCopy(_) | Target::PrDetails(_) | Target::PrBadge(_)
             | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::GoLight | Target::Refresh | Target::NewStory | Target::ToggleDone
             | Target::OpenCheck(..) | Target::OpenJob(..) | Target::RunDetails(_) | Target::Back | Target::PaletteItem(_)
     );
@@ -673,7 +673,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     let keys: &[&str] = match app.screen {
         Screen::List => &["←→↑↓ move", "⏎ open", "v review", "n new", "d done", "Tab PRs/runs", "^P palette", "? help", "q quit"],
         Screen::Board => &[
-            "←→ column", "↑↓ card", "[ ] story", "⏎ detail", "p plan", "i implement", "x done", "R sync PRs", "Tab PRs/runs",
+            "←→ column", "↑↓ card", "[ ] story", "⏎ detail", "p plan", "i implement", "a agent", "x done", "R sync PRs", "Tab PRs/runs",
             "Esc stories", "^P palette", "? help", "q quit",
         ],
     };
@@ -924,6 +924,14 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         lines.push(fact("Agent", format!("{} · {} · since {}", a.pane, a.skill, a.started_at)));
     }
     lines.push(fact("File", task.file.clone()));
+    let agent_row = lines.len() as u16;
+    let button = "[ go to agent ]";
+    lines.push(Line::from(vec![
+        Span::styled(format!("{:<12}", ""), Style::new().fg(theme::DIM)),
+        Span::styled(button, Style::new().fg(theme::CYAN)),
+        Span::styled("  a", Style::new().fg(theme::DIM)),
+    ]));
+    let agent_hit = (agent_row < inner.height).then(|| Rect::new(inner.x + 12, inner.y + agent_row, button.chars().count() as u16, 1));
     lines.push(Line::raw(""));
     lines.push(Line::from(Span::styled("PRs", Style::new().fg(theme::DIM))));
     if task.prs.is_empty() {
@@ -968,6 +976,9 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     theme::clear(f, rect);
     f.render_widget(Paragraph::new(all).block(block), rect);
     hits.push((rect, Target::Sheet));
+    if let Some(r) = agent_hit {
+        hits.push((r, Target::TaskAgent));
+    }
 }
 
 fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
@@ -992,7 +1003,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("m", "mark the selected draft ready for review, or turn a ready PR back into a draft (asks first)".into()),
         row("t / v", "tick auto-fix / auto-review on the selected pull request".into()),
         row("g", "automerge on the selected pull request: its merge bot's label, on or off".into()),
-        row("a", "go to the agent that made the selected pull request".into()),
+        row("a", "go to the agent that made the selected pull request, or (on a story's board) the agent working the selected task".into()),
         row("paste  u", "paste a pull request link to follow someone else's PR like your own (auto-fix starts off); u stops following a pasted one".into()),
         row("d", "show or hide completed stories (list)".into()),
         row("Esc  b", "back to the list, or close a sheet".into()),
@@ -1381,6 +1392,7 @@ mod tests {
             review: Review::Approved,
             comments: 3,
             updated_at: "2026-10-08T01:00:00Z".into(),
+            created_at: format!("2026-10-08T01:{}:00Z", match number { 12 => 30, 4 => 20, _ => 10 }),
             checks,
         };
         vec![
@@ -2065,6 +2077,34 @@ mod tests {
     }
 
     #[test]
+    fn a_task_goes_to_its_agent_by_the_a_key_the_sheet_button_and_the_palette() {
+        let (root, mut app) = sample();
+        let fake = with_herdr(&mut app);
+        let id = app.selected_task().unwrap().id.clone();
+        store::update(root.path(), "PROJ-1", |b| ops::add_session(b, &id, "impl-1", "story-implement-task", "/w/api", "t1")).unwrap();
+        app.reload();
+        app.open_detail();
+        let out = render(&app, 260, 44);
+        let (x, y) = find(&out, "[ go to agent ]");
+        app.on_hover(x + 2, y);
+        assert!(render(&app, 260, 44).lines().last().unwrap().contains("go to the agent working on this task"));
+        app.on_click(x + 2, y);
+        let resumes = resumes_after(&mut app, &fake);
+        assert_eq!(resumes[0].session, Some(("impl-1".to_string(), "/w/api".to_string())));
+        assert_eq!((resumes[0].workspace.as_str(), resumes[0].prompt.is_none(), resumes[0].focus), ("PROJ-1", true, true));
+        assert!(app.detail, "the sheet stays open");
+        app.on_key(KeyCode::Esc, false);
+        fake.resumes.lock().unwrap().clear();
+        app.on_key(KeyCode::Char('a'), false);
+        assert_eq!(resumes_after(&mut app, &fake).len(), 1, "the a key goes too");
+        fake.resumes.lock().unwrap().clear();
+        open_palette_with(&mut app, "agent for");
+        assert!(render(&app, 170, 44).contains(&format!("Go to the agent for {id}")));
+        app.on_key(KeyCode::Enter, false);
+        assert_eq!(resumes_after(&mut app, &fake).len(), 1);
+    }
+
+    #[test]
     fn the_a_key_goes_back_to_the_selected_prs_agent_and_a_task_with_no_session_still_tries_running_agents() {
         let (_root, mut app) = with_prs();
         let fake = with_herdr(&mut app);
@@ -2237,11 +2277,12 @@ mod tests {
         let quiet = |n: u64, title: &str| pr_with(n, title, Review::None, true, CheckState::Skipped);
         let mut red = pr_with(9, "Broken", Review::Required, false, CheckState::Failed);
         red.checks[2].state = CheckState::Failed;
+        red.created_at = "2026-10-09T01:00:00Z".into();
         app.apply_prs(Ok(vec![quiet(1, "Quiet one"), quiet(2, "Quiet two"), red]));
         let out = render(&app, 170, 44);
         let (_, red_y) = find(&out, "Broken");
         let (_, quiet_y) = find(&out, "Quiet one");
-        assert!(red_y < quiet_y, "red first:\n{out}");
+        assert!(red_y < quiet_y, "the newest first, and it is open because it needs you:\n{out}");
         assert_eq!(line_of(&out, "Quiet one").matches("acme/api#1").count(), 1, "badge, id and title share one line:\n{out}");
         let (_, two_y) = find(&out, "Quiet two");
         assert_eq!(two_y, quiet_y + 2, "one line each with a divider between:\n{out}");
@@ -2255,12 +2296,13 @@ mod tests {
     }
 
     #[test]
-    fn the_row_you_are_on_stays_under_you_when_the_order_changes() {
+    fn the_row_you_are_on_stays_under_you_when_a_newer_pr_arrives() {
         let (_root, mut app) = two_stories();
         let calm = |n: u64| pr_with(n, &format!("PR {n}"), Review::None, true, CheckState::Skipped);
-        let mut red = |n: u64| {
+        let red = |n: u64| {
             let mut pr = pr_with(n, &format!("PR {n}"), Review::Required, false, CheckState::Failed);
             pr.checks[2].state = CheckState::Failed;
+            pr.created_at = "2026-10-09T01:00:00Z".into();
             pr
         };
         app.apply_prs(Ok(vec![calm(1), calm(2), calm(3)]));
@@ -2269,11 +2311,11 @@ mod tests {
         let url = |n: u64| format!("https://github.com/acme/api/pull/{n}");
         assert_eq!(app.pr_rows()[2].url, url(3));
         app.apply_prs(Ok(vec![calm(1), calm(2), calm(3), red(4)]));
-        assert_eq!(app.pr_rows()[0].url, url(4), "the red PR jumps to the top");
+        assert_eq!(app.pr_rows()[0].url, url(4), "the newest PR goes to the top");
         assert_eq!(app.pr_rows()[app.pr_sel].url, url(3), "the PR you were on is still the selected one");
         app.focus = Focus::Main;
         app.apply_prs(Ok(vec![calm(1), calm(2), calm(3), red(4)]));
-        assert_eq!(app.pr_sel, 0, "with the panel not in use, the most urgent row is the selected one");
+        assert_eq!(app.pr_sel, 0, "with the panel not in use, the top row is the selected one");
     }
 
     #[test]
@@ -3901,6 +3943,7 @@ mod tests {
             review,
             comments: 0,
             updated_at: "2026-10-08T01:00:00Z".into(),
+            created_at: format!("2026-10-08T01:{:02}:00Z", 59 - number.min(59)),
             checks: vec![check("lint", CheckState::Passed), check("build", CheckState::Passed), check("e2e", last)],
         }
     }
@@ -4037,16 +4080,20 @@ mod tests {
     }
 
     #[test]
-    fn prs_are_listed_by_how_much_they_need_you_and_ties_keep_their_order() {
+    fn prs_are_listed_newest_first_and_ties_keep_their_order() {
         let (_root, mut app) = two_stories();
+        let made = |mut pr: PullRequest, at: &str| {
+            pr.created_at = at.into();
+            pr
+        };
         app.apply_prs(Ok(vec![
-            live("acme/api", 1, "Running"),
-            green(2, "Waits for a reviewer", Review::Required, false),
-            green(3, "Approved", Review::Approved, false),
-            green(4, "Also waits", Review::Required, false),
+            made(live("acme/api", 1, "Running"), "2026-10-01T00:00:00Z"),
+            made(green(2, "Waits for a reviewer", Review::Required, false), "2026-10-05T00:00:00Z"),
+            made(green(3, "Approved", Review::Approved, false), "2026-10-03T00:00:00Z"),
+            made(green(4, "Also waits", Review::Required, false), "2026-10-05T00:00:00Z"),
         ]));
         let numbers: Vec<u64> = app.pr_rows().iter().filter_map(|r| r.number).collect();
-        assert_eq!(numbers, vec![2, 4, 3, 1], "waiting for a reviewer, then ready to merge, then still running");
+        assert_eq!(numbers, vec![2, 4, 3, 1], "by date created, newest first, a tie in GitHub's order");
     }
 
     #[test]
