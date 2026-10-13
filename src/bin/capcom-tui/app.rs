@@ -90,6 +90,8 @@ pub enum Target {
     Pr(usize),
     PrDetails(usize),
     PrCopy(usize),
+    /// The `[ go to agent ]` line of a task's sheet.
+    TaskAgent,
     /// The `[ agent ]` button: back to the agent session that made the PR.
     PrAgent(usize),
     /// The `[x] auto-review` tick box on one PR.
@@ -2154,6 +2156,24 @@ impl App {
         let mut resume = self.resume_request(&url, &repo, &name, owner.as_ref());
         resume.fresh_repo = None;
         let task = owner.map_or(name, |(_, task)| task);
+        self.go_to_agent(herdr, resume, task);
+    }
+
+    /// The `[ go to agent ]` of a task: its running agent, else its recorded session resumed.
+    pub fn open_task_agent(&mut self) {
+        let (Some(key), Some(task)) = (self.keys.get(self.story).cloned(), self.selected_task().map(|t| t.id.clone())) else {
+            return;
+        };
+        let Some(herdr) = self.herdr.clone() else {
+            self.set_notice("not running inside Herdr, so the agent cannot be brought back".into());
+            return;
+        };
+        let mut resume = self.resume_request("", "", &task, Some(&(key, task.clone())));
+        resume.fresh_repo = None;
+        self.go_to_agent(herdr, resume, task);
+    }
+
+    fn go_to_agent(&mut self, herdr: std::sync::Arc<dyn Herdr>, resume: Resume, task: String) {
         self.set_notice(format!("looking for the agent that made {task}…"));
         let done = self.launch_done.0.clone();
         std::thread::spawn(move || {
@@ -2202,9 +2222,8 @@ impl App {
                         fix: self.fix_label(&p.url),
                     })
                     .collect();
-                // what needs you comes first (red, then answers owed, then waiting for review, ...); the
-                // order GitHub gave is otherwise kept
-                rows.sort_by_key(PrRow::urgency);
+                // newest first; the stable sort keeps GitHub's order for the same moment
+                rows.sort_by(|a, b| b.live.map(|p| &p.created_at).cmp(&a.live.map(|p| &p.created_at)));
                 rows
             }
             Screen::Board => {
@@ -3032,6 +3051,7 @@ impl App {
             KeyCode::Enter | KeyCode::Char(' ') => self.open_detail(),
             KeyCode::Char('p') => self.start_selected(Status::Planning),
             KeyCode::Char('i') => self.start_selected(Status::Implementing),
+            KeyCode::Char('a') => self.open_task_agent(),
             KeyCode::Char('x') => self.finish_selected(),
             KeyCode::Char('R') => self.sync_story_now(),
             KeyCode::Char('D') => self.finish_selected_story(),
@@ -3122,6 +3142,7 @@ impl App {
             Action::ImplementTask => self.start_selected(Status::Implementing),
             Action::FinishTask => self.finish_selected(),
             Action::TaskDetails => self.open_detail(),
+            Action::TaskAgent => self.open_task_agent(),
             Action::PrOpen(url) => on_pr(self, &url, &|app, i| app.open_pr(i)),
             Action::PrCopy(url) => on_pr(self, &url, &|app, i| app.copy_pr(i)),
             Action::PrDetails(url) => on_pr(self, &url, &|app, _| app.pr_sheet = true),
@@ -3183,6 +3204,7 @@ impl App {
             Target::PrReview(_) => "auto-review: ask Copilot to review this PR, once (v)",
             Target::PrMerge(_) => "automerge: the merge bot merges this PR by itself once it is approved and green; this adds or removes its label (g)",
             Target::PrAgent(_) => "go to the agent that made this PR (a)",
+            Target::TaskAgent => "go to the agent working on this task: bring it to the front, or resume its session (a)",
             Target::PrCopy(_) => "copy the link of this PR (c)",
             Target::PrDetails(_) => "every check, the state and the link (Enter)",
             Target::PrBadge(i) => {
@@ -3261,6 +3283,7 @@ impl App {
         if self.detail || self.help || self.pr_sheet || self.run_sheet {
             match target {
                 Some(Target::Sheet) => {}
+                Some(Target::TaskAgent) => self.open_task_agent(),
                 Some(Target::OpenPr) => self.open_selected_pr(),
                 Some(Target::OpenSelectedRun) => self.open_selected_run(),
                 Some(Target::OpenStage(k)) => self.open_sheet_stage(k),
@@ -3514,6 +3537,7 @@ mod tests {
             review: Review::None,
             comments: 0,
             updated_at: "2026-10-08T01:00:00Z".into(),
+            created_at: "2026-10-08T01:00:00Z".into(),
             checks: vec![Check {
                 name: "build".into(),
                 workflow: Some("CI".into()),

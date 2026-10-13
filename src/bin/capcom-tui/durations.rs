@@ -127,6 +127,7 @@ mod tests {
             labels: vec![],
             review: Review::None,
             comments: 0,
+            created_at: String::new(),
             updated_at: String::new(),
             checks,
             feedback: Feedback::default(),

@@ -128,6 +128,7 @@ fn pull_requests() -> Vec<PullRequest> {
             review: Review::None,
             comments: 2,
             updated_at: ago(6),
+            created_at: ago(6),
             checks: vec![
                 check("CI", "lint", CheckState::Passed, 9, 1),
                 check("CI", "build", CheckState::Passed, 9, 3),
@@ -147,6 +148,7 @@ fn pull_requests() -> Vec<PullRequest> {
             review: Review::Required,
             comments: 0,
             updated_at: ago(25),
+            created_at: ago(25),
             checks: vec![
                 check("CI", "lint", CheckState::Passed, 30, 1),
                 check("CI", "tests", CheckState::Passed, 30, 7),
@@ -164,6 +166,7 @@ fn pull_requests() -> Vec<PullRequest> {
             review: Review::Required,
             comments: 0,
             updated_at: ago(45),
+            created_at: ago(45),
             checks: vec![
                 check("CI", "lint", CheckState::Passed, 50, 1),
                 check("CI", "build", CheckState::Passed, 50, 3),
@@ -182,6 +185,7 @@ fn pull_requests() -> Vec<PullRequest> {
             review: Review::Approved,
             comments: 3,
             updated_at: ago(130),
+            created_at: ago(130),
             checks: vec![
                 check("CI", "lint", CheckState::Passed, 140, 1),
                 check("CI", "tests", CheckState::Passed, 140, 6),
