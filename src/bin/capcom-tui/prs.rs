@@ -18,7 +18,7 @@ pub const DEFAULT_QUERY: &str =
 /// What is asked of every PR, in the search and in a lookup by number.
 macro_rules! pr_fields {
     () => {
-        r#"id number title url isDraft viewerDidAuthor headRefOid mergeable mergeStateStatus createdAt updatedAt reviewDecision comments { totalCount } reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on Bot { login } } } } latestReviews(first: 20) { nodes { author { login } state submittedAt } } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { workflow { name } } } } ... on StatusContext { context state targetUrl } } } }"#
+        r#"id number title url isDraft viewerDidAuthor headRefOid mergeable mergeStateStatus createdAt updatedAt reviewDecision comments { totalCount } reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on Bot { login } } } } latestReviews(first: 20) { nodes { author { login } state submittedAt } } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { databaseId workflow { name } } } } ... on StatusContext { context state targetUrl } } } }"#
     };
 }
 
@@ -384,6 +384,31 @@ fn parse_check(ctx: &Value) -> Option<Check> {
     }
 }
 
+/// The checks of one list of contexts. A re-run starts a newer run of the workflow, and a check of
+/// the older run that the new one has not reached yet is not a result any more: GitHub shows it pending.
+fn superseded_as_waiting(contexts: &[Value]) -> Vec<Check> {
+    let run_id = |c: &Value| c.pointer("/checkSuite/workflowRun/databaseId").and_then(Value::as_u64);
+    let workflow = |c: &Value| text(c, "/checkSuite/workflowRun/workflow/name");
+    let newest = |name: &Option<String>| contexts.iter().filter(|c| &workflow(c) == name).filter_map(run_id).max();
+    contexts
+        .iter()
+        .filter_map(|c| {
+            let mut check = parse_check(c)?;
+            let superseded = run_id(c).is_some_and(|id| newest(&workflow(c)).is_some_and(|n| n > id));
+            let replaced = || contexts.iter().any(|o| workflow(o) == workflow(c) && text(o, "/name") == text(c, "/name") && run_id(o) > run_id(c));
+            if superseded && replaced() {
+                return None;
+            }
+            if superseded && !matches!(check.state, CheckState::Passed | CheckState::Skipped) {
+                check.state = CheckState::Queued;
+                check.started_at = None;
+                check.completed_at = None;
+            }
+            Some(check)
+        })
+        .collect()
+}
+
 /// A re-run leaves the older run of a check in the list beside the new one; GitHub shows only the newest,
 /// so an old failure must not stay red once the same check has passed. A run not started yet is the newest.
 fn latest_runs(checks: Vec<Check>) -> Vec<Check> {
@@ -456,7 +481,7 @@ fn parse_pr(node: &Value) -> Option<PullRequest> {
     let checks = node
         .pointer("/statusCheckRollup/contexts/nodes")
         .and_then(Value::as_array)
-        .map(|c| latest_runs(c.iter().filter_map(parse_check).collect()))
+        .map(|c| latest_runs(superseded_as_waiting(c)))
         .unwrap_or_default();
     Some(PullRequest {
         repo: text(node, "/repository/nameWithOwner")?,
@@ -1168,6 +1193,26 @@ mod tests {
         assert_eq!(older_last[0].state, CheckState::Passed, "the order GitHub lists them in does not matter");
         let queued = latest_runs(vec![run(CheckState::Failed, Some("2026-10-12T18:23:02Z")), run(CheckState::Queued, None)]);
         assert_eq!(queued[0].state, CheckState::Queued, "a re-run waiting to start replaces the old result");
+    }
+
+    #[test]
+    fn a_failure_from_an_older_run_waits_for_the_rerun_to_reach_it() {
+        let ctx = |name: &str, conclusion: &str, run: u64| {
+            serde_json::json!({"__typename":"CheckRun","name":name,"status":"COMPLETED","conclusion":conclusion,
+                "startedAt":"2026-10-12T18:00:00Z","checkSuite":{"workflowRun":{"databaseId":run,"workflow":{"name":"CI"}}}})
+        };
+        let state_of = |checks: &[Check], name: &str| checks.iter().find(|c| c.name == name).map(|c| c.state);
+        let got = latest_runs(superseded_as_waiting(&[
+            ctx("GreenPipeline", "FAILURE", 1),
+            ctx("unit", "FAILURE", 1),
+            ctx("unit", "SUCCESS", 2),
+            ctx("lint", "SUCCESS", 1),
+        ]));
+        assert_eq!(state_of(&got, "GreenPipeline"), Some(CheckState::Queued), "the new run has not reached it: pending, not red");
+        assert_eq!(state_of(&got, "unit"), Some(CheckState::Passed), "the new run's result wins");
+        assert_eq!(state_of(&got, "lint"), Some(CheckState::Passed));
+        let same_run = latest_runs(superseded_as_waiting(&[ctx("GreenPipeline", "FAILURE", 2), ctx("unit", "SUCCESS", 2)]));
+        assert_eq!(state_of(&same_run, "GreenPipeline"), Some(CheckState::Failed), "a failure in the newest run is real");
     }
 
     #[test]
