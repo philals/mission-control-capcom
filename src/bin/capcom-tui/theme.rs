@@ -17,6 +17,8 @@ pub const SELECT: Color = Color::Rgb(0x26, 0x37, 0x4f);
 pub const HOVER: Color = Color::Rgb(0x1f, 0x29, 0x2d);
 /// Row tint for a PR that is green and waiting for a reviewer: a dark console green.
 pub const GO_ROW: Color = Color::Rgb(0x10, 0x3a, 0x22);
+/// The kanban board's floor: a shade lighter than the console `BG` around it, so the work area reads as its own surface.
+pub const BOARD_BG: Color = Color::Rgb(0x1f, 0x2a, 0x31);
 pub const FG: Color = Color::Rgb(0xf3, 0xeb, 0xd6);
 pub const MUTED: Color = Color::Rgb(0xd9, 0xd0, 0xb8);
 pub const DIM: Color = Color::Rgb(0xb8, 0xae, 0x94);
@@ -77,4 +79,9 @@ pub fn plate(edge: Edge) -> Style {
 pub fn panel_block<'a>(edge: Edge, title: impl Into<ratatui::text::Line<'a>>) -> Block<'a> {
     let (kind, style) = frame(edge);
     Block::bordered().border_type(kind).border_style(style).title(title.into())
+}
+
+/// Lay the board's floor over a rectangle.
+pub fn board_floor(f: &mut Frame, area: Rect) {
+    f.render_widget(Block::new().style(Style::new().bg(BOARD_BG)), area);
 }

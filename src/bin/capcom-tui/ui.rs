@@ -43,17 +43,20 @@ pub fn draw(f: &mut Frame, app: &App) {
             draw_list_header(f, rows[0], app, &mut hits);
             if app.agents_panel(area.width) {
                 let width = app.agents_width.min(main.width.saturating_sub(40)).max(AGENTS_WIDTH_RANGE.0.min(main.width));
-                let parts = Layout::horizontal([Constraint::Length(width), Constraint::Min(20)]).split(main);
+                let parts = Layout::horizontal([Constraint::Length(width), Constraint::Min(20)]).spacing(1).split(main);
                 draw_agents(f, parts[0], app, &mut hits);
                 agents_x = Some(parts[0].x);
+                theme::board_floor(f, parts[1]);
                 draw_list(f, parts[1], app, &mut hits);
                 hits.push((Rect::new(parts[0].x + parts[0].width - 1, parts[0].y, 2, parts[0].height), Target::AgentsHandle));
             } else {
+                theme::board_floor(f, main);
                 draw_list(f, main, app, &mut hits);
             }
         }
         Screen::Board => {
             draw_board_header(f, rows[0], app, &mut hits);
+            theme::board_floor(f, main);
             if app.board.is_some() {
                 draw_board(f, main, app, &mut hits);
             } else {
