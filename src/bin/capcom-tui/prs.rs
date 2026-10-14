@@ -66,6 +66,9 @@ pub enum CheckState {
     Skipped,
 }
 
+/// The name a roll-up check starts with: it reports the others' result and is never worth an ask of its own.
+const ROLLUP_CHECK: &str = "GreenPipeline";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Check {
     pub name: String,
@@ -184,6 +187,12 @@ impl PullRequest {
     /// Checks that really failed, not ones that were cancelled.
     pub fn real_failures(&self) -> Vec<&Check> {
         self.checks_in(CheckState::Failed)
+    }
+
+    /// What an agent is asked to fix: the real failures, without roll-up checks such as `GreenPipeline`,
+    /// which only fail because a check that is listed beside them did.
+    pub fn fixable_failures(&self) -> Vec<&Check> {
+        self.real_failures().into_iter().filter(|c| !c.name.starts_with(ROLLUP_CHECK)).collect()
     }
 
     /// Something is wrong with the PR that its author has to act on: a failing check or a merge conflict.
