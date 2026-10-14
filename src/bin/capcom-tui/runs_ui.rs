@@ -148,13 +148,8 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         crate::panel::status_text(app.runs.loading, app.runs.error.is_some(), app.runs.updated.as_deref(), app.runs.fresh, app.animation_frame())
     };
     let status_width = status.chars().count() as u16;
-    let block = Block::bordered()
-        .border_type(if focused { BorderType::Double } else { BorderType::Plain })
-        .border_style(Style::new().fg(if focused { theme::BLUE } else { theme::BORDER }))
-        .title(Span::styled(
-            format!(" {name} · {} ", runs.len()),
-            Style::new().fg(if focused { theme::BLUE } else { theme::FG }).add_modifier(Modifier::BOLD),
-        ))
+    let edge = if focused { theme::Edge::Focus } else { theme::Edge::Idle };
+    let block = theme::panel_block(edge, Span::styled(format!(" {name} · {} ", runs.len()), theme::plate(edge)))
         .title(Line::from(Span::styled(status, status_style)).right_aligned());
     let inner = block.inner(area);
     f.render_widget(block, area);

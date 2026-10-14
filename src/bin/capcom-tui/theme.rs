@@ -4,7 +4,8 @@
 //! at least a 4.5:1 contrast ratio against `BG`, and against `SELECT` or `HEADER` where text sits on them.
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
-use ratatui::widgets::{Block, Clear};
+use ratatui::style::Modifier;
+use ratatui::widgets::{Block, BorderType, Clear};
 use ratatui::Frame;
 
 pub const BG: Color = Color::Rgb(0x14, 0x18, 0x1a);
@@ -19,7 +20,8 @@ pub const GO_ROW: Color = Color::Rgb(0x10, 0x3a, 0x22);
 pub const FG: Color = Color::Rgb(0xf3, 0xeb, 0xd6);
 pub const MUTED: Color = Color::Rgb(0xd9, 0xd0, 0xb8);
 pub const DIM: Color = Color::Rgb(0xb8, 0xae, 0x94);
-pub const BORDER: Color = Color::Rgb(0x80, 0x89, 0x7a);
+/// The steel of a console panel's frame.
+pub const FRAME: Color = Color::Rgb(0xa9, 0xb6, 0xad);
 pub const CYAN: Color = Color::Rgb(0x8c, 0xc2, 0xff);
 pub const BLUE: Color = Color::Rgb(0x79, 0xae, 0xff);
 pub const GREEN: Color = Color::Rgb(0x84, 0xf0, 0xa0);
@@ -41,4 +43,38 @@ pub fn paint(f: &mut Frame) {
 pub fn clear(f: &mut Frame, area: Rect) {
     f.render_widget(Clear, area);
     f.render_widget(Block::new().style(base()), area);
+}
+
+/// How a panel's frame looks: at rest, with the focus or selection, or as the drop target of a drag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edge {
+    Idle,
+    Focus,
+    Drop,
+}
+
+/// A heavy steel frame at rest, a double blue one with the focus, a double orange one as a drop target.
+/// The line style differs as well as the colour, so focus is never shown by colour alone.
+pub fn frame(edge: Edge) -> (BorderType, Style) {
+    match edge {
+        Edge::Idle => (BorderType::Thick, Style::new().fg(FRAME)),
+        Edge::Focus => (BorderType::Double, Style::new().fg(BLUE)),
+        Edge::Drop => (BorderType::Double, Style::new().fg(ORANGE)),
+    }
+}
+
+/// The name plate in a panel's top edge: cream on console blue at rest, dark on a lit colour otherwise.
+pub fn plate(edge: Edge) -> Style {
+    let (fg, bg) = match edge {
+        Edge::Idle => (FG, HEADER),
+        Edge::Focus => (BG, BLUE),
+        Edge::Drop => (BG, ORANGE),
+    };
+    Style::new().fg(fg).bg(bg).add_modifier(Modifier::BOLD)
+}
+
+/// A panel's block with its frame and name plate.
+pub fn panel_block<'a>(edge: Edge, title: impl Into<ratatui::text::Line<'a>>) -> Block<'a> {
+    let (kind, style) = frame(edge);
+    Block::bordered().border_type(kind).border_style(style).title(title.into())
 }
