@@ -98,6 +98,8 @@ pub enum Target {
     TaskAgent,
     /// A row of the agents panel: the agent at this index of `App::agents`.
     AgentRow(usize),
+    /// The agents panel itself, for the wheel.
+    AgentPanel,
     /// The `[ agent ]` button: back to the agent session that made the PR.
     PrAgent(usize),
     /// The `[x] auto-review` tick box on one PR.
@@ -658,6 +660,8 @@ pub struct App {
     pub spawns: Vec<(String, String)>,
     pub agents_on: bool,
     pub agents_width: u16,
+    pub agents_scroll: usize,
+    pub agents_max: std::cell::Cell<usize>,
     /// The text typed or pasted into the "new story" box, while it is open.
     pub new_story: Option<String>,
     pub card_drag: Option<CardDrag>,
@@ -765,6 +769,8 @@ impl App {
             spawns: Vec::new(),
             agents_on: true,
             agents_width: crate::settings::DEFAULT_AGENTS_WIDTH,
+            agents_scroll: 0,
+            agents_max: std::cell::Cell::new(0),
             new_story: None,
             card_drag: None,
             story_drag: None,
@@ -1955,6 +1961,11 @@ impl App {
         self.split_pct = (self.split_pct as i16 + delta).clamp(SPLIT_RANGE.0 as i16, SPLIT_RANGE.1 as i16) as u16;
         self.split_pinned = true;
         self.save_settings();
+    }
+
+    /// Scroll the agents panel, never past its end.
+    pub fn scroll_agents(&mut self, delta: i32) {
+        self.agents_scroll = (self.agents_scroll as i64 + i64::from(delta)).clamp(0, self.agents_max.get() as i64) as usize;
     }
 
     /// Make the agents panel wider or narrower.
@@ -3559,6 +3570,10 @@ impl App {
             return;
         }
         let target = self.hit(x, y);
+        if matches!(target, Some(Target::AgentRow(_) | Target::AgentPanel)) {
+            self.scroll_agents(delta.signum() * 3);
+            return;
+        }
         if matches!(target, Some(Target::Pr(_) | Target::PrDetails(_) | Target::PrAgent(_) | Target::PrReview(_) | Target::PrAuto(_) | Target::PrMerge(_) | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::PrPanel | Target::OpenCheck(..))) {
             self.set_focus(Focus::Prs);
             self.pr_move(delta);

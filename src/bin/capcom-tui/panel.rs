@@ -640,13 +640,8 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         status_text(app.prs.loading, app.prs.error.is_some(), app.prs.updated.as_deref(), app.prs.fresh, app.animation_frame())
     };
     let status_width = status.chars().count() as u16;
-    let block = Block::bordered()
-        .border_type(if focused { BorderType::Double } else { BorderType::Plain })
-        .border_style(Style::new().fg(if focused { theme::BLUE } else { theme::BORDER }))
-        .title(Span::styled(
-            title_text(name, &rows),
-            Style::new().fg(if focused { theme::BLUE } else { theme::FG }).add_modifier(Modifier::BOLD),
-        ))
+    let edge = if focused { theme::Edge::Focus } else { theme::Edge::Idle };
+    let block = theme::panel_block(edge, Span::styled(title_text(name, &rows), theme::plate(edge)))
         .title(Line::from(Span::styled(status, status_style)).right_aligned());
     let inner = block.inner(area);
     f.render_widget(block, area);

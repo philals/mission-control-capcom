@@ -402,43 +402,33 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
 
 fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     use crate::agents::{self, Status};
+    let edge = theme::Edge::Idle;
     let working = app.agents.iter().filter(|a| a.status == Status::Working).count();
     let needs = app.agents.iter().filter(|a| a.status == Status::Blocked).count();
-    let mut title = vec![Span::styled(format!(" AGENTS · {} ", app.agents.len()), Style::new().fg(theme::FG).add_modifier(Modifier::BOLD))];
+    let plate = theme::plate(edge);
+    let mut title = vec![Span::styled(format!(" AGENTS · {} ", app.agents.len()), plate)];
     if working > 0 {
-        title.push(Span::styled(format!("· {working} working "), Style::new().fg(theme::CYAN)));
+        title.push(Span::styled(format!("· {working} working "), Style::new().fg(theme::CYAN).bg(theme::HEADER)));
     }
     if needs > 0 {
-        title.push(Span::styled(format!("· {needs} need you "), Style::new().fg(panel::ORANGE).add_modifier(Modifier::BOLD)));
+        title.push(Span::styled(format!("· {needs} need you "), Style::new().fg(panel::ORANGE).bg(theme::HEADER).add_modifier(Modifier::BOLD)));
     }
-    let block = Block::bordered().border_style(Style::new().fg(theme::BORDER)).title(Line::from(title));
+    let mut block = theme::panel_block(edge, Line::from(title));
     let inner = block.inner(area);
-    f.render_widget(block, area);
     if app.agents.is_empty() {
+        f.render_widget(block, area);
         f.render_widget(Paragraph::new(Span::styled("no agents are running in Herdr", Style::new().fg(theme::DIM))), inner);
         return;
     }
     let stories: Vec<(String, String)> = app.stories.iter().map(|s| (s.key.clone(), crate::herdr::short_name(&s.title))).collect();
     let width = inner.width as usize;
-    let mut y = inner.y;
-    let bottom = inner.y + inner.height;
-    let total: usize = app.agents.len();
-    let mut shown = 0;
     let parents = agents::parents(&app.agents, &app.spawns);
-    'groups: for group in agents::groups(&app.agents, &stories, &parents) {
-        if y >= bottom {
-            break;
-        }
+    let mut rows: Vec<(Line<'static>, Option<usize>)> = Vec::new();
+    for group in agents::groups(&app.agents, &stories, &parents) {
         let style = if group.story { Style::new().fg(theme::CYAN).add_modifier(Modifier::BOLD) } else { Style::new().fg(theme::MUTED).add_modifier(Modifier::BOLD) };
-        f.render_widget(Paragraph::new(Span::styled(trunc(&group.label, width), style)), Rect::new(inner.x, y, inner.width, 1));
-        y += 1;
+        rows.push((Line::from(Span::styled(trunc(&group.label, width), style)), None));
         for entry in &group.entries {
             let agent = &app.agents[entry.index];
-            let topic = (!agent.topic.is_empty() && agent.topic != entry.label).then(|| agent.topic.clone());
-            let height = if topic.is_some() { 2 } else { 1 };
-            if y + height > bottom {
-                break 'groups;
-            }
             let colour = match agent.status {
                 Status::Working => theme::CYAN,
                 Status::Blocked => panel::ORANGE,
@@ -450,29 +440,47 @@ fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
             let lead = 2 + branch.chars().count();
             let label = trunc(&entry.label, width.saturating_sub(lead + word.chars().count() + 3));
             let pad = width.saturating_sub(lead + label.chars().count() + word.chars().count() + 2);
-            let first = Line::from(vec![
-                Span::raw("  "),
-                Span::styled(branch, Style::new().fg(theme::DIM)),
-                Span::styled(agent.status.icon(), Style::new().fg(colour).add_modifier(Modifier::BOLD)),
-                Span::raw(format!(" {label}{}", " ".repeat(pad))),
-                Span::styled(word, Style::new().fg(colour)),
-            ]);
-            f.render_widget(Paragraph::new(first), Rect::new(inner.x, y, inner.width, 1));
-            if let Some(topic) = topic {
-                f.render_widget(
-                    Paragraph::new(Span::styled(format!("{}{}", " ".repeat(lead + 2), trunc(&topic, width.saturating_sub(lead + 2))), Style::new().fg(theme::DIM))),
-                    Rect::new(inner.x, y + 1, inner.width, 1),
-                );
+            rows.push((
+                Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(branch, Style::new().fg(theme::DIM)),
+                    Span::styled(agent.status.icon(), Style::new().fg(colour).add_modifier(Modifier::BOLD)),
+                    Span::raw(format!(" {label}{}", " ".repeat(pad))),
+                    Span::styled(word, Style::new().fg(colour)),
+                ]),
+                Some(entry.index),
+            ));
+            if !agent.topic.is_empty() && agent.topic != entry.label {
+                let text = format!("{}{}", " ".repeat(lead + 2), trunc(&agent.topic, width.saturating_sub(lead + 2)));
+                rows.push((Line::from(Span::styled(text, Style::new().fg(theme::DIM))), Some(entry.index)));
             }
-            hits.push((Rect::new(inner.x, y, inner.width, height), Target::AgentRow(entry.index)));
-            y += height;
-            shown += 1;
         }
     }
-    if shown < total && inner.height > 0 {
-        let more = Rect::new(inner.x, bottom - 1, inner.width, 1);
-        f.render_widget(Paragraph::new(Span::styled(format!("… +{} more (Ctrl-P lists them all)", total - shown), Style::new().fg(theme::DIM))), more);
+    let room = inner.height as usize;
+    let max = rows.len().saturating_sub(room);
+    app.agents_max.set(max);
+    let scroll = app.agents_scroll.min(max);
+    if max > 0 {
+        let arrows = format!(" {}{} {}/{} ", if scroll > 0 { "▲" } else { " " }, if scroll < max { "▼" } else { " " }, scroll + 1, max + 1);
+        block = block.title_bottom(Line::from(Span::styled(arrows, plate)).right_aligned());
     }
+    f.render_widget(block, area);
+    hits.push((area, Target::AgentPanel));
+    let shown: Vec<_> = rows.into_iter().skip(scroll).take(room).collect();
+    let mut start = 0;
+    while start < shown.len() {
+        let target = shown[start].1;
+        let mut end = start + 1;
+        while target.is_some() && end < shown.len() && shown[end].1 == target {
+            end += 1;
+        }
+        if let Some(index) = target {
+            hits.push((Rect::new(inner.x, inner.y + start as u16, inner.width, (end - start) as u16), Target::AgentRow(index)));
+        }
+        start = end;
+    }
+    let lines: Vec<Line> = shown.into_iter().map(|(l, _)| l).collect();
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_story_columns(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
@@ -483,20 +491,14 @@ fn draw_story_columns(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     for ((col, stories), rect) in columns.iter().zip(rects.iter()) {
         hits.push((*rect, Target::StoryColumn(*col)));
         let holds_selection = app.focus == Focus::Main && stories.contains(&app.list_sel);
-        let accent = if drop == Some(*col) {
-            panel::ORANGE
+        let edge = if drop == Some(*col) {
+            theme::Edge::Drop
         } else if holds_selection {
-            theme::BLUE
+            theme::Edge::Focus
         } else {
-            theme::BORDER
+            theme::Edge::Idle
         };
-        let block = Block::bordered()
-            .border_type(if holds_selection || drop == Some(*col) { BorderType::Double } else { BorderType::Plain })
-            .border_style(Style::new().fg(accent))
-            .title(Span::styled(
-                format!(" {} · {} ", col.label(), stories.len()),
-                Style::new().fg(if holds_selection { theme::BLUE } else { theme::FG }).add_modifier(Modifier::BOLD),
-            ));
+        let block = theme::panel_block(edge, Span::styled(format!(" {} · {} ", col.label(), stories.len()), theme::plate(edge)));
         let inner = block.inner(*rect);
         f.render_widget(block, *rect);
         let capacity = ((inner.height / STORY_CARD_HEIGHT) as usize).max(1);
@@ -818,12 +820,12 @@ fn draw_column(
     title: Option<String>,
     hits: &mut Hits,
 ) {
-    let accent = if drop {
-        panel::ORANGE
+    let edge = if drop {
+        theme::Edge::Drop
     } else if selected {
-        theme::BLUE
+        theme::Edge::Focus
     } else {
-        theme::DIM
+        theme::Edge::Idle
     };
     let title = title.unwrap_or_else(|| format!("{} · {}", label(col.status), col.tasks.len()));
     let inner_height = area.height.saturating_sub(2);
@@ -831,13 +833,7 @@ fn draw_column(
     let offset = if sel_row >= visible { sel_row + 1 - visible } else { 0 };
     let more_above = if offset > 0 { " ▲" } else { "" };
     let more_below = if offset + visible < col.tasks.len() { " ▼" } else { "" };
-    let block = Block::bordered()
-        .border_type(if selected || drop { BorderType::Double } else { BorderType::Plain })
-        .border_style(Style::new().fg(accent))
-        .title(Span::styled(
-            format!(" {title}{more_above}{more_below} "),
-            Style::new().fg(if selected { theme::BLUE } else { theme::FG }).add_modifier(Modifier::BOLD),
-        ));
+    let block = theme::panel_block(edge, Span::styled(format!(" {title}{more_above}{more_below} "), theme::plate(edge)));
     let inner = block.inner(area);
     f.render_widget(block, area);
     for (n, task) in col.tasks.iter().enumerate().skip(offset).take(visible) {
@@ -2229,6 +2225,34 @@ mod tests {
         app.on_key(KeyCode::Char('='), false);
         assert_eq!(app.agents_width, 38, "= resets it");
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_long_agents_list_scrolls_with_the_wheel_and_shows_where_you_are() {
+        use crate::agents::{AgentInfo, Status};
+        let (_root, mut app) = two_stories();
+        let _fake = with_herdr(&mut app);
+        app.agents = (0..30)
+            .map(|n| AgentInfo { pane: format!("w{n}:p1"), name: None, status: Status::Idle, topic: format!("agent number {n:02}"), workspace: format!("space {n:02}"), cwd: String::new(), session: None })
+            .collect();
+        let out = render(&app, 170, 30);
+        assert!(out.contains("agent number 00") && !out.contains("agent number 29"), "{out}");
+        assert!(out.contains("▼") && out.contains("1/"), "the panel says there is more below:\n{out}");
+        let (x, y) = find(&out, "agent number 00");
+        app.on_scroll(x, y, 1);
+        let out = render(&app, 170, 30);
+        assert!(!out.contains("agent number 00"), "the wheel moved it:\n{out}");
+        assert!(out.contains("▲"), "{out}");
+        for _ in 0..40 {
+            app.on_scroll(x, y, 1);
+            render(&app, 170, 30);
+        }
+        let out = render(&app, 170, 30);
+        assert!(out.contains("agent number 29"), "scrolled to the end:\n{out}");
+        assert!(!out.contains("▼ "), "nothing more below");
+        let (x, y) = find(&out, "agent number 29");
+        app.on_click(x, y);
+        assert_eq!(app.agents_scroll, app.agents_max.get(), "a click does not scroll");
     }
 
     #[test]
