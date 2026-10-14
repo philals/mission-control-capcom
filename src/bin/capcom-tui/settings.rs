@@ -1,5 +1,5 @@
 //! The remembered panel sizes, kept in the user's config folder (never in a repository).
-use crate::app::{HEIGHT_RANGE, SPLIT_RANGE};
+use crate::app::{AGENTS_WIDTH_RANGE, HEIGHT_RANGE, SPLIT_RANGE};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -8,6 +8,7 @@ pub const COLUMNS: usize = 6;
 pub const MIN_COLUMN_WEIGHT: u16 = 20;
 pub const DEFAULT_SPLIT: u16 = 58;
 pub const DEFAULT_COLUMN_WEIGHT: u16 = 100;
+pub const DEFAULT_AGENTS_WIDTH: u16 = 38;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -28,6 +29,9 @@ pub struct Settings {
     pub slow_when_away: bool,
     /// Links of the PRs pasted into the PR panel.
     pub pasted_prs: Vec<String>,
+    /// Whether the agents panel shows left of the story board, and how many columns wide it is.
+    pub agents_on: bool,
+    pub agents_width: u16,
 }
 
 impl Default for Settings {
@@ -45,6 +49,8 @@ impl Default for Settings {
             autocopilot_prs: Vec::new(),
             slow_when_away: true,
             pasted_prs: Vec::new(),
+            agents_on: true,
+            agents_width: DEFAULT_AGENTS_WIDTH,
         }
     }
 }
@@ -53,6 +59,7 @@ impl Settings {
     /// Keep every value inside the range the layout can draw, whatever the file said.
     fn sanitized(mut self) -> Settings {
         self.split_pct = self.split_pct.clamp(SPLIT_RANGE.0, SPLIT_RANGE.1);
+        self.agents_width = self.agents_width.clamp(AGENTS_WIDTH_RANGE.0, AGENTS_WIDTH_RANGE.1);
         self.bottom_pct = self.bottom_pct.map(|p| p.clamp(HEIGHT_RANGE.0, HEIGHT_RANGE.1));
         self.columns.resize(COLUMNS, DEFAULT_COLUMN_WEIGHT);
         for weight in &mut self.columns {
@@ -119,7 +126,7 @@ mod tests {
     fn settings_survive_a_save_and_a_load() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("tui.json");
-        let saved = Settings { split_pct: 63, bottom_pct: Some(50), split_pinned: true, columns: vec![120, 80, 100, 100, 100, 100], auto_sync: true, watched: vec![], autofix: true, autofix_prs: vec![("https://github.com/acme/api/pull/1".into(), false)], autocopilot: true, autocopilot_prs: vec![("https://github.com/acme/api/pull/2".into(), true)], slow_when_away: false, pasted_prs: vec!["https://github.com/acme/api/pull/9".into()] };
+        let saved = Settings { split_pct: 63, bottom_pct: Some(50), split_pinned: true, columns: vec![120, 80, 100, 100, 100, 100], auto_sync: true, watched: vec![], autofix: true, autofix_prs: vec![("https://github.com/acme/api/pull/1".into(), false)], autocopilot: true, autocopilot_prs: vec![("https://github.com/acme/api/pull/2".into(), true)], slow_when_away: false, pasted_prs: vec!["https://github.com/acme/api/pull/9".into()], agents_on: false, agents_width: 50 };
         save(&path, &saved).unwrap();
         assert_eq!(load(&path), saved);
     }
