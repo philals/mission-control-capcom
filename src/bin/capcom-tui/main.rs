@@ -1,3 +1,4 @@
+mod agents;
 mod app;
 mod attention;
 mod cache;
@@ -193,6 +194,7 @@ fn main() -> Result<()> {
     if herdr::inside_herdr() {
         let cwd = cli.workdir.or_else(|| std::env::current_dir().ok()).unwrap_or_default();
         app.herdr = Some(Arc::new(herdr::Cli::new(cwd)));
+        app.start_agents();
     }
     if let Some(config) = capcom::session::config_dir() {
         app.start_pr_links(config, cache::Cache::default_dir().map(|d| d.join("pr-links.json")));

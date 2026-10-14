@@ -34,6 +34,8 @@ pub enum Action {
     FinishTask,
     TaskDetails,
     TaskAgent,
+    ToggleAgents,
+    FocusAgent(usize),
     PrOpen(String),
     PrCopy(String),
     PrDetails(String),
@@ -198,6 +200,13 @@ pub fn entries_for(app: &App) -> Vec<Entry> {
         "W",
         Action::ToggleSlowAway,
     ));
+    if app.herdr.is_some() {
+        list.push(entry(format!("Turn the agents panel {}", if app.agents_on { "off" } else { "on" }), "A", Action::ToggleAgents));
+        for (i, a) in app.agents.iter().enumerate() {
+            let who = a.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| a.topic.clone());
+            list.push(entry(format!("Go to agent {who} ({})", a.status.word()), "", Action::FocusAgent(i)));
+        }
+    }
     list.push(entry("Reset the panel sizes", "=", Action::ResetLayout));
     list.push(entry("Show the keys", "?", Action::Help));
     list.push(entry("Quit", "q", Action::Quit));
