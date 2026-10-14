@@ -144,16 +144,20 @@ pub type Runner = Box<dyn Fn(&[String]) -> Result<Value, String> + Send + Sync>;
 pub struct Cli {
     run: Runner,
     cwd: PathBuf,
+    /// `workspace list`, kept for a while: workspaces rarely change and the agents are listed often.
+    workspaces: std::sync::Mutex<Option<(std::time::Instant, Value)>>,
 }
+
+const WORKSPACES_KEPT: Duration = Duration::from_secs(60);
 
 impl Cli {
     pub fn new(cwd: PathBuf) -> Cli {
-        Cli { run: Box::new(herdr_json), cwd }
+        Cli { run: Box::new(herdr_json), cwd, workspaces: Default::default() }
     }
 
     #[cfg(test)]
     pub fn with_runner(cwd: PathBuf, run: Runner) -> Cli {
-        Cli { run, cwd }
+        Cli { run, cwd, workspaces: Default::default() }
     }
 
     fn call(&self, args: &[&str]) -> Result<Value, String> {
@@ -225,8 +229,17 @@ impl Herdr for Cli {
 
     fn agents(&self) -> Result<Vec<crate::agents::AgentInfo>, String> {
         let agents = self.call(&["agent", "list"])?;
-        let workspaces = self.call(&["workspace", "list"]).unwrap_or(Value::Null);
-        Ok(crate::agents::parse(&agents, &workspaces))
+        let known = |list: &Value, id: &str| list["result"]["workspaces"].as_array().is_some_and(|all| all.iter().any(|w| w["workspace_id"] == id));
+        let mut kept = self.workspaces.lock().unwrap_or_else(|e| e.into_inner());
+        let fresh = kept.as_ref().is_some_and(|(at, list)| {
+            at.elapsed() < WORKSPACES_KEPT
+                && agents["result"]["agents"].as_array().is_none_or(|all| all.iter().all(|a| known(list, a["workspace_id"].as_str().unwrap_or_default())))
+        });
+        if !fresh {
+            *kept = Some((std::time::Instant::now(), self.call(&["workspace", "list"]).unwrap_or(Value::Null)));
+        }
+        let workspaces = kept.as_ref().map_or(&Value::Null, |(_, list)| list);
+        Ok(crate::agents::parse(&agents, workspaces))
     }
 
     fn focus(&self, pane: &str) -> Result<(), String> {

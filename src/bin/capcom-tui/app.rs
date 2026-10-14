@@ -284,6 +284,7 @@ pub struct FixNeed {
 
 /// Asking an agent only to bring a branch up to date waits this long after the last such ask, so a busy
 /// repo's every merge does not start a new round.
+const AGENTS_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
 const BEHIND_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
 /// Rows with nothing to do (this rank and below) are shown as one line unless selected.
@@ -2158,9 +2159,17 @@ impl App {
         let (Some(herdr), done) = (self.herdr.clone(), self.launch_done.0.clone()) else {
             return;
         };
+        let attention = self.attention.clone();
         std::thread::spawn(move || {
             let mut last = None;
+            let mut asked: Option<std::time::Instant> = None;
             loop {
+                // out of sight it asks four times less often; looking again is noticed within a second
+                if asked.is_some_and(|at| at.elapsed() < attention.wait(AGENTS_EVERY)) {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    continue;
+                }
+                asked = Some(std::time::Instant::now());
                 if let Ok(list) = herdr.agents() {
                     if last.as_ref() != Some(&list) {
                         last = Some(list.clone());
@@ -2169,7 +2178,6 @@ impl App {
                         }
                     }
                 }
-                std::thread::sleep(std::time::Duration::from_secs(3));
             }
         });
     }

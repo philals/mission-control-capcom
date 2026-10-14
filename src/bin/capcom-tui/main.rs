@@ -251,6 +251,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     // Draw only when something changed, and on a slow tick for the "ago" and "running 2m 05s" texts.
     let mut dirty = true;
     let mut drawn_tick = u64::MAX;
+    let mut checked_files = std::time::Instant::now();
     loop {
         let tick = app.started.elapsed().as_millis() as u64 / app.tick_millis();
         if dirty || tick != drawn_tick {
@@ -291,9 +292,13 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             let _ = std::io::Write::write_all(&mut std::io::stdout(), b"\x07");
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
-        if app.needs_reload() {
-            app.reload();
-            dirty = true;
+        // the story files are looked at once a second, not on every wake-up
+        if checked_files.elapsed() >= Duration::from_secs(1) || dirty {
+            checked_files = std::time::Instant::now();
+            if app.needs_reload() {
+                app.reload();
+                dirty = true;
+            }
         }
     }
 }
