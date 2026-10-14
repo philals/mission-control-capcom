@@ -445,6 +445,8 @@ pub enum AppMsg {
     PrLinks(Vec<(String, PrSession)>),
     /// The agents Herdr is running now.
     Agents(Vec<crate::agents::AgentInfo>),
+    /// Which session made which Herdr pane, read from Claude Code's transcripts: (pane, parent session).
+    Spawns(Vec<(String, String)>),
     /// The agent was asked to fix a PR: this is round `n`.
     FixSent(String, u32),
     /// The ask did not happen (agent busy, state file locked): look again on the next poll.
@@ -647,6 +649,7 @@ pub struct App {
     pub pr_links: Vec<(String, PrSession)>,
     pub herdr: Option<Arc<dyn Herdr>>,
     pub agents: Vec<crate::agents::AgentInfo>,
+    pub spawns: Vec<(String, String)>,
     pub agents_on: bool,
     /// The text typed or pasted into the "new story" box, while it is open.
     pub new_story: Option<String>,
@@ -752,6 +755,7 @@ impl App {
             pr_links: Vec::new(),
             herdr: None,
             agents: Vec::new(),
+            spawns: Vec::new(),
             agents_on: true,
             new_story: None,
             card_drag: None,
@@ -2094,7 +2098,8 @@ impl App {
                             let _ = index.save(file);
                         }
                     }
-                    if done.send(AppMsg::PrLinks(index.sessions())).is_err() {
+                    let spawns = index.spawns().into_iter().map(|s| (s.pane, s.session)).collect();
+                    if done.send(AppMsg::PrLinks(index.sessions())).is_err() || done.send(AppMsg::Spawns(spawns)).is_err() {
                         return;
                     }
                 }
@@ -2763,6 +2768,7 @@ impl App {
                 AppMsg::Notice(text) => self.set_notice(text),
                 AppMsg::PrLinks(links) => self.pr_links = links,
                 AppMsg::Agents(list) => self.agents = list,
+                AppMsg::Spawns(list) => self.spawns = list,
                 AppMsg::FixSent(url, round) => {
                     self.fix_rounds.insert(url, (round, std::time::Instant::now()));
                 }
