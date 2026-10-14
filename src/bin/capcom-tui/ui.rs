@@ -452,7 +452,14 @@ fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
                     Span::styled(agent.status.icon(), Style::new().fg(colour).add_modifier(Modifier::BOLD)),
                     Span::raw(format!(" {label}{}", " ".repeat(pad))),
                     Span::styled(word, Style::new().fg(colour)),
-                    Span::styled(if closable { " ✕" } else { "" }, Style::new().fg(theme::RED).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        match (closable, app.agent_close_armed.as_ref() == Some(&agent.pane)) {
+                            (false, _) => "",
+                            (true, false) => " ✕",
+                            (true, true) => " ?",
+                        },
+                        Style::new().fg(theme::RED).add_modifier(Modifier::BOLD),
+                    ),
                 ]),
                 Some(entry.index),
                 closable,
@@ -2293,6 +2300,18 @@ mod tests {
         app.on_key(KeyCode::Esc, false);
         app.close_agent(1);
         assert!(fake.closed.lock().unwrap().is_empty() && app.agents.len() == 2, "a working agent is not closed");
+        render(&app, 170, 44);
+        app.on_click(x, y);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        app.poll_ready();
+        assert!(fake.closed.lock().unwrap().is_empty(), "the first click only asks");
+        let out = render(&app, 170, 44);
+        assert!(line_of(&out, "resting one").contains('?') && !out.contains('✕'), "the cross became a question mark:\n{out}");
+        app.on_hover(x, y);
+        assert!(app.tooltip().unwrap().contains("click the red ?"));
+        app.on_click(x, y + 2);
+        assert!(!line_of(&render(&app, 170, 44), "resting one").contains('?'), "a click elsewhere takes the question back");
+        app.on_click(x, y);
         render(&app, 170, 44);
         app.on_click(x, y);
         for _ in 0..200 {

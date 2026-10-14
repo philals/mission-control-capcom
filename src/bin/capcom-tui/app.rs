@@ -662,6 +662,8 @@ pub struct App {
     pub spawns: Vec<(String, String)>,
     pub agents_on: bool,
     pub agents_width: u16,
+    /// The pane whose red ✕ was clicked once: its next click, now a red ?, closes it.
+    pub agent_close_armed: Option<String>,
     pub agents_scroll: usize,
     pub agents_max: std::cell::Cell<usize>,
     /// The text typed or pasted into the "new story" box, while it is open.
@@ -771,6 +773,7 @@ impl App {
             spawns: Vec::new(),
             agents_on: true,
             agents_width: crate::settings::DEFAULT_AGENTS_WIDTH,
+            agent_close_armed: None,
             agents_scroll: 0,
             agents_max: std::cell::Cell::new(0),
             new_story: None,
@@ -2949,6 +2952,7 @@ impl App {
 
     /// Returns true when the app should quit.
     pub fn on_key(&mut self, code: KeyCode, ctrl: bool) -> bool {
+        self.agent_close_armed = None;
         if ctrl {
             match code {
                 KeyCode::Char('c') => return true,
@@ -3349,7 +3353,13 @@ impl App {
             Target::PrMerge(_) => "automerge: the merge bot merges this PR by itself once it is approved and green; this adds or removes its label (g)",
             Target::PrAgent(_) => "go to the agent that made this PR (a)",
             Target::AgentRow(_) => "bring this agent to the front in Herdr (right-click for more)",
-            Target::AgentClose(_) => "close this idle agent's pane in Herdr; its session stays on disk, so it can be resumed",
+            Target::AgentClose(i) => {
+                if self.agents.get(i).is_some_and(|a| self.agent_close_armed.as_ref() == Some(&a.pane)) {
+                    "click the red ? to close this agent's pane for good; its session stays on disk"
+                } else {
+                    "close this idle agent: click the red ✕, then the red ? to confirm"
+                }
+            }
             Target::TaskAgent => "go to the agent working on this task: bring it to the front, or resume its session (a)",
             Target::PrCopy(_) => "copy the link of this PR (c)",
             Target::PrDetails(_) => "every check, the state and the link (Enter)",
@@ -3382,6 +3392,9 @@ impl App {
 
     pub fn on_click(&mut self, x: u16, y: u16) {
         let target = self.hit(x, y);
+        if !matches!(target, Some(Target::AgentClose(_))) {
+            self.agent_close_armed = None;
+        }
         if self.palette.is_some() {
             match target {
                 Some(Target::PaletteItem(n)) => {
@@ -3509,7 +3522,13 @@ impl App {
                 return;
             }
             Some(Target::AgentClose(i)) => {
-                self.close_agent(i);
+                let pane = self.agents.get(i).map(|a| a.pane.clone());
+                if pane.is_some() && self.agent_close_armed == pane {
+                    self.agent_close_armed = None;
+                    self.close_agent(i);
+                } else {
+                    self.agent_close_armed = pane;
+                }
                 return;
             }
             Some(Target::PrAgent(i)) => {
