@@ -134,7 +134,7 @@ fn draw_hover(f: &mut Frame, app: &App, hits: &Hits) {
     };
     let button = matches!(
         target,
-        Target::PrAuto(_) | Target::PrReview(_) | Target::PrMerge(_) | Target::PrAgent(_) | Target::TaskAgent | Target::PrCopy(_) | Target::PrDetails(_) | Target::PrBadge(_)
+        Target::PrAuto(_) | Target::PrReview(_) | Target::PrMerge(_) | Target::PrAgent(_) | Target::TaskAgent | Target::AgentClose(_) | Target::PrCopy(_) | Target::PrDetails(_) | Target::PrBadge(_)
             | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::GoLight | Target::Refresh | Target::NewStory | Target::ToggleDone
             | Target::OpenCheck(..) | Target::OpenJob(..) | Target::RunDetails(_) | Target::Back | Target::PaletteItem(_)
     );
@@ -426,10 +426,10 @@ fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let stories: Vec<(String, String)> = app.stories.iter().map(|s| (s.key.clone(), crate::herdr::short_name(&s.title))).collect();
     let width = inner.width as usize;
     let parents = agents::parents(&app.agents, &app.spawns);
-    let mut rows: Vec<(Line<'static>, Option<usize>)> = Vec::new();
+    let mut rows: Vec<(Line<'static>, Option<usize>, bool)> = Vec::new();
     for group in agents::groups(&app.agents, &stories, &parents) {
         let style = if group.story { Style::new().fg(theme::CYAN).add_modifier(Modifier::BOLD) } else { Style::new().fg(theme::MUTED).add_modifier(Modifier::BOLD) };
-        rows.push((Line::from(Span::styled(trunc(&group.label, width), style)), None));
+        rows.push((Line::from(Span::styled(trunc(&group.label, width), style)), None, false));
         for entry in &group.entries {
             let agent = &app.agents[entry.index];
             let colour = match agent.status {
@@ -441,8 +441,10 @@ fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
             let word = agent.status.word();
             let branch = if entry.depth == 0 { String::new() } else { format!("{}└ ", "  ".repeat(entry.depth - 1)) };
             let lead = 2 + branch.chars().count();
-            let label = trunc(&entry.label, width.saturating_sub(lead + word.chars().count() + 3));
-            let pad = width.saturating_sub(lead + label.chars().count() + word.chars().count() + 2);
+            let closable = matches!(agent.status, Status::Idle | Status::Done);
+            let cross = if closable { 2 } else { 0 };
+            let label = trunc(&entry.label, width.saturating_sub(lead + word.chars().count() + cross + 3));
+            let pad = width.saturating_sub(lead + label.chars().count() + word.chars().count() + cross + 2);
             rows.push((
                 Line::from(vec![
                     Span::raw("  "),
@@ -450,12 +452,14 @@ fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
                     Span::styled(agent.status.icon(), Style::new().fg(colour).add_modifier(Modifier::BOLD)),
                     Span::raw(format!(" {label}{}", " ".repeat(pad))),
                     Span::styled(word, Style::new().fg(colour)),
+                    Span::styled(if closable { " ✕" } else { "" }, Style::new().fg(theme::RED).add_modifier(Modifier::BOLD)),
                 ]),
                 Some(entry.index),
+                closable,
             ));
             if !agent.topic.is_empty() && agent.topic != entry.label {
                 let text = format!("{}{}", " ".repeat(lead + 2), trunc(&agent.topic, width.saturating_sub(lead + 2)));
-                rows.push((Line::from(Span::styled(text, Style::new().fg(theme::DIM))), Some(entry.index)));
+                rows.push((Line::from(Span::styled(text, Style::new().fg(theme::DIM))), Some(entry.index), false));
             }
         }
     }
@@ -469,7 +473,7 @@ fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     }
     f.render_widget(block, area);
     hits.push((area, Target::AgentPanel));
-    let shown: Vec<_> = rows.into_iter().skip(scroll).take(room).collect();
+    let shown: Vec<(Line<'static>, Option<usize>, bool)> = rows.into_iter().skip(scroll).take(room).collect();
     let mut start = 0;
     while start < shown.len() {
         let target = shown[start].1;
@@ -482,7 +486,12 @@ fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         }
         start = end;
     }
-    let lines: Vec<Line> = shown.into_iter().map(|(l, _)| l).collect();
+    for (n, (_, target, closable)) in shown.iter().enumerate() {
+        if let (Some(index), true) = (target, closable) {
+            hits.push((Rect::new(inner.x + inner.width.saturating_sub(2), inner.y + n as u16, 2.min(inner.width), 1), Target::AgentClose(*index)));
+        }
+    }
+    let lines: Vec<Line> = shown.into_iter().map(|(l, _, _)| l).collect();
     f.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -2092,9 +2101,15 @@ mod tests {
         resumes: std::sync::Mutex<Vec<crate::herdr::Resume>>,
         busy: std::sync::atomic::AtomicBool,
         focused: std::sync::Mutex<Vec<String>>,
+        closed: std::sync::Mutex<Vec<String>>,
     }
 
     impl crate::herdr::Herdr for FakeHerdr {
+        fn close(&self, pane: &str) -> Result<(), String> {
+            self.closed.lock().unwrap().push(pane.to_string());
+            Ok(())
+        }
+
         fn focus(&self, pane: &str) -> Result<(), String> {
             self.focused.lock().unwrap().push(pane.to_string());
             Ok(())
@@ -2115,7 +2130,7 @@ mod tests {
     }
 
     fn with_herdr(app: &mut App) -> std::sync::Arc<FakeHerdr> {
-        let fake = std::sync::Arc::new(FakeHerdr { launches: std::sync::Mutex::new(Vec::new()), resumes: std::sync::Mutex::new(Vec::new()), busy: std::sync::atomic::AtomicBool::new(false), focused: std::sync::Mutex::new(Vec::new()) });
+        let fake = std::sync::Arc::new(FakeHerdr { launches: std::sync::Mutex::new(Vec::new()), resumes: std::sync::Mutex::new(Vec::new()), busy: std::sync::atomic::AtomicBool::new(false), focused: std::sync::Mutex::new(Vec::new()), closed: std::sync::Mutex::new(Vec::new()) });
         app.herdr = Some(fake.clone());
         fake
     }
@@ -2256,6 +2271,39 @@ mod tests {
         let (x, y) = find(&out, "agent number 29");
         app.on_click(x, y);
         assert_eq!(app.agents_scroll, app.agents_max.get(), "a click does not scroll");
+    }
+
+    #[test]
+    fn an_idle_agent_has_a_red_cross_and_right_click_offers_close_but_one_at_work_is_left_alone() {
+        use crate::agents::{AgentInfo, Status};
+        let (_root, mut app) = two_stories();
+        let fake = with_herdr(&mut app);
+        let agent = |pane: &str, status, topic: &str| AgentInfo { pane: pane.into(), name: None, status, topic: topic.into(), workspace: "scratch".into(), cwd: String::new(), session: None };
+        app.agents = vec![agent("w1:p1", Status::Idle, "resting one"), agent("w2:p1", Status::Working, "busy one")];
+        let out = render(&app, 170, 44);
+        assert_eq!(out.matches('✕').count(), 1, "only the idle agent has a cross:\n{out}");
+        let (x, y) = find(&out, "✕");
+        app.on_hover(x, y);
+        assert!(render(&app, 260, 44).lines().last().unwrap().contains("close this idle agent"), "the tip says what it does");
+        let out = render(&app, 170, 44);
+        let (bx, by) = find(&out, "busy one");
+        app.on_right_click(bx, by);
+        let menu = render(&app, 170, 44);
+        assert!(menu.contains("Go to busy one") && menu.contains("Close busy one (only when idle)"), "{menu}");
+        app.on_key(KeyCode::Esc, false);
+        app.close_agent(1);
+        assert!(fake.closed.lock().unwrap().is_empty() && app.agents.len() == 2, "a working agent is not closed");
+        render(&app, 170, 44);
+        app.on_click(x, y);
+        for _ in 0..200 {
+            app.poll_ready();
+            if !fake.closed.lock().unwrap().is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(*fake.closed.lock().unwrap(), vec!["w1:p1".to_string()]);
+        assert_eq!(app.agents.len(), 1, "it leaves the list at once");
     }
 
     #[test]

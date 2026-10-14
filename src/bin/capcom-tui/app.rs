@@ -98,6 +98,8 @@ pub enum Target {
     TaskAgent,
     /// A row of the agents panel: the agent at this index of `App::agents`.
     AgentRow(usize),
+    /// The red ✕ on an idle agent's row.
+    AgentClose(usize),
     /// The agents panel itself, for the wheel.
     AgentPanel,
     /// The `[ agent ]` button: back to the agent session that made the PR.
@@ -2180,6 +2182,30 @@ impl App {
         self.set_notice(format!("agents panel {}", if self.agents_on { "on" } else { "off" }));
     }
 
+    /// Close an agent's pane in Herdr. Only an agent that is waiting (idle or done) is closed; one at
+    /// work or asking a question is left alone.
+    pub fn close_agent(&mut self, index: usize) {
+        use crate::agents::Status;
+        let (Some(agent), Some(herdr)) = (self.agents.get(index), self.herdr.clone()) else {
+            return;
+        };
+        let name = agent.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| agent.topic.clone());
+        if !matches!(agent.status, Status::Idle | Status::Done) {
+            self.set_notice(format!("{name} is {}: only an idle agent is closed", agent.status.word()));
+            return;
+        }
+        let pane = agent.pane.clone();
+        self.agents.remove(index);
+        let done = self.launch_done.0.clone();
+        std::thread::spawn(move || {
+            let text = match herdr.close(&pane) {
+                Ok(()) => format!("closed {name} (its session is kept: resume it from the board)"),
+                Err(e) => format!("could not close {name}: {e}"),
+            };
+            let _ = done.send(AppMsg::Notice(text));
+        });
+    }
+
     /// A row of the agents panel was clicked: bring that agent to the front in Herdr.
     pub fn open_agent(&mut self, index: usize) {
         let (Some(agent), Some(herdr)) = (self.agents.get(index), self.herdr.clone()) else {
@@ -3253,6 +3279,7 @@ impl App {
             Action::TaskAgent => self.open_task_agent(),
             Action::ToggleAgents => self.toggle_agents_panel(),
             Action::FocusAgent(index) => self.open_agent(index),
+            Action::CloseAgent(index) => self.close_agent(index),
             Action::PrOpen(url) => on_pr(self, &url, &|app, i| app.open_pr(i)),
             Action::PrCopy(url) => on_pr(self, &url, &|app, i| app.copy_pr(i)),
             Action::PrDetails(url) => on_pr(self, &url, &|app, _| app.pr_sheet = true),
@@ -3274,6 +3301,13 @@ impl App {
         }
         let target = self.hit(x, y);
         self.close_overlays();
+        if let Some(Target::AgentRow(i) | Target::AgentClose(i)) = target {
+            if let Some(agent) = self.agents.get(i) {
+                let entries = crate::palette::agent_entries(i, agent);
+                self.palette = Some(crate::palette::Palette::menu(" Agent ", entries, (x, y)));
+                return;
+            }
+        }
         let pr = match target {
             Some(Target::Pr(i) | Target::PrDetails(i) | Target::PrCopy(i) | Target::PrAgent(i) | Target::PrReview(i) | Target::PrAuto(i) | Target::PrMerge(i) | Target::PrBadge(i) | Target::OpenCheck(i, _)) => Some(i),
             _ => None,
@@ -3314,7 +3348,8 @@ impl App {
             Target::PrReview(_) => "auto-review: ask Copilot to review this PR, once (v)",
             Target::PrMerge(_) => "automerge: the merge bot merges this PR by itself once it is approved and green; this adds or removes its label (g)",
             Target::PrAgent(_) => "go to the agent that made this PR (a)",
-            Target::AgentRow(_) => "bring this agent to the front in Herdr",
+            Target::AgentRow(_) => "bring this agent to the front in Herdr (right-click for more)",
+            Target::AgentClose(_) => "close this idle agent's pane in Herdr; its session stays on disk, so it can be resumed",
             Target::TaskAgent => "go to the agent working on this task: bring it to the front, or resume its session (a)",
             Target::PrCopy(_) => "copy the link of this PR (c)",
             Target::PrDetails(_) => "every check, the state and the link (Enter)",
@@ -3473,6 +3508,10 @@ impl App {
                 self.open_agent(i);
                 return;
             }
+            Some(Target::AgentClose(i)) => {
+                self.close_agent(i);
+                return;
+            }
             Some(Target::PrAgent(i)) => {
                 self.set_focus(Focus::Prs);
                 self.pr_sel = i;
@@ -3570,7 +3609,7 @@ impl App {
             return;
         }
         let target = self.hit(x, y);
-        if matches!(target, Some(Target::AgentRow(_) | Target::AgentPanel)) {
+        if matches!(target, Some(Target::AgentRow(_) | Target::AgentClose(_) | Target::AgentPanel)) {
             self.scroll_agents(delta.signum() * 3);
             return;
         }
