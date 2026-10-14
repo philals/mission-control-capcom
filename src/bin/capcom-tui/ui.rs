@@ -1,5 +1,5 @@
 use crate::theme;
-use crate::app::{App, AskKind, BottomTab, Column, Focus, Geometry, Screen, StorySummary, Target, STATUS_ORDER};
+use crate::app::{App, AGENTS_WIDTH_RANGE, AskKind, BottomTab, Column, Focus, Geometry, Screen, StorySummary, Target, STATUS_ORDER};
 use crate::prs::PullRequest;
 use crate::{panel, runs_ui, taskdoc};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -21,7 +21,6 @@ const STORY_CARD_HEIGHT: u16 = 5;
 const COMPACT_BELOW: u16 = 60;
 const WIDE_FROM: u16 = 150;
 const RUNS_SMALL_WIDTH: u16 = 30;
-const AGENTS_WIDTH: u16 = 38;
 const BACK_LABEL: &str = "‹ Stories";
 
 pub fn draw(f: &mut Frame, app: &App) {
@@ -38,13 +37,17 @@ pub fn draw(f: &mut Frame, app: &App) {
     } else {
         (rows[1], None)
     };
+    let mut agents_x = None;
     match app.screen {
         Screen::List => {
             draw_list_header(f, rows[0], app, &mut hits);
             if app.agents_panel(area.width) {
-                let parts = Layout::horizontal([Constraint::Length(AGENTS_WIDTH), Constraint::Min(20)]).split(main);
+                let width = app.agents_width.min(main.width.saturating_sub(40)).max(AGENTS_WIDTH_RANGE.0.min(main.width));
+                let parts = Layout::horizontal([Constraint::Length(width), Constraint::Min(20)]).split(main);
                 draw_agents(f, parts[0], app, &mut hits);
+                agents_x = Some(parts[0].x);
                 draw_list(f, parts[1], app, &mut hits);
+                hits.push((Rect::new(parts[0].x + parts[0].width - 1, parts[0].y, 2, parts[0].height), Target::AgentsHandle));
             } else {
                 draw_list(f, main, app, &mut hits);
             }
@@ -63,6 +66,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         body_h: rows[1].height,
         bottom_x: panel_area.map_or(area.x, |b| b.x),
         bottom_w: panel_area.map_or(area.width, |b| b.width),
+        agents_x: agents_x.unwrap_or(0),
     });
     if let Some(bottom) = panel_area {
         if wide {
@@ -1093,7 +1097,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("r", "reload now (it also reloads by itself)".into()),
         row("< >", "make the PR panel narrower or wider (or drag the divider)".into()),
         row("+ -", "make the bottom panels taller or shorter (or drag their top edge)".into()),
-        row(", .", "make the selected kanban column narrower or wider (or drag a column border)".into()),
+        row(", .", "make the selected kanban column narrower or wider (or drag a column border); on the story list, the agents panel (or drag its right edge)".into()),
         row("=", "reset all panel sizes".into()),
         row("Ctrl-P", "the command palette: type to find any action and press Enter (Esc closes it)".into()),
         row("?", "toggle this help".into()),
@@ -2199,6 +2203,32 @@ mod tests {
         assert_eq!(*fake.focused.lock().unwrap(), vec!["w2:p3".to_string()]);
         app.on_key(KeyCode::Char('A'), false);
         assert!(!render(&app, 170, 44).contains("AGENTS"), "A hides it");
+    }
+
+    #[test]
+    fn the_agents_panel_is_resized_by_dragging_its_edge_or_by_keys_and_the_size_is_kept() {
+        let (_root, mut app) = two_stories();
+        let path = std::env::temp_dir().join(format!("capcom-agents-{}.json", std::process::id()));
+        app.settings_path = Some(path.clone());
+        let _fake = with_herdr(&mut app);
+        let out = render(&app, 170, 44);
+        assert!(out.contains("AGENTS"));
+        let (x, y) = (app.agents_width - 1, 10);
+        assert_eq!(app.agents_width, 38);
+        app.on_click(x, y);
+        app.on_drag(x + 12, y);
+        app.on_release();
+        assert_eq!(app.agents_width, 50, "the edge follows the pointer");
+        app.on_key(KeyCode::Char(','), false);
+        assert_eq!(app.agents_width, 48, "a key narrows it by two columns");
+        for _ in 0..40 {
+            app.on_key(KeyCode::Char('.'), false);
+        }
+        assert_eq!(app.agents_width, 70, "never wider than the limit");
+        assert_eq!(crate::settings::load(&path).agents_width, 70, "remembered");
+        app.on_key(KeyCode::Char('='), false);
+        assert_eq!(app.agents_width, 38, "= resets it");
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

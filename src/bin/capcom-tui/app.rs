@@ -61,6 +61,7 @@ pub enum BottomTab {
 pub enum Drag {
     Split,
     Height,
+    Agents,
     Column { index: usize, x0: u16, x1: u16 },
 }
 
@@ -71,9 +72,12 @@ pub struct Geometry {
     pub body_h: u16,
     pub bottom_x: u16,
     pub bottom_w: u16,
+    /// Where the agents panel starts, when it is drawn.
+    pub agents_x: u16,
 }
 
 pub const SPLIT_RANGE: (u16, u16) = (25, 80);
+pub const AGENTS_WIDTH_RANGE: (u16, u16) = (24, 70);
 pub const HEIGHT_RANGE: (u16, u16) = (15, 80);
 
 /// What a mouse click on a rectangle does. Rectangles are recorded while drawing.
@@ -132,6 +136,8 @@ pub enum Target {
     NewStoryCancel,
     SplitHandle,
     HeightHandle,
+    /// The right edge of the agents panel.
+    AgentsHandle,
     /// The border between kanban column `i` and `i + 1`; carries the span of both columns.
     ColumnHandle(usize, u16, u16),
     Sheet,
@@ -651,6 +657,7 @@ pub struct App {
     pub agents: Vec<crate::agents::AgentInfo>,
     pub spawns: Vec<(String, String)>,
     pub agents_on: bool,
+    pub agents_width: u16,
     /// The text typed or pasted into the "new story" box, while it is open.
     pub new_story: Option<String>,
     pub card_drag: Option<CardDrag>,
@@ -757,6 +764,7 @@ impl App {
             agents: Vec::new(),
             spawns: Vec::new(),
             agents_on: true,
+            agents_width: crate::settings::DEFAULT_AGENTS_WIDTH,
             new_story: None,
             card_drag: None,
             story_drag: None,
@@ -1906,6 +1914,8 @@ impl App {
             autocopilot_prs: self.autocopilot_prs.iter().map(|(u, on)| (u.clone(), *on)).collect(),
             slow_when_away: self.attention.slow_when_away(),
             pasted_prs: self.pasted.clone(),
+            agents_on: self.agents_on,
+            agents_width: self.agents_width,
         }
     }
 
@@ -1917,6 +1927,8 @@ impl App {
         self.split_pct = saved.split_pct;
         self.bottom_pct = saved.bottom_pct;
         self.split_pinned = saved.split_pinned;
+        self.agents_on = saved.agents_on;
+        self.agents_width = saved.agents_width;
         self.auto_sync = saved.auto_sync;
         self.watches = saved.watched;
         self.autofix = saved.autofix;
@@ -1945,8 +1957,19 @@ impl App {
         self.save_settings();
     }
 
-    /// Grow (or shrink) the selected kanban column at the expense of its neighbour.
+    /// Make the agents panel wider or narrower.
+    pub fn resize_agents(&mut self, delta: i16) {
+        self.agents_width = (self.agents_width as i16 + delta).clamp(AGENTS_WIDTH_RANGE.0 as i16, AGENTS_WIDTH_RANGE.1 as i16) as u16;
+        self.save_settings();
+    }
+
+    /// Grow (or shrink) the selected kanban column at the expense of its neighbour; on the story
+    /// list, the agents panel.
     pub fn resize_column(&mut self, delta: i16) {
+        if self.screen == Screen::List && self.herdr.is_some() && self.agents_on {
+            self.resize_agents(delta.signum() * 2);
+            return;
+        }
         let count = self.columns().len();
         if self.screen != Screen::Board || count < 2 {
             return;
@@ -1976,6 +1999,7 @@ impl App {
         self.split_pct = defaults.split_pct;
         self.bottom_pct = defaults.bottom_pct;
         self.split_pinned = defaults.split_pinned;
+        self.agents_width = defaults.agents_width;
         self.col_weights = [DEFAULT_COLUMN_WEIGHT; COLUMNS];
         self.save_settings();
     }
@@ -2008,6 +2032,10 @@ impl App {
                 let pct = u32::from(x.saturating_sub(g.bottom_x)) * 100 / u32::from(g.bottom_w);
                 self.split_pct = (pct as u16).clamp(SPLIT_RANGE.0, SPLIT_RANGE.1);
                 self.split_pinned = true;
+            }
+            Some(Drag::Agents) => {
+                let width = x.saturating_sub(g.agents_x) + 1;
+                self.agents_width = width.clamp(AGENTS_WIDTH_RANGE.0, AGENTS_WIDTH_RANGE.1);
             }
             Some(Drag::Height) if g.body_h > 0 => {
                 let bottom = (i32::from(g.body_y) + i32::from(g.body_h) - i32::from(y)).max(0) as u32;
@@ -2137,6 +2165,7 @@ impl App {
 
     pub fn toggle_agents_panel(&mut self) {
         self.agents_on = !self.agents_on;
+        self.save_settings();
         self.set_notice(format!("agents panel {}", if self.agents_on { "on" } else { "off" }));
     }
 
@@ -3375,6 +3404,10 @@ impl App {
                 self.drag = Some(Drag::Split);
                 return;
             }
+            Some(Target::AgentsHandle) => {
+                self.drag = Some(Drag::Agents);
+                return;
+            }
             Some(Target::HeightHandle) => {
                 self.drag = Some(Drag::Height);
                 return;
@@ -4491,7 +4524,7 @@ mod tests {
         app.on_key(KeyCode::Char('>'), false);
         let (_dir, path) = temp_settings();
         app.settings_path = Some(path.clone());
-        app.geometry.set(Geometry { body_y: 1, body_h: 40, bottom_x: 0, bottom_w: 200 });
+        app.geometry.set(Geometry { body_y: 1, body_h: 40, bottom_x: 0, bottom_w: 200, agents_x: 0 });
         app.hits.borrow_mut().push((Rect::new(100, 20, 2, 5), Target::SplitHandle));
         app.on_click(100, 21);
         app.on_drag(140, 21);
