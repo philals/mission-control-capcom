@@ -36,6 +36,7 @@ pub enum Action {
     TaskAgent,
     ToggleAgents,
     FocusAgent(usize),
+    CloseAgent(usize),
     PrOpen(String),
     PrCopy(String),
     PrDetails(String),
@@ -145,6 +146,15 @@ pub fn pr_entries(row: &PrRow) -> Vec<Entry> {
         Some(false) => list.push(entry(format!("Turn {id} back into a draft"), "m", Action::PrDraft(url))),
         None => {}
     }
+    list
+}
+
+/// What can be done to an agent of the agents panel.
+pub fn agent_entries(index: usize, agent: &crate::agents::AgentInfo) -> Vec<Entry> {
+    let who = agent.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| agent.topic.clone());
+    let mut list = vec![entry(format!("Go to {who}"), "", Action::FocusAgent(index))];
+    let waiting = matches!(agent.status, crate::agents::Status::Idle | crate::agents::Status::Done);
+    list.push(entry(if waiting { format!("Close {who}") } else { format!("Close {who} (only when idle)") }, "", Action::CloseAgent(index)));
     list
 }
 

@@ -56,6 +56,10 @@ pub trait Herdr: Send + Sync {
     fn agents(&self) -> Result<Vec<crate::agents::AgentInfo>, String> {
         Ok(Vec::new())
     }
+    /// Close the pane an agent runs in (its Claude Code session stays on disk, to resume).
+    fn close(&self, _pane: &str) -> Result<(), String> {
+        Err("cannot close an agent here".into())
+    }
     /// Bring the agent in this pane to the front.
     fn focus(&self, _pane: &str) -> Result<(), String> {
         Err("cannot focus an agent here".into())
@@ -227,6 +231,10 @@ impl Herdr for Cli {
 
     fn focus(&self, pane: &str) -> Result<(), String> {
         self.call(&["agent", "focus", pane]).map(|_| ())
+    }
+
+    fn close(&self, pane: &str) -> Result<(), String> {
+        self.call(&["pane", "close", pane]).map(|_| ())
     }
 }
 
