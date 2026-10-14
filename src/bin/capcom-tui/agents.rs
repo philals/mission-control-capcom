@@ -53,6 +53,8 @@ pub struct AgentInfo {
     pub topic: String,
     pub workspace: String,
     pub cwd: String,
+    /// The Claude Code session running in it, which is how a parent finds its children.
+    pub session: Option<String>,
 }
 
 /// The agents in `herdr agent list`, each with its workspace's label from `herdr workspace list`.
@@ -78,6 +80,7 @@ pub fn parse(agents: &Value, workspaces: &Value) -> Vec<AgentInfo> {
                         topic: text(a, "terminal_title_stripped"),
                         workspace: label_of(a["workspace_id"].as_str().unwrap_or_default()),
                         cwd: text(a, "cwd"),
+                        session: a["agent_session"]["value"].as_str().map(str::to_string),
                     })
                 })
                 .collect()
@@ -90,6 +93,8 @@ pub fn parse(agents: &Value, workspaces: &Value) -> Vec<AgentInfo> {
 pub struct Entry {
     pub index: usize,
     pub label: String,
+    /// 0 for an agent on its own, 1 for one it started, and so on.
+    pub depth: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,17 +125,36 @@ fn task_number(label: &str) -> u32 {
     label.strip_prefix('T').and_then(|r| r.split(' ').next()).and_then(|n| n.parse().ok()).unwrap_or(u32::MAX)
 }
 
+/// For each agent, the live agent that started it: the one whose session made the pane this one runs in.
+pub fn parents(agents: &[AgentInfo], spawns: &[(String, String)]) -> Vec<Option<usize>> {
+    agents
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            let session = &spawns.iter().find(|(pane, _)| *pane == a.pane)?.1;
+            agents.iter().position(|p| p.session.as_ref() == Some(session)).filter(|&p| p != i)
+        })
+        .collect()
+}
+
 /// The panel's groups: a story's agents under the story, the rest under their Herdr workspace.
-/// Stories come first, in board order; inside a story the tasks run in order.
-pub fn groups(agents: &[AgentInfo], stories: &[(String, String)]) -> Vec<Group> {
+/// Stories come first, in board order; inside a story the tasks run in order. An agent started by
+/// another follows it, one level in.
+pub fn groups(agents: &[AgentInfo], stories: &[(String, String)], parents: &[Option<usize>]) -> Vec<Group> {
+    let label_of = |agent: &AgentInfo| match agent.name.as_deref().and_then(|n| named_for(n, stories)) {
+        Some((_, label)) => label,
+        None if agent.topic.is_empty() => "agent".to_string(),
+        None => agent.topic.clone(),
+    };
+    let top = |i: usize| parents.get(i).copied().flatten().is_none();
     let mut out: Vec<Group> = Vec::new();
-    for (i, agent) in agents.iter().enumerate() {
+    for (i, agent) in agents.iter().enumerate().filter(|(i, _)| top(*i)) {
         let named = agent.name.as_deref().and_then(|n| named_for(n, stories));
-        let (label, story, entry_label) = match &named {
-            Some((s, label)) => (format!("{} {}", s.0, s.1), true, label.clone()),
-            None => (agent.workspace.clone(), false, if agent.topic.is_empty() { "agent".to_string() } else { agent.topic.clone() }),
+        let (label, story) = match &named {
+            Some((s, _)) => (format!("{} {}", s.0, s.1), true),
+            None => (agent.workspace.clone(), false),
         };
-        let entry = Entry { index: i, label: entry_label };
+        let entry = Entry { index: i, label: label_of(agent), depth: 0 };
         match out.iter_mut().find(|g| g.label == label && g.story == story) {
             Some(g) => g.entries.push(entry),
             None => out.push(Group { label, story, entries: vec![entry] }),
@@ -138,6 +162,13 @@ pub fn groups(agents: &[AgentInfo], stories: &[(String, String)]) -> Vec<Group> 
     }
     for g in &mut out {
         g.entries.sort_by(|a, b| task_number(&a.label).cmp(&task_number(&b.label)).then_with(|| a.label.cmp(&b.label)));
+        let mut tree = Vec::with_capacity(g.entries.len());
+        for entry in std::mem::take(&mut g.entries) {
+            let at = entry.index;
+            tree.push(entry);
+            descendants(agents, parents, &label_of, at, 1, &mut tree);
+        }
+        g.entries = tree;
     }
     let rank = |g: &Group| match stories.iter().position(|s| g.label.split(' ').next() == Some(s.0.as_str())) {
         Some(p) if g.story => (0, p),
@@ -147,13 +178,25 @@ pub fn groups(agents: &[AgentInfo], stories: &[(String, String)]) -> Vec<Group> 
     out
 }
 
+fn descendants(agents: &[AgentInfo], parents: &[Option<usize>], label_of: &dyn Fn(&AgentInfo) -> String, of: usize, depth: usize, out: &mut Vec<Entry>) {
+    let mut kids: Vec<usize> = (0..agents.len()).filter(|&i| parents.get(i).copied().flatten() == Some(of)).collect();
+    kids.sort_by_key(|&i| (task_number(&label_of(&agents[i])), label_of(&agents[i])));
+    for kid in kids {
+        if depth > 8 || out.iter().any(|e| e.index == kid) {
+            continue;
+        }
+        out.push(Entry { index: kid, label: label_of(&agents[kid]), depth });
+        descendants(agents, parents, label_of, kid, depth + 1, out);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
     fn agent(pane: &str, name: Option<&str>, status: Status, topic: &str, workspace: &str) -> AgentInfo {
-        AgentInfo { pane: pane.into(), name: name.map(str::to_string), status, topic: topic.into(), workspace: workspace.into(), cwd: String::new() }
+        AgentInfo { pane: pane.into(), name: name.map(str::to_string), status, topic: topic.into(), workspace: workspace.into(), cwd: String::new(), session: None }
     }
 
     #[test]
@@ -181,7 +224,7 @@ mod tests {
             agent("d", Some("proj-1-t2-impl"), Status::Done, "", "x"),
             agent("e", Some("proj-1-review"), Status::Idle, "", "x"),
         ];
-        let g = groups(&list, &stories);
+        let g = groups(&list, &stories, &vec![None; list.len()]);
         let shape: Vec<(String, Vec<String>)> = g.iter().map(|g| (g.label.clone(), g.entries.iter().map(|e| e.label.clone()).collect())).collect();
         assert_eq!(
             shape,
@@ -192,5 +235,36 @@ mod tests {
             ]
         );
         assert!(g[0].story && !g[2].story);
+    }
+
+    #[test]
+    fn an_agent_follows_the_one_that_started_it_one_level_in() {
+        let stories: Vec<(String, String)> = vec![];
+        let mut list = vec![
+            agent("w3E:p1", None, Status::Idle, "Edit UX feedback", "Edit UX"),
+            agent("w3N:p1", None, Status::Working, "hold icon", "hold-icon"),
+            agent("w4:p1", None, Status::Idle, "grandchild", "g"),
+            agent("w9:p1", None, Status::Idle, "unrelated", "u"),
+        ];
+        list[0].session = Some("parent".into());
+        list[1].session = Some("child".into());
+        let spawns = vec![("w3N:p1".to_string(), "parent".to_string()), ("w4:p1".to_string(), "child".to_string())];
+        let p = parents(&list, &spawns);
+        assert_eq!(p, vec![None, Some(0), Some(1), None]);
+        let g = groups(&list, &stories, &p);
+        let shape: Vec<(String, Vec<(String, usize)>)> = g.iter().map(|g| (g.label.clone(), g.entries.iter().map(|e| (e.label.clone(), e.depth)).collect())).collect();
+        assert_eq!(
+            shape,
+            vec![
+                ("Edit UX".to_string(), vec![("Edit UX feedback".to_string(), 0), ("hold icon".to_string(), 1), ("grandchild".to_string(), 2)]),
+                ("u".to_string(), vec![("unrelated".to_string(), 0)]),
+            ],
+            "the child is no group of its own"
+        );
+        let mut loop_ = vec![agent("a:p1", None, Status::Idle, "a", "a"), agent("b:p1", None, Status::Idle, "b", "b")];
+        loop_[0].session = Some("sa".into());
+        loop_[1].session = Some("sb".into());
+        let both = parents(&loop_, &[("a:p1".into(), "sb".into()), ("b:p1".into(), "sa".into())]);
+        assert_eq!(groups(&loop_, &stories, &both).len(), 0, "a cycle has no top, and nothing hangs");
     }
 }

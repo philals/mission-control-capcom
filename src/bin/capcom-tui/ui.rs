@@ -420,7 +420,8 @@ fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let bottom = inner.y + inner.height;
     let total: usize = app.agents.len();
     let mut shown = 0;
-    'groups: for group in agents::groups(&app.agents, &stories) {
+    let parents = agents::parents(&app.agents, &app.spawns);
+    'groups: for group in agents::groups(&app.agents, &stories, &parents) {
         if y >= bottom {
             break;
         }
@@ -441,10 +442,13 @@ fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
                 _ => theme::DIM,
             };
             let word = agent.status.word();
-            let label = trunc(&entry.label, width.saturating_sub(word.chars().count() + 5));
-            let pad = width.saturating_sub(label.chars().count() + word.chars().count() + 4);
+            let branch = if entry.depth == 0 { String::new() } else { format!("{}└ ", "  ".repeat(entry.depth - 1)) };
+            let lead = 2 + branch.chars().count();
+            let label = trunc(&entry.label, width.saturating_sub(lead + word.chars().count() + 3));
+            let pad = width.saturating_sub(lead + label.chars().count() + word.chars().count() + 2);
             let first = Line::from(vec![
                 Span::raw("  "),
+                Span::styled(branch, Style::new().fg(theme::DIM)),
                 Span::styled(agent.status.icon(), Style::new().fg(colour).add_modifier(Modifier::BOLD)),
                 Span::raw(format!(" {label}{}", " ".repeat(pad))),
                 Span::styled(word, Style::new().fg(colour)),
@@ -452,7 +456,7 @@ fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
             f.render_widget(Paragraph::new(first), Rect::new(inner.x, y, inner.width, 1));
             if let Some(topic) = topic {
                 f.render_widget(
-                    Paragraph::new(Span::styled(format!("    {}", trunc(&topic, width.saturating_sub(4))), Style::new().fg(theme::DIM))),
+                    Paragraph::new(Span::styled(format!("{}{}", " ".repeat(lead + 2), trunc(&topic, width.saturating_sub(lead + 2))), Style::new().fg(theme::DIM))),
                     Rect::new(inner.x, y + 1, inner.width, 1),
                 );
             }
@@ -2165,7 +2169,7 @@ mod tests {
     fn the_agents_panel_lists_agents_under_their_story_and_a_click_brings_one_to_the_front() {
         use crate::agents::{AgentInfo, Status};
         let (_root, mut app) = two_stories();
-        let agent = |pane: &str, name: Option<&str>, status, topic: &str| AgentInfo { pane: pane.into(), name: name.map(str::to_string), status, topic: topic.into(), workspace: "scratch".into(), cwd: String::new() };
+        let agent = |pane: &str, name: Option<&str>, status, topic: &str| AgentInfo { pane: pane.into(), name: name.map(str::to_string), status, topic: topic.into(), workspace: "scratch".into(), cwd: String::new(), session: None };
         assert!(!render(&app, 170, 44).contains("AGENTS"), "not shown outside Herdr");
         let fake = with_herdr(&mut app);
         app.agents = vec![
@@ -2195,6 +2199,34 @@ mod tests {
         assert_eq!(*fake.focused.lock().unwrap(), vec!["w2:p3".to_string()]);
         app.on_key(KeyCode::Char('A'), false);
         assert!(!render(&app, 170, 44).contains("AGENTS"), "A hides it");
+    }
+
+    #[test]
+    fn an_agent_started_by_another_is_tabbed_in_under_it_and_a_click_still_focuses_it() {
+        use crate::agents::{AgentInfo, Status};
+        let (_root, mut app) = two_stories();
+        let fake = with_herdr(&mut app);
+        let agent = |pane: &str, session: &str, status, topic: &str, workspace: &str| AgentInfo { pane: pane.into(), name: None, status, topic: topic.into(), workspace: workspace.into(), cwd: String::new(), session: Some(session.into()) };
+        app.agents = vec![
+            agent("w3E:p1", "parent", Status::Idle, "Edit UX feedback", "Edit UX"),
+            agent("w3N:p1", "child", Status::Working, "hold icon", "hold-icon"),
+        ];
+        app.spawns = vec![("w3N:p1".into(), "parent".into())];
+        let out = render(&app, 170, 44);
+        assert!(!out.contains("hold-icon"), "the child has no workspace header of its own:\n{out}");
+        let (px, py) = find(&out, "Edit UX feedback");
+        let (cx, cy) = find(&out, "hold icon");
+        assert!(cy > py && cx > px, "the child is under the parent and further in:\n{out}");
+        assert!(out.contains("└"), "{out}");
+        app.on_click(cx + 1, cy);
+        for _ in 0..200 {
+            app.poll_ready();
+            if !fake.focused.lock().unwrap().is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(*fake.focused.lock().unwrap(), vec!["w3N:p1".to_string()]);
     }
 
     #[test]

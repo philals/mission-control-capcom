@@ -43,6 +43,13 @@ pub struct Link {
     pub at: String,
 }
 
+/// A Herdr pane a session created (a split, a new tab or workspace): the session is its parent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Spawn {
+    pub pane: String,
+    pub session: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrSession {
     pub session: String,
@@ -56,13 +63,20 @@ struct FileEntry {
     /// Distinct directories the session reported being in, in order (capped).
     cwds: Vec<String>,
     links: Vec<Link>,
+    #[serde(default)]
+    spawns: Vec<Spawn>,
 }
 
 /// Which session made which PR, kept on disk so only the new part of each transcript is read.
 #[derive(Default, Serialize, Deserialize)]
 pub struct Index {
+    /// What the saved offsets were read for; an older file is read again from the start.
+    #[serde(default)]
+    version: u32,
     files: BTreeMap<String, FileEntry>,
 }
+
+const INDEX_VERSION: u32 = 1;
 
 const MAX_CWDS: usize = 64;
 
@@ -81,10 +95,37 @@ fn project_name(dir: &str) -> String {
 }
 
 const LINK_MARK: &str = "\"type\":\"pr-link\"";
+const SPAWN_MARKS: [&str; 3] = ["cli:pane:split", "cli:workspace:create", "cli:tab:create"];
+
+/// The pane a `herdr pane split`, `tab create` or `workspace create` made, from the result a session got back.
+fn spawn_in(line: &str) -> Option<Spawn> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    let session = v["sessionId"].as_str()?;
+    v["message"]["content"].as_array()?.iter().filter(|b| b["type"] == "tool_result").find_map(|b| {
+        let text = match &b["content"] {
+            serde_json::Value::String(t) => t.clone(),
+            serde_json::Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join(""),
+            _ => return None,
+        };
+        let result: serde_json::Value = serde_json::from_str(&text).ok()?;
+        let id = result["id"].as_str()?;
+        let pane = match id {
+            "cli:pane:split" => result["result"]["pane"]["pane_id"].as_str()?,
+            "cli:workspace:create" | "cli:tab:create" => result["result"]["root_pane"]["pane_id"].as_str()?,
+            _ => return None,
+        };
+        Some(Spawn { pane: pane.to_string(), session: session.to_string() })
+    })
+}
 
 impl Index {
     pub fn load(path: &Path) -> Index {
-        std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        let saved: Index = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        if saved.version == INDEX_VERSION {
+            saved
+        } else {
+            Index { version: INDEX_VERSION, files: BTreeMap::new() }
+        }
     }
 
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
@@ -98,6 +139,7 @@ impl Index {
 
     /// Read what has been added to every transcript since last time. True when anything changed.
     pub fn refresh(&mut self, config: &Path) -> bool {
+        self.version = INDEX_VERSION;
         let mut seen = std::collections::HashSet::new();
         let mut changed = false;
         let projects = std::fs::read_dir(config.join("projects")).into_iter().flatten().flatten();
@@ -149,6 +191,12 @@ impl Index {
                     entry.cwds.push(cwd.to_string());
                 }
             }
+            if SPAWN_MARKS.iter().any(|m| text.contains(m)) {
+                if let Some(spawn) = spawn_in(&text) {
+                    entry.spawns.push(spawn);
+                    changed = true;
+                }
+            }
             if text.contains(LINK_MARK) {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
                     if let (Some(url), Some(session)) = (v["prUrl"].as_str(), v["sessionId"].as_str()) {
@@ -160,6 +208,11 @@ impl Index {
             }
         }
         changed
+    }
+
+    /// Every Herdr pane a session made, with that session: its parent.
+    pub fn spawns(&self) -> Vec<Spawn> {
+        self.files.values().flat_map(|e| e.spawns.iter().cloned()).collect()
     }
 
     /// Every PR with the session that first linked it (the one that made it) and where it started.
@@ -281,5 +334,33 @@ mod tests {
         let again = Index::load(&file);
         assert_eq!(again.sessions(), index.sessions());
         assert!(Index::load(&dir.path().join("missing")).sessions().is_empty());
+    }
+
+    fn result_line(session: &str, text: &str) -> String {
+        let content = serde_json::to_string(text).unwrap();
+        format!("{{\"type\":\"user\",\"sessionId\":\"{session}\",\"message\":{{\"content\":[{{\"type\":\"tool_result\",\"content\":{content}}}]}}}}\n")
+    }
+
+    #[test]
+    fn a_pane_workspace_or_tab_a_session_made_has_that_session_as_its_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = [
+            result_line("parent", r#"{"id":"cli:pane:split","result":{"pane":{"pane_id":"w3E:p3"},"type":"pane_info"}}"#),
+            result_line("parent", r#"{"id":"cli:workspace:create","result":{"root_pane":{"pane_id":"w3N:p1"},"tab":{}}}"#),
+            result_line("parent", r#"{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"w3E:p9"}}}"#),
+            result_line("parent", r#"{"id":"cli:pane:list","result":{"panes":[{"pane_id":"w1:p1"}]}}"#),
+            result_line("parent", "not json at all, cli:pane:split"),
+        ]
+        .concat();
+        transcript(dir.path(), "-w", "parent", "/w", &body);
+        let mut index = Index::default();
+        assert!(index.refresh(dir.path()));
+        let panes: Vec<_> = index.spawns().into_iter().map(|s| (s.pane, s.session)).collect();
+        assert_eq!(panes, vec![("w3E:p3".into(), "parent".into()), ("w3N:p1".into(), "parent".into()), ("w3E:p9".into(), "parent".into())]);
+        let file = dir.path().join("idx.json");
+        index.save(&file).unwrap();
+        assert_eq!(Index::load(&file).spawns().len(), 3, "kept through the file");
+        std::fs::write(&file, r#"{"files":{"x":{"offset":99,"cwds":[],"links":[]}}}"#).unwrap();
+        assert!(Index::load(&file).spawns().is_empty() && Index::load(&file).files.is_empty(), "an index from before spawns are read is read again");
     }
 }
