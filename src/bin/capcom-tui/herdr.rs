@@ -52,6 +52,14 @@ pub enum Outcome {
 pub trait Herdr: Send + Sync {
     fn launch(&self, launch: &Launch) -> Result<Outcome, String>;
     fn resume(&self, resume: &Resume) -> Result<Outcome, String>;
+    /// The agents running now.
+    fn agents(&self) -> Result<Vec<crate::agents::AgentInfo>, String> {
+        Ok(Vec::new())
+    }
+    /// Bring the agent in this pane to the front.
+    fn focus(&self, _pane: &str) -> Result<(), String> {
+        Err("cannot focus an agent here".into())
+    }
 }
 
 const SHORT_NAME_WORDS: usize = 3;
@@ -209,6 +217,16 @@ impl Herdr for Cli {
 
     fn resume(&self, r: &Resume) -> Result<Outcome, String> {
         self.resume_in_herdr(r)
+    }
+
+    fn agents(&self) -> Result<Vec<crate::agents::AgentInfo>, String> {
+        let agents = self.call(&["agent", "list"])?;
+        let workspaces = self.call(&["workspace", "list"]).unwrap_or(Value::Null);
+        Ok(crate::agents::parse(&agents, &workspaces))
+    }
+
+    fn focus(&self, pane: &str) -> Result<(), String> {
+        self.call(&["agent", "focus", pane]).map(|_| ())
     }
 }
 

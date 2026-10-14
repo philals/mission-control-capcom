@@ -21,6 +21,7 @@ const STORY_CARD_HEIGHT: u16 = 5;
 const COMPACT_BELOW: u16 = 60;
 const WIDE_FROM: u16 = 150;
 const RUNS_SMALL_WIDTH: u16 = 30;
+const AGENTS_WIDTH: u16 = 38;
 const BACK_LABEL: &str = "‹ Stories";
 
 pub fn draw(f: &mut Frame, app: &App) {
@@ -40,7 +41,13 @@ pub fn draw(f: &mut Frame, app: &App) {
     match app.screen {
         Screen::List => {
             draw_list_header(f, rows[0], app, &mut hits);
-            draw_list(f, main, app, &mut hits);
+            if app.agents_panel(area.width) {
+                let parts = Layout::horizontal([Constraint::Length(AGENTS_WIDTH), Constraint::Min(20)]).split(main);
+                draw_agents(f, parts[0], app, &mut hits);
+                draw_list(f, parts[1], app, &mut hits);
+            } else {
+                draw_list(f, main, app, &mut hits);
+            }
         }
         Screen::Board => {
             draw_board_header(f, rows[0], app, &mut hits);
@@ -124,7 +131,7 @@ fn draw_hover(f: &mut Frame, app: &App, hits: &Hits) {
             | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::GoLight | Target::Refresh | Target::NewStory | Target::ToggleDone
             | Target::OpenCheck(..) | Target::OpenJob(..) | Target::RunDetails(_) | Target::Back | Target::PaletteItem(_)
     );
-    let row = matches!(target, Target::Pr(_) | Target::Run(_) | Target::Story(_) | Target::Card { .. });
+    let row = matches!(target, Target::Pr(_) | Target::Run(_) | Target::Story(_) | Target::Card { .. } | Target::AgentRow(_));
     let buffer = f.buffer_mut();
     if button {
         buffer.set_style(*rect, Style::new().add_modifier(Modifier::REVERSED));
@@ -386,6 +393,77 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         let rect = Rect::new(area.x, y, area.width, STORY_ROW_HEIGHT);
         draw_story_row(f, rect, story, n == app.list_sel);
         hits.push((rect, Target::Story(n)));
+    }
+}
+
+fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
+    use crate::agents::{self, Status};
+    let working = app.agents.iter().filter(|a| a.status == Status::Working).count();
+    let needs = app.agents.iter().filter(|a| a.status == Status::Blocked).count();
+    let mut title = vec![Span::styled(format!(" AGENTS · {} ", app.agents.len()), Style::new().fg(theme::FG).add_modifier(Modifier::BOLD))];
+    if working > 0 {
+        title.push(Span::styled(format!("· {working} working "), Style::new().fg(theme::CYAN)));
+    }
+    if needs > 0 {
+        title.push(Span::styled(format!("· {needs} need you "), Style::new().fg(panel::ORANGE).add_modifier(Modifier::BOLD)));
+    }
+    let block = Block::bordered().border_style(Style::new().fg(theme::BORDER)).title(Line::from(title));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if app.agents.is_empty() {
+        f.render_widget(Paragraph::new(Span::styled("no agents are running in Herdr", Style::new().fg(theme::DIM))), inner);
+        return;
+    }
+    let stories: Vec<(String, String)> = app.stories.iter().map(|s| (s.key.clone(), crate::herdr::short_name(&s.title))).collect();
+    let width = inner.width as usize;
+    let mut y = inner.y;
+    let bottom = inner.y + inner.height;
+    let total: usize = app.agents.len();
+    let mut shown = 0;
+    'groups: for group in agents::groups(&app.agents, &stories) {
+        if y >= bottom {
+            break;
+        }
+        let style = if group.story { Style::new().fg(theme::CYAN).add_modifier(Modifier::BOLD) } else { Style::new().fg(theme::MUTED).add_modifier(Modifier::BOLD) };
+        f.render_widget(Paragraph::new(Span::styled(trunc(&group.label, width), style)), Rect::new(inner.x, y, inner.width, 1));
+        y += 1;
+        for entry in &group.entries {
+            let agent = &app.agents[entry.index];
+            let topic = (!agent.topic.is_empty() && agent.topic != entry.label).then(|| agent.topic.clone());
+            let height = if topic.is_some() { 2 } else { 1 };
+            if y + height > bottom {
+                break 'groups;
+            }
+            let colour = match agent.status {
+                Status::Working => theme::CYAN,
+                Status::Blocked => panel::ORANGE,
+                Status::Done => theme::GREEN,
+                _ => theme::DIM,
+            };
+            let word = agent.status.word();
+            let label = trunc(&entry.label, width.saturating_sub(word.chars().count() + 5));
+            let pad = width.saturating_sub(label.chars().count() + word.chars().count() + 4);
+            let first = Line::from(vec![
+                Span::raw("  "),
+                Span::styled(agent.status.icon(), Style::new().fg(colour).add_modifier(Modifier::BOLD)),
+                Span::raw(format!(" {label}{}", " ".repeat(pad))),
+                Span::styled(word, Style::new().fg(colour)),
+            ]);
+            f.render_widget(Paragraph::new(first), Rect::new(inner.x, y, inner.width, 1));
+            if let Some(topic) = topic {
+                f.render_widget(
+                    Paragraph::new(Span::styled(format!("    {}", trunc(&topic, width.saturating_sub(4))), Style::new().fg(theme::DIM))),
+                    Rect::new(inner.x, y + 1, inner.width, 1),
+                );
+            }
+            hits.push((Rect::new(inner.x, y, inner.width, height), Target::AgentRow(entry.index)));
+            y += height;
+            shown += 1;
+        }
+    }
+    if shown < total && inner.height > 0 {
+        let more = Rect::new(inner.x, bottom - 1, inner.width, 1);
+        f.render_widget(Paragraph::new(Span::styled(format!("… +{} more (Ctrl-P lists them all)", total - shown), Style::new().fg(theme::DIM))), more);
     }
 }
 
@@ -1005,6 +1083,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("g", "automerge on the selected pull request: its merge bot's label, on or off".into()),
         row("a", "go to the agent that made the selected pull request, or (on a story's board) the agent working the selected task".into()),
         row("paste  u", "paste a pull request link to follow someone else's PR like your own (auto-fix starts off); u stops following a pasted one".into()),
+        row("A", "show or hide the agents panel left of the stories (inside Herdr, on terminals at least 110 wide); click an agent to bring it to the front".into()),
         row("d", "show or hide completed stories (list)".into()),
         row("Esc  b", "back to the list, or close a sheet".into()),
         row("r", "reload now (it also reloads by itself)".into()),
@@ -2005,9 +2084,15 @@ mod tests {
         launches: std::sync::Mutex<Vec<crate::herdr::Launch>>,
         resumes: std::sync::Mutex<Vec<crate::herdr::Resume>>,
         busy: std::sync::atomic::AtomicBool,
+        focused: std::sync::Mutex<Vec<String>>,
     }
 
     impl crate::herdr::Herdr for FakeHerdr {
+        fn focus(&self, pane: &str) -> Result<(), String> {
+            self.focused.lock().unwrap().push(pane.to_string());
+            Ok(())
+        }
+
         fn launch(&self, l: &crate::herdr::Launch) -> Result<crate::herdr::Outcome, String> {
             self.launches.lock().unwrap().push(l.clone());
             Ok(crate::herdr::Outcome::Started)
@@ -2023,7 +2108,7 @@ mod tests {
     }
 
     fn with_herdr(app: &mut App) -> std::sync::Arc<FakeHerdr> {
-        let fake = std::sync::Arc::new(FakeHerdr { launches: std::sync::Mutex::new(Vec::new()), resumes: std::sync::Mutex::new(Vec::new()), busy: std::sync::atomic::AtomicBool::new(false) });
+        let fake = std::sync::Arc::new(FakeHerdr { launches: std::sync::Mutex::new(Vec::new()), resumes: std::sync::Mutex::new(Vec::new()), busy: std::sync::atomic::AtomicBool::new(false), focused: std::sync::Mutex::new(Vec::new()) });
         app.herdr = Some(fake.clone());
         fake
     }
@@ -2074,6 +2159,42 @@ mod tests {
         assert_eq!(resumes[0].tab, "T1 resume");
         assert!(resumes[0].known_agents.contains(&"proj-2-t1-impl".to_string()), "{:?}", resumes[0].known_agents);
         assert!(fake.launches.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_agents_panel_lists_agents_under_their_story_and_a_click_brings_one_to_the_front() {
+        use crate::agents::{AgentInfo, Status};
+        let (_root, mut app) = two_stories();
+        let agent = |pane: &str, name: Option<&str>, status, topic: &str| AgentInfo { pane: pane.into(), name: name.map(str::to_string), status, topic: topic.into(), workspace: "scratch".into(), cwd: String::new() };
+        assert!(!render(&app, 170, 44).contains("AGENTS"), "not shown outside Herdr");
+        let fake = with_herdr(&mut app);
+        app.agents = vec![
+            agent("w1:p1", None, Status::Idle, "AWS alert resolution"),
+            agent("w2:p3", Some("proj-1-t1-impl"), Status::Blocked, "Add the endpoint"),
+            agent("w2:p4", Some("proj-1-t2-plan"), Status::Working, ""),
+        ];
+        let out = render(&app, 170, 44);
+        assert!(out.contains("AGENTS · 3") && out.contains("1 working") && out.contains("1 need you"), "{out}");
+        let (_, story_y) = find(&out, "PROJ-1");
+        let (_, t1_y) = find(&out, "T1 impl");
+        let (_, t2_y) = find(&out, "T2 plan");
+        let (_, scratch_y) = find(&out, "scratch");
+        assert!(story_y < t1_y && t1_y < t2_y && t2_y < scratch_y, "story, its tasks in order, then the rest:\n{out}");
+        assert!(out.contains("needs you") && out.contains("Add the endpoint"), "{out}");
+        assert!(!render(&app, 100, 44).contains("AGENTS"), "no room on a narrow terminal");
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "T1 impl");
+        app.on_click(x + 1, y);
+        for _ in 0..200 {
+            app.poll_ready();
+            if !fake.focused.lock().unwrap().is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(*fake.focused.lock().unwrap(), vec!["w2:p3".to_string()]);
+        app.on_key(KeyCode::Char('A'), false);
+        assert!(!render(&app, 170, 44).contains("AGENTS"), "A hides it");
     }
 
     #[test]

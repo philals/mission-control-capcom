@@ -92,6 +92,8 @@ pub enum Target {
     PrCopy(usize),
     /// The `[ go to agent ]` line of a task's sheet.
     TaskAgent,
+    /// A row of the agents panel: the agent at this index of `App::agents`.
+    AgentRow(usize),
     /// The `[ agent ]` button: back to the agent session that made the PR.
     PrAgent(usize),
     /// The `[x] auto-review` tick box on one PR.
@@ -441,6 +443,8 @@ pub enum AppMsg {
     Cleanup(String),
     /// Which session made which PR, read from Claude Code's transcripts.
     PrLinks(Vec<(String, PrSession)>),
+    /// The agents Herdr is running now.
+    Agents(Vec<crate::agents::AgentInfo>),
     /// The agent was asked to fix a PR: this is round `n`.
     FixSent(String, u32),
     /// The ask did not happen (agent busy, state file locked): look again on the next poll.
@@ -454,6 +458,8 @@ pub const MAX_FIX_ROUNDS: u32 = 5;
 /// Minutes after an ask with nothing changing on the PR before capcom says the agent did not act.
 const STALL_MINUTES: i64 = 10;
 const NOTICE_SECONDS: u64 = 8;
+/// The agents panel needs at least this much terminal width.
+pub const AGENTS_MIN_WIDTH: u16 = 110;
 /// A watched run stays in the panel this long after it finishes.
 const WATCH_KEEP_MINUTES: i64 = 30;
 
@@ -640,6 +646,8 @@ pub struct App {
     /// (PR url, session that made it) for PRs that are on no task.
     pub pr_links: Vec<(String, PrSession)>,
     pub herdr: Option<Arc<dyn Herdr>>,
+    pub agents: Vec<crate::agents::AgentInfo>,
+    pub agents_on: bool,
     /// The text typed or pasted into the "new story" box, while it is open.
     pub new_story: Option<String>,
     pub card_drag: Option<CardDrag>,
@@ -743,6 +751,8 @@ impl App {
             copilot_tried: std::collections::HashSet::new(),
             pr_links: Vec::new(),
             herdr: None,
+            agents: Vec::new(),
+            agents_on: true,
             new_story: None,
             card_drag: None,
             story_drag: None,
@@ -2094,6 +2104,53 @@ impl App {
         });
     }
 
+    /// Ask Herdr which agents are running now and then, off the UI thread, and say when that changes.
+    pub fn start_agents(&self) {
+        let (Some(herdr), done) = (self.herdr.clone(), self.launch_done.0.clone()) else {
+            return;
+        };
+        std::thread::spawn(move || {
+            let mut last = None;
+            loop {
+                if let Ok(list) = herdr.agents() {
+                    if last.as_ref() != Some(&list) {
+                        last = Some(list.clone());
+                        if done.send(AppMsg::Agents(list)).is_err() {
+                            return;
+                        }
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_secs(3));
+            }
+        });
+    }
+
+    /// Whether the agents panel is on the main page: inside Herdr, switched on, and room for it.
+    pub fn agents_panel(&self, width: u16) -> bool {
+        self.screen == Screen::List && self.herdr.is_some() && self.agents_on && width >= AGENTS_MIN_WIDTH
+    }
+
+    pub fn toggle_agents_panel(&mut self) {
+        self.agents_on = !self.agents_on;
+        self.set_notice(format!("agents panel {}", if self.agents_on { "on" } else { "off" }));
+    }
+
+    /// A row of the agents panel was clicked: bring that agent to the front in Herdr.
+    pub fn open_agent(&mut self, index: usize) {
+        let (Some(agent), Some(herdr)) = (self.agents.get(index), self.herdr.clone()) else {
+            return;
+        };
+        let (pane, name) = (agent.pane.clone(), agent.name.clone().unwrap_or_else(|| agent.topic.clone()));
+        let done = self.launch_done.0.clone();
+        std::thread::spawn(move || {
+            let text = match herdr.focus(&pane) {
+                Ok(()) => format!("brought {name} to the front"),
+                Err(e) => format!("{name}: {e}"),
+            };
+            let _ = done.send(AppMsg::Notice(text));
+        });
+    }
+
     /// The session to resume for a task: the latest implementing one, else the latest of any skill.
     fn session_for(&self, key: &str, task: &str) -> Option<&Session> {
         let story = self.stories.iter().find(|s| s.key == key)?;
@@ -2705,6 +2762,7 @@ impl App {
             match msg {
                 AppMsg::Notice(text) => self.set_notice(text),
                 AppMsg::PrLinks(links) => self.pr_links = links,
+                AppMsg::Agents(list) => self.agents = list,
                 AppMsg::FixSent(url, round) => {
                     self.fix_rounds.insert(url, (round, std::time::Instant::now()));
                 }
@@ -2951,6 +3009,10 @@ impl App {
                 self.toggle_autocopilot();
                 return false;
             }
+            KeyCode::Char('A') => {
+                self.toggle_agents_panel();
+                return false;
+            }
             KeyCode::Char('W') => {
                 self.toggle_slow_when_away();
                 return false;
@@ -3143,6 +3205,8 @@ impl App {
             Action::FinishTask => self.finish_selected(),
             Action::TaskDetails => self.open_detail(),
             Action::TaskAgent => self.open_task_agent(),
+            Action::ToggleAgents => self.toggle_agents_panel(),
+            Action::FocusAgent(index) => self.open_agent(index),
             Action::PrOpen(url) => on_pr(self, &url, &|app, i| app.open_pr(i)),
             Action::PrCopy(url) => on_pr(self, &url, &|app, i| app.copy_pr(i)),
             Action::PrDetails(url) => on_pr(self, &url, &|app, _| app.pr_sheet = true),
@@ -3204,6 +3268,7 @@ impl App {
             Target::PrReview(_) => "auto-review: ask Copilot to review this PR, once (v)",
             Target::PrMerge(_) => "automerge: the merge bot merges this PR by itself once it is approved and green; this adds or removes its label (g)",
             Target::PrAgent(_) => "go to the agent that made this PR (a)",
+            Target::AgentRow(_) => "bring this agent to the front in Herdr",
             Target::TaskAgent => "go to the agent working on this task: bring it to the front, or resume its session (a)",
             Target::PrCopy(_) => "copy the link of this PR (c)",
             Target::PrDetails(_) => "every check, the state and the link (Enter)",
@@ -3352,6 +3417,10 @@ impl App {
             }
             Some(Target::ToggleAutoCopilot) => {
                 self.toggle_autocopilot();
+                return;
+            }
+            Some(Target::AgentRow(i)) => {
+                self.open_agent(i);
                 return;
             }
             Some(Target::PrAgent(i)) => {
