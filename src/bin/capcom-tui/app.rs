@@ -1289,7 +1289,7 @@ impl App {
         if !pr.managed() {
             return None;
         }
-        let mut failing: Vec<String> = if pr.settled() { pr.real_failures().iter().map(|c| c.name.clone()).collect() } else { Vec::new() };
+        let mut failing: Vec<String> = pr.fixable_failures().iter().map(|c| c.name.clone()).collect();
         let mut threads: Vec<String> =
             if pr.feedback.copilot == CopilotState::Requested { Vec::new() } else { pr.copilot_open().iter().map(|t| t.id.clone()).collect() };
         let conflicts = pr.feedback.merge == MergeState::Conflicting;

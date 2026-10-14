@@ -2792,7 +2792,7 @@ mod tests {
     }
 
     #[test]
-    fn red_checks_are_fixed_even_while_another_service_leaves_a_status_pending() {
+    fn a_red_check_is_asked_about_at_once_even_while_other_checks_are_still_running() {
         let (_root, mut app, fake, _) = autopilot_app();
         app.autofix = true;
         let mut pr = red(1, "sha1");
@@ -2804,7 +2804,34 @@ mod tests {
         running.checks.push(Check { name: "slow".into(), workflow: None, state: CheckState::Queued, started_at: None, completed_at: None, url: None, external: false });
         app.apply_prs(Ok(vec![running]));
         settle(&mut app);
-        assert_eq!(fake.resumes.lock().unwrap().len(), 1, "a queued Actions check still means wait");
+        assert_eq!(fake.resumes.lock().unwrap().len(), 2, "red is red: a check still queued does not hold the ask back");
+        let mut more = red(2, "sha1");
+        more.checks.push(Check { name: "slow".into(), workflow: None, state: CheckState::Running, started_at: None, completed_at: None, url: None, external: false });
+        more.checks[0].name = "lint".into();
+        more.checks[1].state = CheckState::Failed;
+        app.apply_prs(Ok(vec![more]));
+        settle(&mut app);
+        assert_eq!(fake.resumes.lock().unwrap().len(), 3, "another check turning red is another state, so another ask");
+    }
+
+    #[test]
+    fn the_greenpipeline_roll_up_is_never_what_triggers_an_ask() {
+        let (_root, mut app, fake, _) = autopilot_app();
+        app.autofix = true;
+        let mut only = mine(1, "sha1");
+        only.checks = vec![
+            Check { name: "unit".into(), workflow: None, state: CheckState::Running, started_at: None, completed_at: None, url: None, external: false },
+            Check { name: "GreenPipeline".into(), workflow: Some("CI".into()), state: CheckState::Failed, started_at: None, completed_at: None, url: None, external: false },
+        ];
+        app.apply_prs(Ok(vec![only.clone()]));
+        settle(&mut app);
+        assert!(fake.resumes.lock().unwrap().is_empty(), "the roll-up alone says nothing the checks beside it do not");
+        only.checks[0].state = CheckState::Failed;
+        app.apply_prs(Ok(vec![only]));
+        settle(&mut app);
+        let asks = fake.resumes.lock().unwrap();
+        assert_eq!(asks.len(), 1, "the real red check asks");
+        assert!(asks[0].prompt.clone().unwrap().contains("1 failing check)"), "and only it is counted: {:?}", asks[0].prompt);
     }
 
     #[test]
@@ -3186,18 +3213,16 @@ mod tests {
     }
 
     #[test]
-    fn only_real_failures_on_settled_checks_and_finished_copilot_reviews_count_and_only_on_your_own_prs() {
+    fn only_real_failures_and_finished_copilot_reviews_count_and_only_on_your_own_prs() {
         let (_root, mut app, fake, _) = autopilot_app();
         app.autofix = true;
         let mut cancelled = red(1, "a");
         cancelled.checks[0].state = CheckState::Cancelled;
-        let mut running = red(2, "b");
-        running.checks.push(Check { name: "slow".into(), workflow: None, state: CheckState::Running, started_at: None, completed_at: None, url: None, external: false });
         let mut pending = with_open_comment(mine(3, "c"), "T1");
         pending.feedback.copilot = crate::prs::CopilotState::Requested;
         let mut someone_elses = red(4, "d");
         someone_elses.feedback.mine = false;
-        app.apply_prs(Ok(vec![cancelled, running, pending, someone_elses]));
+        app.apply_prs(Ok(vec![cancelled, pending, someone_elses]));
         settle(&mut app);
         assert!(fake.resumes.lock().unwrap().is_empty(), "{:?}", fake.resumes.lock().unwrap());
         app.apply_prs(Ok(vec![with_open_comment(mine(5, "e"), "T9")]));
