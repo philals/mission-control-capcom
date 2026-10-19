@@ -103,7 +103,7 @@ pub enum Target {
     AgentClose(usize),
     /// The agents panel itself, for the wheel.
     AgentPanel,
-    /// The `[ agent ]` button: back to the agent session that made the PR.
+    /// The `🤖` button: back to the agent session that made the PR.
     PrAgent(usize),
     /// The `[x] auto-review` tick box on one PR.
     PrReview(usize),
@@ -302,7 +302,7 @@ pub struct PrRow<'a> {
     pub board_state: Option<PrState>,
     /// The story key and task id this PR is recorded on.
     pub owner: Option<(String, String)>,
-    /// Whether `[ agent ]` has anywhere to go: a task, or a session that made this PR.
+    /// Whether `🤖` has anywhere to go: a task, or a session that made this PR.
     pub has_agent: bool,
     /// Whether auto-fix is on for this PR (None for a PR that is not yours).
     pub auto: Option<bool>,
