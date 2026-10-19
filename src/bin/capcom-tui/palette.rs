@@ -39,6 +39,7 @@ pub enum Action {
     CloseAgent(usize),
     PrOpen(String),
     PrCopy(String),
+    PrCopyBranch(String),
     PrDetails(String),
     PrAgent(String),
     PrAutoFix(String),
@@ -126,6 +127,9 @@ pub fn pr_entries(row: &PrRow) -> Vec<Entry> {
         entry(format!("Copy the link of {id}"), "c", Action::PrCopy(url.clone())),
         entry(format!("Details of {id}"), "Enter", Action::PrDetails(url.clone())),
     ];
+    if row.live.is_some_and(|p| !p.feedback.branch.is_empty()) {
+        list.push(entry(format!("Copy the branch name of {id}"), "", Action::PrCopyBranch(url.clone())));
+    }
     if row.has_agent {
         list.push(entry(format!("Go to the agent for {id}"), "a", Action::PrAgent(url.clone())));
     }

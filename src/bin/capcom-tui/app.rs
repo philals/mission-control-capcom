@@ -94,6 +94,7 @@ pub enum Target {
     Pr(usize),
     PrDetails(usize),
     PrCopy(usize),
+    PrCopyBranch(usize),
     /// The `[ go to agent ]` line of a task's sheet.
     TaskAgent,
     /// A row of the agents panel: the agent at this index of `App::agents`.
@@ -2467,7 +2468,14 @@ impl App {
         self.set_notice(format!("copied {id}"));
     }
 
-    /// Ask before marking a live draft ready for review.
+    pub fn copy_branch(&mut self, index: usize) {
+        let Some(branch) = self.pr_rows().get(index).and_then(|r| r.live).map(|p| p.feedback.branch.clone()).filter(|b| !b.is_empty()) else {
+            return;
+        };
+        (self.copier)(&branch);
+        self.set_notice(format!("copied branch {branch}"));
+    }
+
     /// Ask whether to mark a draft ready for review.
     pub fn ask_mark_ready(&mut self, index: usize) {
         let confirm = self.pr_rows().get(index).and_then(|r| {
@@ -3294,6 +3302,7 @@ impl App {
             Action::CloseAgent(index) => self.close_agent(index),
             Action::PrOpen(url) => on_pr(self, &url, &|app, i| app.open_pr(i)),
             Action::PrCopy(url) => on_pr(self, &url, &|app, i| app.copy_pr(i)),
+            Action::PrCopyBranch(url) => on_pr(self, &url, &|app, i| app.copy_branch(i)),
             Action::PrDetails(url) => on_pr(self, &url, &|app, _| app.pr_sheet = true),
             Action::PrAgent(url) => on_pr(self, &url, &|app, i| app.open_pr_agent(i)),
             Action::PrAutoFix(url) => on_pr(self, &url, &|app, i| app.toggle_pr_autofix(i)),
@@ -3321,7 +3330,7 @@ impl App {
             }
         }
         let pr = match target {
-            Some(Target::Pr(i) | Target::PrDetails(i) | Target::PrCopy(i) | Target::PrAgent(i) | Target::PrReview(i) | Target::PrAuto(i) | Target::PrMerge(i) | Target::PrBadge(i) | Target::OpenCheck(i, _)) => Some(i),
+            Some(Target::Pr(i) | Target::PrDetails(i) | Target::PrCopy(i) | Target::PrCopyBranch(i) | Target::PrAgent(i) | Target::PrReview(i) | Target::PrAuto(i) | Target::PrMerge(i) | Target::PrBadge(i) | Target::OpenCheck(i, _)) => Some(i),
             _ => None,
         };
         if let Some(i) = pr {
@@ -3370,6 +3379,7 @@ impl App {
             }
             Target::TaskAgent => "go to the agent working on this task: bring it to the front, or resume its session (a)",
             Target::PrCopy(_) => "copy the link of this PR (c)",
+            Target::PrCopyBranch(_) => "copy the name of this PR's branch",
             Target::PrDetails(_) => "every check, the state and the link (Enter)",
             Target::PrBadge(i) => {
                 if self.pr_rows().get(i).and_then(|r| r.live).is_some_and(|p| p.is_draft) {
@@ -3497,6 +3507,12 @@ impl App {
                 self.set_focus(Focus::Prs);
                 self.pr_sel = i;
                 self.copy_pr(i);
+                return;
+            }
+            Some(Target::PrCopyBranch(i)) => {
+                self.set_focus(Focus::Prs);
+                self.pr_sel = i;
+                self.copy_branch(i);
                 return;
             }
             Some(Target::PrAuto(i)) => {
