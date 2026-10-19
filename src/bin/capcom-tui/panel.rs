@@ -16,8 +16,8 @@ type Hits = Vec<(Rect, Target)>;
 
 const OPEN_BUTTON: &str = "[ o Open in browser ]";
 const DETAILS_BUTTON: &str = "[ details ]";
-/// Icons, not words, to save room: copy the link, and go to the agent (a wide emoji, two columns).
-const COPY_BUTTON: &str = "❐";
+/// Emoji, not words, to save room: copy the link, and go to the agent (each two columns wide).
+const COPY_BUTTON: &str = "📋";
 pub const AGENT_ICON: &str = "🤖";
 const AGENT_BUTTON: &str = AGENT_ICON;
 const CONFIRM_YES: &str = "[ y Mark ready ]";
@@ -457,7 +457,7 @@ fn rail(pr: &PullRequest, now: DateTime<Utc>, durations: &Durations, width: usiz
     spans
 }
 
-const COPY_ICON: &str = " ❐";
+const COPY_ICON: &str = " 📋";
 
 /// The PR's branch (dimmed, cut to `room` columns) and the icon that copies it; None when the
 /// branch is unknown or there is no room.
@@ -625,7 +625,7 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, expanded: bool, now: Dat
     lines.extend(stages.into_iter().map(|s| Line::from(fit(s, width)).style(style)));
     let title_n = title_lines(row, width).len() as u16;
     let limit = width.saturating_sub(right_width) as u16;
-    (lines, icon_col.filter(|col| col + 2 <= limit).map(|col| (title_n, col)))
+    (lines, icon_col.filter(|col| col + 3 <= limit).map(|col| (title_n, col)))
 }
 
 /// `PULL REQUESTS · 3`, with `· 1 awaiting review` when some are all green and waiting for a reviewer.
@@ -733,7 +733,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         f.render_widget(Paragraph::new(lines), rect);
         hits.push((rect, Target::Pr(i)));
         if let Some((line, col)) = icon.filter(|(line, _)| *line < h) {
-            hits.push((Rect::new(body.x + col, y + line, 2, 1), Target::PrCopyBranch(i)));
+            hits.push((Rect::new(body.x + col, y + line, 3, 1), Target::PrCopyBranch(i)));
         }
         let title_n = if expanded[i] { title_lines(row, width).len() as u16 } else { 0 };
         let rail_n = rail_lines(row) as u16;
