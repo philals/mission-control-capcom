@@ -8,6 +8,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph, Wrap};
+use unicode_width::UnicodeWidthStr;
 use ratatui::Frame;
 use capcom::model::PrState;
 
@@ -15,8 +16,10 @@ type Hits = Vec<(Rect, Target)>;
 
 const OPEN_BUTTON: &str = "[ o Open in browser ]";
 const DETAILS_BUTTON: &str = "[ details ]";
-const COPY_BUTTON: &str = "[ copy ]";
-const AGENT_BUTTON: &str = "[ agent ]";
+/// Icons, not words, to save room: copy the link, and go to the agent (a wide emoji, two columns).
+const COPY_BUTTON: &str = "❐";
+pub const AGENT_ICON: &str = "🤖";
+const AGENT_BUTTON: &str = AGENT_ICON;
 const CONFIRM_YES: &str = "[ y Mark ready ]";
 const CONFIRM_YES_DRAFT: &str = "[ y Turn into a draft ]";
 const CONFIRM_NO: &str = "[ n Cancel ]";
@@ -61,7 +64,7 @@ fn buttons(row: &PrRow) -> Vec<(Btn, String, Style)> {
 
 /// Characters the buttons take, with a space between each.
 fn buttons_width(list: &[(Btn, String, Style)]) -> usize {
-    list.iter().map(|(_, t, _)| t.chars().count()).sum::<usize>() + list.len().saturating_sub(1)
+    list.iter().map(|(_, t, _)| UnicodeWidthStr::width(t.as_str())).sum::<usize>() + list.len().saturating_sub(1)
 }
 
 /// Width of the `[DRAFT]` badge that marks a draft ready when clicked.
@@ -182,7 +185,7 @@ pub fn fit(spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
 }
 
 pub fn width_of(spans: &[Span<'static>]) -> usize {
-    spans.iter().map(|s| s.content.chars().count()).sum()
+    spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum()
 }
 
 pub fn dim() -> Style {
@@ -454,7 +457,7 @@ fn rail(pr: &PullRequest, now: DateTime<Utc>, durations: &Durations, width: usiz
     spans
 }
 
-const COPY_ICON: &str = " ⧉";
+const COPY_ICON: &str = " ❐";
 
 /// The PR's branch (dimmed, cut to `room` columns) and the icon that copies it; None when the
 /// branch is unknown or there is no room.
@@ -741,7 +744,7 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
             let mut x = body.x + body.width - total;
             for (n, (which, text, _)) in list.iter().enumerate() {
                 // the space between two buttons belongs to the one before it, so a near miss still lands
-                let w = text.chars().count() as u16;
+                let w = UnicodeWidthStr::width(text.as_str()) as u16;
                 let area_w = if n + 1 < list.len() { w + 1 } else { w };
                 let target = match which {
                     Btn::AutoFix => Target::PrAuto(i),

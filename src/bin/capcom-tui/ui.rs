@@ -1026,13 +1026,13 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     }
     lines.push(fact("File", task.file.clone()));
     let agent_row = lines.len() as u16;
-    let button = "[ go to agent ]";
+    let button = format!("{} go to agent", panel::AGENT_ICON);
     lines.push(Line::from(vec![
         Span::styled(format!("{:<12}", ""), Style::new().fg(theme::DIM)),
-        Span::styled(button, Style::new().fg(theme::CYAN)),
+        Span::styled(button.clone(), Style::new().fg(theme::CYAN)),
         Span::styled("  a", Style::new().fg(theme::DIM)),
     ]));
-    let agent_hit = (agent_row < inner.height).then(|| Rect::new(inner.x + 12, inner.y + agent_row, button.chars().count() as u16, 1));
+    let agent_hit = (agent_row < inner.height).then(|| Rect::new(inner.x + 12, inner.y + agent_row, unicode_width::UnicodeWidthStr::width(button.as_str()) as u16, 1));
     lines.push(Line::raw(""));
     lines.push(Line::from(Span::styled("PRs", Style::new().fg(theme::DIM))));
     if task.prs.is_empty() {
@@ -1860,9 +1860,9 @@ mod tests {
         let opened = recorder(&mut app);
         let copied = copies(&mut app);
         let out = render(&app, 170, 44);
-        assert_eq!(out.matches("[ copy ]").count(), 1, "on the open row only:\n{out}");
-        let (x, y) = find(&out, "[ copy ]");
-        app.on_click(x + 2, y);
+        assert_eq!(out.matches("❐").count(), 1, "on the open row only:\n{out}");
+        let (x, y) = find(&out, "❐");
+        app.on_click(x, y);
         assert_eq!(*copied.borrow(), vec!["https://github.com/acme/widgets/pull/12".to_string()]);
         assert!(opened.borrow().is_empty());
         assert!(render(&app, 170, 44).contains("copied acme/widgets#12"));
@@ -2178,8 +2178,8 @@ mod tests {
         app.reload();
         let fake = with_herdr(&mut app);
         let out = render(&app, 170, 44);
-        assert_eq!(out.matches("[ agent ]").count(), 1, "the two PRs on no task have none:\n{out}");
-        let (x, y) = find(&out, "[ agent ]");
+        assert_eq!(out.matches("🤖").count(), 1, "the two PRs on no task have none:\n{out}");
+        let (x, y) = find(&out, "🤖");
         app.on_click(x + 2, y);
         let resumes = resumes_after(&mut app, &fake);
         assert_eq!(resumes.len(), 1);
@@ -2362,7 +2362,7 @@ mod tests {
         app.reload();
         app.open_detail();
         let out = render(&app, 260, 44);
-        let (x, y) = find(&out, "[ go to agent ]");
+        let (x, y) = find(&out, "🤖  go to agent");
         app.on_hover(x + 2, y);
         assert!(render(&app, 260, 44).lines().last().unwrap().contains("go to the agent working on this task"));
         app.on_click(x + 2, y);
@@ -2401,17 +2401,17 @@ mod tests {
         let (_root, mut app) = with_prs();
         let url = "https://github.com/acme/api/pull/99";
         let fake = with_herdr(&mut app);
-        assert_eq!(render(&app, 170, 44).matches("[ agent ]").count(), 1);
+        assert_eq!(render(&app, 170, 44).matches("🤖").count(), 1);
         app.pr_links = vec![(url.to_string(), capcom::session::PrSession { session: "s-99".into(), cwd: "/w/api/tree".into() })];
         app.pr_sel = app.pr_rows().iter().position(|r| r.url == url).unwrap();
         let out = render(&app, 170, 44);
-        assert_eq!(out.matches("[ agent ]").count(), 2, "the task PR and the selected, linked one:\n{out}");
+        assert_eq!(out.matches("🤖").count(), 2, "the task PR and the selected, linked one:\n{out}");
         let line = out.lines().position(|l| l.contains("acme/api#99")).unwrap();
         let (x, y) = out
             .lines()
             .enumerate()
             .skip(line)
-            .find_map(|(y, l)| l.find("[ agent ]").map(|b| (l[..b].chars().count() as u16, y as u16)))
+            .find_map(|(y, l)| l.find("🤖").map(|b| (l[..b].chars().count() as u16, y as u16)))
             .unwrap();
         app.on_click(x + 2, y);
         let resumes = resumes_after(&mut app, &fake);
@@ -4723,7 +4723,7 @@ mod tests {
         let out = render(&app, 170, 44);
         let (x, y) = find(&out, "feature/retry-loop");
         let icon_x = x + "feature/retry-loop".chars().count() as u16 + 1;
-        assert!(line_of(&out, "feature/retry-loop").contains("feature/retry-loop ⧉"), "{out}");
+        assert!(line_of(&out, "feature/retry-loop").contains("feature/retry-loop ❐"), "{out}");
         app.on_hover(icon_x, y);
         assert_eq!(app.tooltip(), Some("copy the name of this PR's branch"));
         app.on_click(icon_x, y);
