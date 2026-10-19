@@ -113,6 +113,7 @@ fn pull_requests() -> Vec<PullRequest> {
                 mine: true,
                 pasted: false,
                 head: "9f2c1ab".into(),
+                branch: "feature/demo-9f2c1ab".into(),
                 copilot: CopilotState::Reviewed,
                 copilot_reviewed_at: Some(ago(20)),
                 threads: ["a", "b"].iter().map(|id| Thread { id: id.to_string(), resolved: false, outdated: false, by_copilot: true }).collect(),
@@ -138,7 +139,7 @@ fn pull_requests() -> Vec<PullRequest> {
             ],
         },
         PullRequest {
-            feedback: Feedback { mine: true, head: "4be7710".into(), copilot: CopilotState::Requested, kodiak: Some(kodiak()), ..Feedback::default() },
+            feedback: Feedback { mine: true, head: "4be7710".into(), branch: "feature/audit-log-export".into(), copilot: CopilotState::Requested, kodiak: Some(kodiak()), ..Feedback::default() },
             repo: "acme/worker".into(),
             number: 41,
             title: "feat: DEMO-102 add the audit log export job (T1)".into(),
@@ -156,7 +157,7 @@ fn pull_requests() -> Vec<PullRequest> {
             ],
         },
         PullRequest {
-            feedback: Feedback { mine: true, head: "c0ffee1".into(), kodiak: Some(kodiak()), ..Feedback::default() },
+            feedback: Feedback { mine: true, head: "c0ffee1".into(), branch: "docs/digest-settings".into(), kodiak: Some(kodiak()), ..Feedback::default() },
             repo: "acme/web".into(),
             number: 215,
             title: "docs: explain the notification digest settings".into(),
