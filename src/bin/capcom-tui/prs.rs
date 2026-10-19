@@ -18,7 +18,7 @@ pub const DEFAULT_QUERY: &str =
 /// What is asked of every PR, in the search and in a lookup by number.
 macro_rules! pr_fields {
     () => {
-        r#"id number title url isDraft viewerDidAuthor headRefOid mergeable mergeStateStatus createdAt updatedAt reviewDecision comments { totalCount } reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on Bot { login } } } } latestReviews(first: 20) { nodes { author { login } state submittedAt } } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { databaseId workflow { name } } } } ... on StatusContext { context state targetUrl } } } }"#
+        r#"id number title url isDraft viewerDidAuthor headRefName headRefOid mergeable mergeStateStatus createdAt updatedAt reviewDecision comments { totalCount } reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on Bot { login } } } } latestReviews(first: 20) { nodes { author { login } state submittedAt } } repository { nameWithOwner } labels(first: 10) { nodes { name } } statusCheckRollup { state contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { databaseId workflow { name } } } } ... on StatusContext { context state targetUrl } } } }"#
     };
 }
 
@@ -159,6 +159,9 @@ pub struct Feedback {
     #[serde(default)]
     pub pasted: bool,
     pub head: String,
+    /// The PR's branch name.
+    #[serde(default)]
+    pub branch: String,
     pub copilot: CopilotState,
     pub copilot_reviewed_at: Option<String>,
     pub threads: Vec<Thread>,
@@ -461,6 +464,7 @@ fn parse_feedback(node: &Value) -> Feedback {
         mine: node.get("viewerDidAuthor").and_then(Value::as_bool).unwrap_or(false),
         pasted: false,
         head: text(node, "/headRefOid").unwrap_or_default(),
+        branch: text(node, "/headRefName").unwrap_or_default(),
         copilot: if requested {
             CopilotState::Requested
         } else if reviewed_at.is_some() {
@@ -1487,7 +1491,7 @@ mod tests {
     #[test]
     fn parse_reads_who_wrote_the_pr_copilots_review_and_the_open_threads() {
         let json = r#"{"data":{"search":{"nodes":[{"number":7,"title":"t","url":"https://github.com/acme/api/pull/7",
-          "isDraft":false,"viewerDidAuthor":true,"headRefOid":"abc123","updatedAt":"2026-10-09T01:00:00Z","reviewDecision":null,
+          "isDraft":false,"viewerDidAuthor":true,"headRefName":"feature/retry-loop","headRefOid":"abc123","updatedAt":"2026-10-09T01:00:00Z","reviewDecision":null,
           "comments":{"totalCount":0},"repository":{"nameWithOwner":"acme/api"},"labels":{"nodes":[]},
           "reviewRequests":{"nodes":[]},
           "latestReviews":{"nodes":[{"author":{"login":"copilot-pull-request-reviewer"},"state":"COMMENTED","submittedAt":"2026-10-09T02:46:40Z"},
@@ -1502,6 +1506,7 @@ mod tests {
         let pr = parse(json).unwrap().remove(0);
         assert!(pr.feedback.mine);
         assert_eq!(pr.feedback.head, "abc123");
+        assert_eq!(pr.feedback.branch, "feature/retry-loop");
         assert_eq!(pr.feedback.copilot, CopilotState::Reviewed);
         assert_eq!(pr.feedback.copilot_reviewed_at.as_deref(), Some("2026-10-09T02:46:40Z"));
         assert_eq!(pr.copilot_open().iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["T1"]);

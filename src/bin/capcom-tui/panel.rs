@@ -454,6 +454,12 @@ fn rail(pr: &PullRequest, now: DateTime<Utc>, durations: &Durations, width: usiz
     spans
 }
 
+/// The PR's branch, dimmed, cut to `room` columns; None when it is unknown or there is no room.
+fn branch_span(row: &PrRow, room: usize) -> Option<Span<'static>> {
+    let branch = &row.live?.feedback.branch;
+    (!branch.is_empty() && room >= 8).then(|| Span::styled(format!("  ⎇ {}", trunc(branch, room - 4)), dim()))
+}
+
 /// A quiet PR on one line: badge, id, title, and the little that matters.
 fn collapsed_line(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> Line<'static> {
     let marker = if selected { Span::styled("▌ ", Style::new().fg(theme::CYAN)) } else { Span::raw("  ") };
@@ -467,6 +473,9 @@ fn collapsed_line(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>)
         None => left.push(Span::raw(" ")),
     }
     left.push(Span::styled(id, Style::new().fg(theme::CYAN)));
+    if let Some(branch) = branch_span(row, width / 3) {
+        left.push(branch);
+    }
     let mut right: Vec<Span<'static>> = Vec::new();
     if let Some(pr) = row.live {
         let passed = pr.counts().passed;
@@ -557,6 +566,10 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, expanded: bool, now: Dat
         left.push(Span::raw(" "));
     }
     left.push(Span::styled(id, Style::new().fg(theme::CYAN)));
+    let room = width.saturating_sub(width_of(&left) + width_of(&right) + 3);
+    if let Some(branch) = branch_span(row, room.min(width / 2)) {
+        left.push(branch);
+    }
     if let Some(labels) = labels_text {
         let room = width.saturating_sub(width_of(&left) + width_of(&right) + 3);
         if room >= 6 {

@@ -4697,6 +4697,21 @@ mod tests {
     }
 
     #[test]
+    fn the_branch_name_is_on_the_repo_line_of_every_pr_and_on_a_quiet_pr_line() {
+        let (_root, mut app) = with_prs();
+        let mut open = feed();
+        open[0].feedback.branch = "feature/retry-loop".into();
+        app.apply_prs(Ok(open));
+        let out = render(&app, 170, 44);
+        assert!(line_of(&out, "acme/widgets#12").contains("⎇ feature/retry-loop"), "{out}");
+        let mut long = feed();
+        long[0].feedback.branch = "feature/".to_string() + &"very-long-".repeat(10);
+        app.apply_prs(Ok(long));
+        let out = render(&app, 90, 44);
+        assert!(line_of(&out, "acme/widgets#12").contains("⎇ feature/"), "a long branch is cut, not dropped:\n{out}");
+    }
+
+    #[test]
     fn a_title_that_fits_takes_one_line_and_clicking_it_still_opens_the_pr() {
         let (_root, mut app) = with_prs();
         let log = recorder(&mut app);
