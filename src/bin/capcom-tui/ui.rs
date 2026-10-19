@@ -134,7 +134,7 @@ fn draw_hover(f: &mut Frame, app: &App, hits: &Hits) {
     };
     let button = matches!(
         target,
-        Target::PrAuto(_) | Target::PrReview(_) | Target::PrMerge(_) | Target::PrAgent(_) | Target::TaskAgent | Target::AgentClose(_) | Target::PrCopy(_) | Target::PrDetails(_) | Target::PrBadge(_)
+        Target::PrAuto(_) | Target::PrReview(_) | Target::PrMerge(_) | Target::PrAgent(_) | Target::TaskAgent | Target::AgentClose(_) | Target::PrCopy(_) | Target::PrCopyBranch(_) | Target::PrDetails(_) | Target::PrBadge(_)
             | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::GoLight | Target::Refresh | Target::NewStory | Target::ToggleDone
             | Target::OpenCheck(..) | Target::OpenJob(..) | Target::RunDetails(_) | Target::Back | Target::PaletteItem(_)
     );
@@ -4709,6 +4709,28 @@ mod tests {
         app.apply_prs(Ok(long));
         let out = render(&app, 90, 44);
         assert!(line_of(&out, "acme/widgets#12").contains("⎇ feature/"), "a long branch is cut, not dropped:\n{out}");
+    }
+
+    #[test]
+    fn clicking_the_copy_icon_after_the_branch_copies_the_branch_name() {
+        let (_root, mut app) = with_prs();
+        let mut open = feed();
+        open[0].feedback.branch = "feature/retry-loop".into();
+        app.apply_prs(Ok(open));
+        let copied = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        let sink = copied.clone();
+        app.copier = Box::new(move |text| sink.borrow_mut().push(text.to_string()));
+        let out = render(&app, 170, 44);
+        let (x, y) = find(&out, "feature/retry-loop");
+        let icon_x = x + "feature/retry-loop".chars().count() as u16 + 1;
+        assert!(line_of(&out, "feature/retry-loop").contains("feature/retry-loop ⧉"), "{out}");
+        app.on_hover(icon_x, y);
+        assert_eq!(app.tooltip(), Some("copy the name of this PR's branch"));
+        app.on_click(icon_x, y);
+        assert_eq!(*copied.borrow(), vec!["feature/retry-loop".to_string()], "the branch, not the link");
+        assert!(app.current_notice().is_some_and(|n| n.contains("copied branch feature/retry-loop")));
+        app.on_click(x, y);
+        assert_eq!(copied.borrow().len(), 1, "the name itself is just the row");
     }
 
     #[test]

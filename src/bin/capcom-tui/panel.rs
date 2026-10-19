@@ -454,14 +454,20 @@ fn rail(pr: &PullRequest, now: DateTime<Utc>, durations: &Durations, width: usiz
     spans
 }
 
-/// The PR's branch, dimmed, cut to `room` columns; None when it is unknown or there is no room.
-fn branch_span(row: &PrRow, room: usize) -> Option<Span<'static>> {
+const COPY_ICON: &str = " ⧉";
+
+/// The PR's branch (dimmed, cut to `room` columns) and the icon that copies it; None when the
+/// branch is unknown or there is no room.
+fn branch_spans(row: &PrRow, room: usize) -> Option<(Span<'static>, Span<'static>)> {
     let branch = &row.live?.feedback.branch;
-    (!branch.is_empty() && room >= 8).then(|| Span::styled(format!("  ⎇ {}", trunc(branch, room - 4)), dim()))
+    (!branch.is_empty() && room >= 8).then(|| {
+        let name = Span::styled(format!("  ⎇ {}", trunc(branch, room - 6)), dim());
+        (name, Span::styled(COPY_ICON, Style::new().fg(theme::CYAN)))
+    })
 }
 
 /// A quiet PR on one line: badge, id, title, and the little that matters.
-fn collapsed_line(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> Line<'static> {
+fn collapsed_line(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>) -> (Line<'static>, Option<u16>) {
     let marker = if selected { Span::styled("▌ ", Style::new().fg(theme::CYAN)) } else { Span::raw("  ") };
     let id = match row.number {
         Some(n) => format!("{}#{n}", row.repo),
@@ -473,8 +479,11 @@ fn collapsed_line(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>)
         None => left.push(Span::raw(" ")),
     }
     left.push(Span::styled(id, Style::new().fg(theme::CYAN)));
-    if let Some(branch) = branch_span(row, width / 3) {
-        left.push(branch);
+    let mut icon_at = None;
+    if let Some((name, icon)) = branch_spans(row, width / 3) {
+        left.push(name);
+        icon_at = Some(width_of(&left) as u16);
+        left.push(icon);
     }
     let mut right: Vec<Span<'static>> = Vec::new();
     if let Some(pr) = row.live {
@@ -495,16 +504,15 @@ fn collapsed_line(row: &PrRow, width: usize, selected: bool, now: DateTime<Utc>)
     spans.push(Span::raw(" ".repeat(width.saturating_sub(used))));
     spans.extend(right);
     let line = Line::from(fit(spans, width));
-    if selected {
-        line.style(Style::new().bg(theme::SELECT))
-    } else {
-        line
-    }
+    let line = if selected { line.style(Style::new().bg(theme::SELECT)) } else { line };
+    (line, icon_at)
 }
 
-fn row_lines(row: &PrRow, width: usize, selected: bool, expanded: bool, now: DateTime<Utc>, durations: &Durations) -> Vec<Line<'static>> {
+/// The lines of a PR row, and where its copy-branch icon is: (line within the row, column).
+fn row_lines(row: &PrRow, width: usize, selected: bool, expanded: bool, now: DateTime<Utc>, durations: &Durations) -> (Vec<Line<'static>>, Option<(u16, u16)>) {
     if !expanded {
-        return vec![collapsed_line(row, width, selected, now)];
+        let (line, icon) = collapsed_line(row, width, selected, now);
+        return (vec![line], icon.map(|col| (0, col)));
     }
     let go = row.live.and_then(PullRequest::waiting_for) == Some(Waiting::Reviewer);
     let marker = match (selected, go) {
@@ -567,8 +575,11 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, expanded: bool, now: Dat
     }
     left.push(Span::styled(id, Style::new().fg(theme::CYAN)));
     let room = width.saturating_sub(width_of(&left) + width_of(&right) + 3);
-    if let Some(branch) = branch_span(row, room.min(width / 2)) {
-        left.push(branch);
+    let mut icon_col = None;
+    if let Some((name, icon)) = branch_spans(row, room.min(width / 2)) {
+        left.push(name);
+        icon_col = Some(width_of(&left) as u16);
+        left.push(icon);
     }
     if let Some(labels) = labels_text {
         let room = width.saturating_sub(width_of(&left) + width_of(&right) + 3);
@@ -609,7 +620,9 @@ fn row_lines(row: &PrRow, width: usize, selected: bool, expanded: bool, now: Dat
     }
     lines.push(Line::from(second).style(style));
     lines.extend(stages.into_iter().map(|s| Line::from(fit(s, width)).style(style)));
-    lines
+    let title_n = title_lines(row, width).len() as u16;
+    let limit = width.saturating_sub(right_width) as u16;
+    (lines, icon_col.filter(|col| col + 2 <= limit).map(|col| (title_n, col)))
 }
 
 /// `PULL REQUESTS · 3`, with `· 1 awaiting review` when some are all green and waiting for a reviewer.
@@ -713,9 +726,12 @@ pub fn draw_panel(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         }
         let h = (heights[i] - 1).min(bottom - y);
         let rect = Rect::new(body.x, y, body.width, h);
-        let lines = row_lines(row, body.width as usize, focused && i == selected, expanded[i], now, &app.durations);
+        let (lines, icon) = row_lines(row, body.width as usize, focused && i == selected, expanded[i], now, &app.durations);
         f.render_widget(Paragraph::new(lines), rect);
         hits.push((rect, Target::Pr(i)));
+        if let Some((line, col)) = icon.filter(|(line, _)| *line < h) {
+            hits.push((Rect::new(body.x + col, y + line, 2, 1), Target::PrCopyBranch(i)));
+        }
         let title_n = if expanded[i] { title_lines(row, width).len() as u16 } else { 0 };
         let rail_n = rail_lines(row) as u16;
         let list = if expanded[i] { buttons(row) } else { Vec::new() };
