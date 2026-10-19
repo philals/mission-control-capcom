@@ -1860,8 +1860,8 @@ mod tests {
         let opened = recorder(&mut app);
         let copied = copies(&mut app);
         let out = render(&app, 170, 44);
-        assert_eq!(out.matches("❐").count(), 1, "on the open row only:\n{out}");
-        let (x, y) = find(&out, "❐");
+        assert_eq!(out.matches("📋").count(), 1, "on the open row only:\n{out}");
+        let (x, y) = find(&out, "📋");
         app.on_click(x, y);
         assert_eq!(*copied.borrow(), vec!["https://github.com/acme/widgets/pull/12".to_string()]);
         assert!(opened.borrow().is_empty());
@@ -4723,7 +4723,7 @@ mod tests {
         let out = render(&app, 170, 44);
         let (x, y) = find(&out, "feature/retry-loop");
         let icon_x = x + "feature/retry-loop".chars().count() as u16 + 1;
-        assert!(line_of(&out, "feature/retry-loop").contains("feature/retry-loop ❐"), "{out}");
+        assert!(line_of(&out, "feature/retry-loop").contains("feature/retry-loop 📋"), "{out}");
         app.on_hover(icon_x, y);
         assert_eq!(app.tooltip(), Some("copy the name of this PR's branch"));
         app.on_click(icon_x, y);
