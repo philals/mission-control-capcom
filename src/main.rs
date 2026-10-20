@@ -28,6 +28,28 @@ enum Cmd {
         #[arg(long)]
         jira_url: Option<String>,
     },
+    /// Keep a short note about the agent running this session, shown in capcom-tui's agents panel.
+    /// Leave an option out to keep what the note says; give an empty text to clear it.
+    Note {
+        /// What you were asked to do, in one line
+        #[arg(long)]
+        task: Option<String>,
+        /// Where you have got to
+        #[arg(long)]
+        progress: Option<String>,
+        /// What you are waiting on (empty: not waiting)
+        #[arg(long)]
+        waiting: Option<String>,
+        /// The wait is on the user (true or false)
+        #[arg(long)]
+        needs_you: Option<bool>,
+        /// What the user needs to do next (empty: nothing)
+        #[arg(long)]
+        next: Option<String>,
+        /// Claude Code session id (Claude Code sets CLAUDE_CODE_SESSION_ID in its shell)
+        #[arg(long, env = "CLAUDE_CODE_SESSION_ID")]
+        session: String,
+    },
     /// Print the stories folder in use (from --root or CAPCOM_ROOT)
     Root,
     /// List every story with its title and task count
@@ -233,6 +255,13 @@ fn parse_pr_state(s: &str) -> Result<PrState> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if let Cmd::Note { task, progress, waiting, needs_you, next, session } = cli.cmd {
+        let dir = capcom::notes::dir().ok_or_else(|| anyhow::anyhow!("no home folder for the notes: set CAPCOM_NOTES_DIR"))?;
+        let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let cwd = capcom::notes::read(&dir, &session).filter(|n| !n.cwd.is_empty()).map(|n| n.cwd).or_else(|| capcom::session::start_dir(&session)).or_else(|| std::env::current_dir().ok().map(|d| d.to_string_lossy().to_string()));
+        let note = capcom::notes::write(&dir, &session, capcom::notes::Update { task, progress, waiting, needs_you, next, cwd }, &now)?;
+        return print(&serde_json::to_value(note)?);
+    }
     let root = cli.root.ok_or_else(|| {
         anyhow::anyhow!("no stories folder: set CAPCOM_ROOT or pass --root DIR")
     })?;
@@ -242,6 +271,7 @@ fn main() -> Result<()> {
             ops::init_story(root, &key, &title, jira_url.as_deref())?;
             print(&json!({ "key": key, "dir": store::story_dir(root, &key)? }))
         }
+        Cmd::Note { .. } => unreachable!("handled before the root is needed"),
         Cmd::Root => print(&json!({ "root": root })),
         Cmd::List => {
             let mut rows = Vec::new();

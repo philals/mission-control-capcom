@@ -164,7 +164,7 @@ mod tests {
             .map(|m| match m {
                 AppMsg::Notice(t) => t.clone(),
                 AppMsg::Cleanup(id) => format!("cleanup {id}"),
-                AppMsg::PrLinks(_) | AppMsg::Agents(_) | AppMsg::Spawns(_) | AppMsg::FixSent(..) | AppMsg::FixRetry(_) | AppMsg::UpdateConflict(..) => String::new(),
+                AppMsg::PrLinks(_) | AppMsg::Agents(_) | AppMsg::Notes(_) | AppMsg::Spawns(_) | AppMsg::FixSent(..) | AppMsg::FixRetry(_) | AppMsg::UpdateConflict(..) => String::new(),
             })
             .collect::<Vec<_>>()
             .join(" | ")

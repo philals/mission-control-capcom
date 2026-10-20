@@ -28,7 +28,7 @@ If that sounds like you, great. If not, treat this as a worked example: fork it,
 | Part | What it does |
 |---|---|
 | **`capcom`** (command) | The only writer of each story's `board.json`: tasks, statuses, dependencies, PRs. Refuses illegal moves. Everything it prints is JSON. |
-| **Five Claude Code skills** | `/story-break-down`, `/story-plan-task`, `/story-implement-task`, `/story-review` and `/pr-address` (works on any PR). They talk to you, Jira and `git`/`gh`, and change the board only through `capcom`. |
+| **Six Claude Code skills** | `/story-break-down`, `/story-plan-task`, `/story-implement-task`, `/story-review`, `/pr-address` (works on any PR) and `/agent-note` (an agent's TLDR of what it is doing and waiting for, shown in the agents panel). They talk to you, Jira and `git`/`gh`, and change the board only through `capcom`. |
 | **`capcom-tui`** | A live terminal board (keyboard and mouse): your stories, your open PRs with their CI stages, and the GitHub Actions runs you started by hand. It can start the skills for you and finish tasks when their PRs merge. |
 | **Herdr plugin** (optional) | Opens `capcom-tui` from a keyboard shortcut in [Herdr](https://herdr.dev), and lets the board launch agents in Herdr panes. |
 
@@ -67,7 +67,7 @@ mkdir -p ~/stories
 export CAPCOM_ROOT=~/stories         # also add this to your shell profile and to `env` in ~/.claude/settings.json
 
 # make the skills visible to Claude Code
-for s in story-break-down story-plan-task story-implement-task story-review pr-address; do
+for s in story-break-down story-plan-task story-implement-task story-review pr-address agent-note; do
   ln -s "$PWD/skills/$s" ~/.claude/skills/$s
 done
 ```
@@ -141,7 +141,7 @@ capcom-tui --screenshot docs/img/list.svg  --screen list  --size 150x30
 ```
 src/                      the capcom command and its library (board model, rules, store, refresh)
 src/bin/capcom-tui/       the terminal board (app state, drawing, GitHub polling, Herdr, cache, demo data)
-skills/                   the five Claude Code skills
+skills/                   the six Claude Code skills
 schemas/board.schema.json JSON Schema for board.json
 herdr-plugin.toml         the Herdr plugin manifest (scripts/open.sh is its action)
 docs/                     design notes, command reference, TUI guide, README pictures

@@ -134,11 +134,11 @@ fn draw_hover(f: &mut Frame, app: &App, hits: &Hits) {
     };
     let button = matches!(
         target,
-        Target::PrAuto(_) | Target::PrReview(_) | Target::PrMerge(_) | Target::PrAgent(_) | Target::TaskAgent | Target::AgentClose(_) | Target::PrCopy(_) | Target::PrCopyBranch(_) | Target::PrDetails(_) | Target::PrBadge(_)
+        Target::PrAuto(_) | Target::PrReview(_) | Target::PrMerge(_) | Target::PrAgent(_) | Target::TaskAgent | Target::AgentClose(_) | Target::NoteDismiss(_) | Target::PrCopy(_) | Target::PrCopyBranch(_) | Target::PrDetails(_) | Target::PrBadge(_)
             | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::GoLight | Target::Refresh | Target::NewStory | Target::ToggleDone
             | Target::OpenCheck(..) | Target::OpenJob(..) | Target::RunDetails(_) | Target::Back | Target::PaletteItem(_)
     );
-    let row = matches!(target, Target::Pr(_) | Target::Run(_) | Target::Story(_) | Target::Card { .. } | Target::AgentRow(_));
+    let row = matches!(target, Target::Pr(_) | Target::Run(_) | Target::Story(_) | Target::Card { .. } | Target::AgentRow(_) | Target::NoteToggle(_) | Target::NoteResume(_));
     let buffer = f.buffer_mut();
     if button {
         buffer.set_style(*rect, Style::new().add_modifier(Modifier::REVERSED));
@@ -403,11 +403,73 @@ fn draw_list(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     }
 }
 
+/// How long ago, in two or three characters: `5m`, `3h`, `2d`.
+fn age_of(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
+    let Ok(then) = chrono::DateTime::parse_from_rfc3339(iso) else {
+        return String::new();
+    };
+    let minutes = now.signed_duration_since(then).num_minutes().max(0);
+    match minutes {
+        0..=59 => format!("{minutes}m"),
+        60..=1439 => format!("{}h", minutes / 60),
+        _ => format!("{}d", minutes / 1440),
+    }
+}
+
+/// The one line that says what an agent is up to, and how to colour it.
+fn note_line(note: &capcom::notes::Note, needs_you: bool) -> (String, Style) {
+    let first = |parts: [&str; 3]| parts.into_iter().find(|p| !p.is_empty()).unwrap_or_default().to_string();
+    if needs_you {
+        (format!("you: {}", first([&note.next, &note.waiting, &note.progress])), Style::new().fg(panel::ORANGE).add_modifier(Modifier::BOLD))
+    } else if !note.waiting.is_empty() {
+        (format!("waiting: {}", note.waiting), Style::new().fg(theme::CYAN))
+    } else {
+        (first([&note.progress, &note.task, ""]), Style::new().fg(theme::DIM))
+    }
+}
+
+/// A note shown in full: what it was asked, where it is, what it waits on, what you do.
+fn note_lines(note: &capcom::notes::Note, indent: usize, width: usize) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    for (label, text, style) in [
+        ("asked ", &note.task, Style::new().fg(theme::MUTED)),
+        ("now   ", &note.progress, Style::new().fg(theme::DIM)),
+        ("wait  ", &note.waiting, Style::new().fg(theme::CYAN)),
+        ("you   ", &note.next, Style::new().fg(panel::ORANGE).add_modifier(Modifier::BOLD)),
+    ] {
+        if text.is_empty() {
+            continue;
+        }
+        let room = width.saturating_sub(indent + label.len()).max(8);
+        for (n, part) in panel::wrap_text(text, room, 4).into_iter().enumerate() {
+            let lead = if n == 0 { label } else { "      " };
+            lines.push(Line::from(vec![Span::raw(" ".repeat(indent)), Span::styled(lead, Style::new().fg(theme::DIM)), Span::styled(part, style)]));
+        }
+    }
+    lines
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum AgentHit {
+    None,
+    Agent(usize),
+    Note(usize),
+    Earlier(usize),
+}
+
+struct AgentRow {
+    line: Line<'static>,
+    hit: AgentHit,
+    close: Option<Target>,
+}
+
 fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     use crate::agents::{self, Status};
     let edge = theme::Edge::Idle;
+    let now = chrono::Utc::now();
+    let earlier = app.earlier_notes();
     let working = app.agents.iter().filter(|a| a.status == Status::Working).count();
-    let needs = app.agents.iter().filter(|a| a.status == Status::Blocked).count();
+    let needs = app.agents.iter().filter(|a| app.agent_needs_you(a)).count() + earlier.iter().filter(|i| app.notes[**i].needs_you).count();
     let plate = theme::plate(edge);
     let mut title = vec![Span::styled(format!(" AGENTS · {} ", app.agents.len()), plate)];
     if working > 0 {
@@ -418,7 +480,7 @@ fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     }
     let mut block = theme::panel_block(edge, Line::from(title));
     let inner = block.inner(area);
-    if app.agents.is_empty() {
+    if app.agents.is_empty() && earlier.is_empty() {
         f.render_widget(block, area);
         f.render_widget(Paragraph::new(Span::styled("no agents are running in Herdr", Style::new().fg(theme::DIM))), inner);
         return;
@@ -426,30 +488,35 @@ fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let stories: Vec<(String, String)> = app.stories.iter().map(|s| (s.key.clone(), crate::herdr::short_name(&s.title))).collect();
     let width = inner.width as usize;
     let parents = agents::parents(&app.agents, &app.spawns);
-    let mut rows: Vec<(Line<'static>, Option<usize>, bool)> = Vec::new();
+    let mut rows: Vec<AgentRow> = Vec::new();
     for group in agents::groups(&app.agents, &stories, &parents) {
         let style = if group.story { Style::new().fg(theme::CYAN).add_modifier(Modifier::BOLD) } else { Style::new().fg(theme::MUTED).add_modifier(Modifier::BOLD) };
-        rows.push((Line::from(Span::styled(trunc(&group.label, width), style)), None, false));
+        rows.push(AgentRow { line: Line::from(Span::styled(trunc(&group.label, width), style)), hit: AgentHit::None, close: None });
         for entry in &group.entries {
             let agent = &app.agents[entry.index];
-            let colour = match agent.status {
-                Status::Working => theme::CYAN,
-                Status::Blocked => panel::ORANGE,
-                Status::Done => theme::GREEN,
-                _ => theme::DIM,
+            let needs_you = app.agent_needs_you(agent);
+            let colour = if needs_you {
+                panel::ORANGE
+            } else {
+                match agent.status {
+                    Status::Working => theme::CYAN,
+                    Status::Done => theme::GREEN,
+                    _ => theme::DIM,
+                }
             };
-            let word = agent.status.word();
+            let word = if needs_you { Status::Blocked.word() } else { agent.status.word() };
+            let icon = if needs_you { Status::Blocked.icon() } else { agent.status.icon() };
             let branch = if entry.depth == 0 { String::new() } else { format!("{}└ ", "  ".repeat(entry.depth - 1)) };
             let lead = 2 + branch.chars().count();
             let closable = matches!(agent.status, Status::Idle | Status::Done);
             let cross = if closable { 2 } else { 0 };
             let label = trunc(&entry.label, width.saturating_sub(lead + word.chars().count() + cross + 3));
             let pad = width.saturating_sub(lead + label.chars().count() + word.chars().count() + cross + 2);
-            rows.push((
-                Line::from(vec![
+            rows.push(AgentRow {
+                line: Line::from(vec![
                     Span::raw("  "),
                     Span::styled(branch, Style::new().fg(theme::DIM)),
-                    Span::styled(agent.status.icon(), Style::new().fg(colour).add_modifier(Modifier::BOLD)),
+                    Span::styled(icon, Style::new().fg(colour).add_modifier(Modifier::BOLD)),
                     Span::raw(format!(" {label}{}", " ".repeat(pad))),
                     Span::styled(word, Style::new().fg(colour)),
                     Span::styled(
@@ -461,12 +528,55 @@ fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
                         Style::new().fg(theme::RED).add_modifier(Modifier::BOLD),
                     ),
                 ]),
-                Some(entry.index),
-                closable,
-            ));
-            if !agent.topic.is_empty() && agent.topic != entry.label {
+                hit: AgentHit::Agent(entry.index),
+                close: closable.then_some(Target::AgentClose(entry.index)),
+            });
+            if let Some(n) = app.note_of(agent) {
+                let note = &app.notes[n];
+                if app.notes_open.contains(&note.session) {
+                    for line in note_lines(note, lead + 2, width) {
+                        rows.push(AgentRow { line, hit: AgentHit::Note(n), close: None });
+                    }
+                } else {
+                    let (text, style) = note_line(note, needs_you);
+                    let text = format!("{}{}", " ".repeat(lead + 2), trunc(&text, width.saturating_sub(lead + 2)));
+                    rows.push(AgentRow { line: Line::from(Span::styled(text, style)), hit: AgentHit::Note(n), close: None });
+                }
+            } else if !agent.topic.is_empty() && agent.topic != entry.label {
                 let text = format!("{}{}", " ".repeat(lead + 2), trunc(&agent.topic, width.saturating_sub(lead + 2)));
-                rows.push((Line::from(Span::styled(text, Style::new().fg(theme::DIM))), Some(entry.index), false));
+                rows.push(AgentRow { line: Line::from(Span::styled(text, Style::new().fg(theme::DIM))), hit: AgentHit::Agent(entry.index), close: None });
+            }
+        }
+    }
+    if !earlier.is_empty() {
+        let heading = format!("EARLIER · {}", earlier.len());
+        rows.push(AgentRow { line: Line::from(Span::styled(trunc(&heading, width), Style::new().fg(theme::MUTED).add_modifier(Modifier::BOLD))), hit: AgentHit::None, close: None });
+        for &n in &earlier {
+            let note = &app.notes[n];
+            let age = age_of(&note.updated_at, now);
+            let (colour, icon) = if note.needs_you { (panel::ORANGE, "!") } else { (theme::DIM, "○") };
+            let title = if note.task.is_empty() { format!("session {}", note.session.chars().take(8).collect::<String>()) } else { note.task.clone() };
+            let label = trunc(&title, width.saturating_sub(2 + age.chars().count() + 7));
+            let pad = width.saturating_sub(2 + label.chars().count() + age.chars().count() + 5);
+            rows.push(AgentRow {
+                line: Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(icon, Style::new().fg(colour).add_modifier(Modifier::BOLD)),
+                    Span::raw(format!(" {label}{}", " ".repeat(pad))),
+                    Span::styled(age, Style::new().fg(theme::DIM)),
+                    Span::styled(" ✕", Style::new().fg(theme::RED).add_modifier(Modifier::BOLD)),
+                ]),
+                hit: AgentHit::Earlier(n),
+                close: Some(Target::NoteDismiss(n)),
+            });
+            if app.notes_open.contains(&note.session) {
+                for line in note_lines(note, 4, width) {
+                    rows.push(AgentRow { line, hit: AgentHit::Note(n), close: None });
+                }
+            } else {
+                let (text, style) = note_line(note, note.needs_you);
+                let text = format!("    {}", trunc(&text, width.saturating_sub(4)));
+                rows.push(AgentRow { line: Line::from(Span::styled(text, style)), hit: AgentHit::Note(n), close: None });
             }
         }
     }
@@ -480,25 +590,31 @@ fn draw_agents(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     }
     f.render_widget(block, area);
     hits.push((area, Target::AgentPanel));
-    let shown: Vec<(Line<'static>, Option<usize>, bool)> = rows.into_iter().skip(scroll).take(room).collect();
+    let shown: Vec<AgentRow> = rows.into_iter().skip(scroll).take(room).collect();
+    let target_of = |hit: AgentHit| match hit {
+        AgentHit::None => None,
+        AgentHit::Agent(i) => Some(Target::AgentRow(i)),
+        AgentHit::Note(i) => Some(Target::NoteToggle(i)),
+        AgentHit::Earlier(i) => Some(Target::NoteResume(i)),
+    };
     let mut start = 0;
     while start < shown.len() {
-        let target = shown[start].1;
+        let hit = shown[start].hit;
         let mut end = start + 1;
-        while target.is_some() && end < shown.len() && shown[end].1 == target {
+        while hit != AgentHit::None && end < shown.len() && shown[end].hit == hit && !matches!(hit, AgentHit::Earlier(_)) {
             end += 1;
         }
-        if let Some(index) = target {
-            hits.push((Rect::new(inner.x, inner.y + start as u16, inner.width, (end - start) as u16), Target::AgentRow(index)));
+        if let Some(target) = target_of(hit) {
+            hits.push((Rect::new(inner.x, inner.y + start as u16, inner.width, (end - start) as u16), target));
         }
         start = end;
     }
-    for (n, (_, target, closable)) in shown.iter().enumerate() {
-        if let (Some(index), true) = (target, closable) {
-            hits.push((Rect::new(inner.x + inner.width.saturating_sub(2), inner.y + n as u16, 2.min(inner.width), 1), Target::AgentClose(*index)));
+    for (n, row) in shown.iter().enumerate() {
+        if let Some(target) = row.close {
+            hits.push((Rect::new(inner.x + inner.width.saturating_sub(2), inner.y + n as u16, 2.min(inner.width), 1), target));
         }
     }
-    let lines: Vec<Line> = shown.into_iter().map(|(l, _, _)| l).collect();
+    let lines: Vec<Line> = shown.into_iter().map(|r| r.line).collect();
     f.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -2323,6 +2439,101 @@ mod tests {
         }
         assert_eq!(*fake.closed.lock().unwrap(), vec!["w1:p1".to_string()]);
         assert_eq!(app.agents.len(), 1, "it leaves the list at once");
+    }
+
+    fn note(session: &str, task: &str, progress: &str, waiting: &str, needs_you: bool, next: &str, at: chrono::DateTime<chrono::Utc>) -> capcom::notes::Note {
+        capcom::notes::Note {
+            session: session.into(),
+            task: task.into(),
+            progress: progress.into(),
+            waiting: waiting.into(),
+            needs_you,
+            next: next.into(),
+            cwd: "/w/spike".into(),
+            updated_at: at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        }
+    }
+
+    #[test]
+    fn an_agent_says_what_it_waits_on_and_what_you_do_and_the_title_counts_those_needing_you() {
+        use crate::agents::{AgentInfo, Status};
+        let (_root, mut app) = two_stories();
+        with_herdr(&mut app);
+        let agent = |pane: &str, session: &str, status, topic: &str| AgentInfo { pane: pane.into(), name: None, status, topic: topic.into(), workspace: "scratch".into(), cwd: String::new(), session: Some(session.into()) };
+        app.agents = vec![
+            agent("w1:p1", "s-ask", Status::Idle, "terminal title one"),
+            agent("w2:p1", "s-ci", Status::Working, "terminal title two"),
+            agent("w3:p1", "s-stale", Status::Working, "terminal title three"),
+        ];
+        let now = chrono::Utc::now();
+        app.notes = vec![
+            note("s-ask", "find the retry loop", "found it", "your call on the fix", true, "pick option A or B", now),
+            note("s-ci", "fix the lint", "pushed", "CI on the PR", false, "", now),
+            note("s-stale", "old ask", "carrying on", "", true, "answer me", now),
+        ];
+        let out = render(&app, 170, 44);
+        assert!(out.contains("you: pick option A or B"), "{out}");
+        assert!(out.contains("waiting: CI on the PR"), "{out}");
+        assert!(!out.contains("you: answer me"), "a note from before the agent carried on is not an ask:\n{out}");
+        assert!(out.contains("1 need you"), "{out}");
+    }
+
+    #[test]
+    fn clicking_a_note_shows_all_of_it_and_again_only_a_line() {
+        use crate::agents::{AgentInfo, Status};
+        let (_root, mut app) = two_stories();
+        let fake = with_herdr(&mut app);
+        app.agents = vec![AgentInfo { pane: "w1:p1".into(), name: None, status: Status::Idle, topic: "t".into(), workspace: "scratch".into(), cwd: String::new(), session: Some("s-1".into()) }];
+        app.notes = vec![note("s-1", "find the retry loop", "found it in the handler", "your call on the fix", true, "pick option A or B", chrono::Utc::now())];
+        let out = render(&app, 170, 44);
+        assert!(!out.contains("asked"), "{out}");
+        let (x, y) = find(&out, "you: pick");
+        app.on_hover(x, y);
+        assert!(app.tooltip().unwrap().contains("what this agent says about itself"));
+        app.on_click(x, y);
+        let out = render(&app, 170, 44);
+        for want in ["asked find the retry loop", "now   found it in the handler", "wait  your call on the fix", "you   pick option A or B"] {
+            assert!(out.contains(want), "{want}:\n{out}");
+        }
+        assert!(fake.focused.lock().unwrap().is_empty(), "the note is not the agent's own row");
+        let (x, y) = find(&out, "asked");
+        app.on_click(x, y);
+        assert!(!render(&app, 170, 44).contains("asked"));
+    }
+
+    #[test]
+    fn agents_that_ended_stay_listed_from_their_notes_and_can_be_resumed_or_dropped() {
+        let (root, mut app) = two_stories();
+        let fake = with_herdr(&mut app);
+        let dir = root.path().join("notes");
+        app.notes_dir = Some(dir.clone());
+        let now = chrono::Utc::now();
+        let day = chrono::Duration::days(1);
+        for n in [
+            note("s-spike", "spike the Aurora upgrade", "restored the snapshot", "", true, "decide whether to continue", now - day * 2),
+            note("s-fix", "fix the lint", "pushed", "CI", false, "", now - chrono::Duration::hours(3)),
+            note("s-old", "ancient", "x", "", false, "", now - day * 20),
+        ] {
+            capcom::notes::write(&dir, &n.session, capcom::notes::Update { task: Some(n.task.clone()), progress: Some(n.progress.clone()), waiting: Some(n.waiting.clone()), needs_you: Some(n.needs_you), next: Some(n.next.clone()), cwd: Some(n.cwd.clone()) }, &n.updated_at).unwrap();
+        }
+        app.notes = capcom::notes::read_all(&dir, now);
+        let out = render(&app, 170, 44);
+        assert!(out.contains("EARLIER · 2"), "the 20-day-old one is left out:\n{out}");
+        assert!(out.contains("1 need you") && !out.contains("ancient"), "{out}");
+        assert!(line_of(&out, "fix the lint").contains("3h") && line_of(&out, "spike the Aurora").contains("2d"), "{out}");
+        assert!(out.find("fix the lint") < out.find("spike the Aurora"), "newest first:\n{out}");
+        let (x, y) = find(&out, "spike the Aurora");
+        app.on_click(x, y);
+        let resumes = resumes_after(&mut app, &fake);
+        assert_eq!(resumes.len(), 1);
+        assert_eq!(resumes[0].session, Some(("s-spike".to_string(), "/w/spike".to_string())));
+        let out = render(&app, 170, 44);
+        let (_, cy) = find(&out, "fix the lint");
+        let line = out.lines().nth(cy as usize).unwrap();
+        let cross_x = line[..line.find('✕').unwrap()].chars().count() as u16;
+        app.on_click(cross_x, cy);
+        assert!(capcom::notes::read(&dir, "s-fix").is_none(), "the file is gone");
+        assert!(!render(&app, 170, 44).contains("fix the lint"));
     }
 
     #[test]

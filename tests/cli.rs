@@ -293,3 +293,27 @@ fn story_review_flow() {
     ok(&root, &["story-status", "PROJ-1", "in_progress"]);
     ok(&root, &["add-task", "PROJ-1", "--title", "Late"]);
 }
+
+#[test]
+fn a_note_needs_no_stories_folder_and_keeps_what_an_update_leaves_out() {
+    let notes = TempDir::new().unwrap();
+    let run = |args: &[&str]| {
+        let out = Command::cargo_bin("capcom")
+            .unwrap()
+            .env_remove("CAPCOM_ROOT")
+            .env("CAPCOM_NOTES_DIR", notes.path())
+            .args(["note", "--session", "s-7"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        serde_json::from_slice::<Value>(&out.stdout).unwrap()
+    };
+    run(&["--task", "look at the retry loop"]);
+    let note = run(&["--waiting", "your call", "--needs-you", "true"]);
+    assert_eq!(note["task"], "look at the retry loop");
+    assert_eq!(note["needs_you"], true);
+    let note = run(&["--waiting", "", "--needs-you", "false"]);
+    assert_eq!((note["waiting"].as_str(), note["needs_you"].as_bool()), (Some(""), Some(false)));
+    assert!(notes.path().join("s-7.json").exists());
+}
