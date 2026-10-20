@@ -103,6 +103,12 @@ pub enum Target {
     AgentClose(usize),
     /// The agents panel itself, for the wheel.
     AgentPanel,
+    /// The note under an agent: click to show all of it or only a line.
+    NoteToggle(usize),
+    /// An agent that has ended, from its note: click to resume its session.
+    NoteResume(usize),
+    /// The red ✕ that drops a note.
+    NoteDismiss(usize),
     /// The `🤖` button: back to the agent session that made the PR.
     PrAgent(usize),
     /// The `[x] auto-review` tick box on one PR.
@@ -285,6 +291,9 @@ pub struct FixNeed {
 
 /// Asking an agent only to bring a branch up to date waits this long after the last such ask, so a busy
 /// repo's every merge does not start a new round.
+/// Notes of agents that ended stay in the panel this many days, at most this many of them.
+const EARLIER_DAYS: i64 = 7;
+const EARLIER_MAX: usize = 12;
 const AGENTS_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
 const BEHIND_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
@@ -457,6 +466,8 @@ pub enum AppMsg {
     PrLinks(Vec<(String, PrSession)>),
     /// The agents Herdr is running now.
     Agents(Vec<crate::agents::AgentInfo>),
+    /// The agents' notes about themselves.
+    Notes(Vec<capcom::notes::Note>),
     /// Which session made which Herdr pane, read from Claude Code's transcripts: (pane, parent session).
     Spawns(Vec<(String, String)>),
     /// The agent was asked to fix a PR: this is round `n`.
@@ -661,6 +672,12 @@ pub struct App {
     pub pr_links: Vec<(String, PrSession)>,
     pub herdr: Option<Arc<dyn Herdr>>,
     pub agents: Vec<crate::agents::AgentInfo>,
+    /// What each agent says about itself (`capcom note`), newest first.
+    pub notes: Vec<capcom::notes::Note>,
+    /// Where the notes are kept.
+    pub notes_dir: Option<PathBuf>,
+    /// Sessions whose note is shown in full.
+    pub notes_open: std::collections::HashSet<String>,
     pub spawns: Vec<(String, String)>,
     pub agents_on: bool,
     pub agents_width: u16,
@@ -776,6 +793,9 @@ impl App {
             agents_on: true,
             agents_width: crate::settings::DEFAULT_AGENTS_WIDTH,
             agent_close_armed: None,
+            notes: Vec::new(),
+            notes_dir: capcom::notes::dir(),
+            notes_open: Default::default(),
             agents_scroll: 0,
             agents_max: std::cell::Cell::new(0),
             new_story: None,
@@ -2161,8 +2181,10 @@ impl App {
             return;
         };
         let attention = self.attention.clone();
+        let notes_dir = self.notes_dir.clone();
         std::thread::spawn(move || {
             let mut last = None;
+            let mut notes_seen = None;
             let mut asked: Option<std::time::Instant> = None;
             loop {
                 // out of sight it asks four times less often; looking again is noticed within a second
@@ -2171,6 +2193,15 @@ impl App {
                     continue;
                 }
                 asked = Some(std::time::Instant::now());
+                if let Some(dir) = &notes_dir {
+                    let stamp = capcom::notes::stamp(dir);
+                    if notes_seen.as_ref() != Some(&stamp) {
+                        notes_seen = Some(stamp);
+                        if done.send(AppMsg::Notes(capcom::notes::read_all(dir, chrono::Utc::now()))).is_err() {
+                            return;
+                        }
+                    }
+                }
                 if let Ok(list) = herdr.agents() {
                     if last.as_ref() != Some(&list) {
                         last = Some(list.clone());
@@ -2186,6 +2217,81 @@ impl App {
     /// Whether the agents panel is on the main page: inside Herdr, switched on, and room for it.
     pub fn agents_panel(&self, width: u16) -> bool {
         self.screen == Screen::List && self.herdr.is_some() && self.agents_on && width >= AGENTS_MIN_WIDTH
+    }
+
+    /// The note a running agent keeps about itself, found by its Claude Code session.
+    pub fn note_of(&self, agent: &crate::agents::AgentInfo) -> Option<usize> {
+        let session = agent.session.as_deref()?;
+        self.notes.iter().position(|n| n.session == session)
+    }
+
+    /// Notes of agents that are no longer running, newest first: what you may have forgotten about.
+    pub fn earlier_notes(&self) -> Vec<usize> {
+        let running: std::collections::HashSet<&str> = self.agents.iter().filter_map(|a| a.session.as_deref()).collect();
+        let now = chrono::Utc::now();
+        self.notes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| !running.contains(n.session.as_str()))
+            .filter(|(_, n)| chrono::DateTime::parse_from_rfc3339(&n.updated_at).is_ok_and(|t| now.signed_duration_since(t).num_days() < EARLIER_DAYS))
+            .map(|(i, _)| i)
+            .take(EARLIER_MAX)
+            .collect()
+    }
+
+    /// Whether an agent is waiting on you: Herdr says it is blocked, or it says so in its note while
+    /// not at work (a note left from before it carried on does not count).
+    pub fn agent_needs_you(&self, agent: &crate::agents::AgentInfo) -> bool {
+        use crate::agents::Status;
+        agent.status == Status::Blocked || (agent.status != Status::Working && self.note_of(agent).is_some_and(|i| self.notes[i].needs_you))
+    }
+
+    pub fn toggle_note(&mut self, index: usize) {
+        let Some(session) = self.notes.get(index).map(|n| n.session.clone()) else {
+            return;
+        };
+        if !self.notes_open.remove(&session) {
+            self.notes_open.insert(session);
+        }
+    }
+
+    pub fn dismiss_note(&mut self, index: usize) {
+        let Some(note) = self.notes.get(index).cloned() else {
+            return;
+        };
+        if let Some(dir) = &self.notes_dir {
+            capcom::notes::remove(dir, &note.session);
+        }
+        self.notes.retain(|n| n.session != note.session);
+        self.set_notice("note dropped".into());
+    }
+
+    /// Bring an agent that has ended back: resume its Claude Code session in a new tab.
+    pub fn resume_note(&mut self, index: usize) {
+        let Some(note) = self.notes.get(index).cloned() else {
+            return;
+        };
+        let Some(herdr) = self.herdr.clone() else {
+            return;
+        };
+        if note.cwd.is_empty() {
+            self.set_notice("that note does not say where its session started, so it cannot be resumed".into());
+            return;
+        }
+        let short: String = note.session.chars().take(8).collect();
+        let label: String = note.task.chars().take(30).collect();
+        let resume = Resume {
+            workspace: String::new(),
+            label: String::new(),
+            tab: if label.is_empty() { format!("resume {short}") } else { label.clone() },
+            agent: herdr::agent_name(&["resume", &short]),
+            known_agents: Vec::new(),
+            prompt: None,
+            focus: true,
+            fresh_repo: None,
+            session: Some((note.session.clone(), note.cwd.clone())),
+        };
+        self.go_to_agent(herdr, resume, if label.is_empty() { short } else { label });
     }
 
     pub fn toggle_agents_panel(&mut self) {
@@ -2853,6 +2959,7 @@ impl App {
                 AppMsg::Notice(text) => self.set_notice(text),
                 AppMsg::PrLinks(links) => self.pr_links = links,
                 AppMsg::Agents(list) => self.agents = list,
+                AppMsg::Notes(list) => self.notes = list,
                 AppMsg::Spawns(list) => self.spawns = list,
                 AppMsg::FixSent(url, round) => {
                     self.fix_rounds.insert(url, (round, std::time::Instant::now()));
@@ -3300,6 +3407,9 @@ impl App {
             Action::ToggleAgents => self.toggle_agents_panel(),
             Action::FocusAgent(index) => self.open_agent(index),
             Action::CloseAgent(index) => self.close_agent(index),
+            Action::ToggleNote(index) => self.toggle_note(index),
+            Action::ResumeNote(index) => self.resume_note(index),
+            Action::DismissNote(index) => self.dismiss_note(index),
             Action::PrOpen(url) => on_pr(self, &url, &|app, i| app.open_pr(i)),
             Action::PrCopy(url) => on_pr(self, &url, &|app, i| app.copy_pr(i)),
             Action::PrCopyBranch(url) => on_pr(self, &url, &|app, i| app.copy_branch(i)),
@@ -3324,8 +3434,17 @@ impl App {
         self.close_overlays();
         if let Some(Target::AgentRow(i) | Target::AgentClose(i)) = target {
             if let Some(agent) = self.agents.get(i) {
-                let entries = crate::palette::agent_entries(i, agent);
+                let note = self.note_of(agent).map(|n| (n, self.notes_open.contains(&self.notes[n].session)));
+                let entries = crate::palette::agent_entries(i, agent, note);
                 self.palette = Some(crate::palette::Palette::menu(" Agent ", entries, (x, y)));
+                return;
+            }
+        }
+        if let Some(Target::NoteToggle(i) | Target::NoteResume(i) | Target::NoteDismiss(i)) = target {
+            if let Some(note) = self.notes.get(i) {
+                let running = self.agents.iter().any(|a| a.session.as_deref() == Some(note.session.as_str()));
+                let entries = crate::palette::note_entries(i, self.notes_open.contains(&note.session), running);
+                self.palette = Some(crate::palette::Palette::menu(" Note ", entries, (x, y)));
                 return;
             }
         }
@@ -3370,6 +3489,9 @@ impl App {
             Target::PrMerge(_) => "automerge: the merge bot merges this PR by itself once it is approved and green; this adds or removes its label (g)",
             Target::PrAgent(_) => "go to the agent that made this PR (a)",
             Target::AgentRow(_) => "bring this agent to the front in Herdr (right-click for more)",
+            Target::NoteToggle(_) => "what this agent says about itself: click to show all of it or just a line",
+            Target::NoteResume(_) => "this agent has ended: click to resume its session in a new tab (right-click for more)",
+            Target::NoteDismiss(_) => "drop this note: the session itself stays on disk",
             Target::AgentClose(i) => {
                 if self.agents.get(i).is_some_and(|a| self.agent_close_armed.as_ref() == Some(&a.pane)) {
                     "click the red ? to close this agent's pane for good; its session stays on disk"
@@ -3545,6 +3667,18 @@ impl App {
                 self.open_agent(i);
                 return;
             }
+            Some(Target::NoteToggle(i)) => {
+                self.toggle_note(i);
+                return;
+            }
+            Some(Target::NoteResume(i)) => {
+                self.resume_note(i);
+                return;
+            }
+            Some(Target::NoteDismiss(i)) => {
+                self.dismiss_note(i);
+                return;
+            }
             Some(Target::AgentClose(i)) => {
                 let pane = self.agents.get(i).map(|a| a.pane.clone());
                 if pane.is_some() && self.agent_close_armed == pane {
@@ -3652,7 +3786,7 @@ impl App {
             return;
         }
         let target = self.hit(x, y);
-        if matches!(target, Some(Target::AgentRow(_) | Target::AgentClose(_) | Target::AgentPanel)) {
+        if matches!(target, Some(Target::AgentRow(_) | Target::AgentClose(_) | Target::AgentPanel | Target::NoteToggle(_) | Target::NoteResume(_) | Target::NoteDismiss(_))) {
             self.scroll_agents(delta.signum() * 3);
             return;
         }

@@ -37,6 +37,9 @@ pub enum Action {
     ToggleAgents,
     FocusAgent(usize),
     CloseAgent(usize),
+    ToggleNote(usize),
+    ResumeNote(usize),
+    DismissNote(usize),
     PrOpen(String),
     PrCopy(String),
     PrCopyBranch(String),
@@ -154,11 +157,25 @@ pub fn pr_entries(row: &PrRow) -> Vec<Entry> {
 }
 
 /// What can be done to an agent of the agents panel.
-pub fn agent_entries(index: usize, agent: &crate::agents::AgentInfo) -> Vec<Entry> {
+pub fn agent_entries(index: usize, agent: &crate::agents::AgentInfo, note: Option<(usize, bool)>) -> Vec<Entry> {
     let who = agent.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| agent.topic.clone());
     let mut list = vec![entry(format!("Go to {who}"), "", Action::FocusAgent(index))];
     let waiting = matches!(agent.status, crate::agents::Status::Idle | crate::agents::Status::Done);
+    if let Some((n, open)) = note {
+        list.push(entry(if open { "Show only a line of its note" } else { "Show all of its note" }, "", Action::ToggleNote(n)));
+    }
     list.push(entry(if waiting { format!("Close {who}") } else { format!("Close {who} (only when idle)") }, "", Action::CloseAgent(index)));
+    list
+}
+
+/// What can be done to a note in the agents panel.
+pub fn note_entries(index: usize, open: bool, running: bool) -> Vec<Entry> {
+    let mut list = Vec::new();
+    if !running {
+        list.push(entry("Resume this session", "", Action::ResumeNote(index)));
+    }
+    list.push(entry(if open { "Show only a line" } else { "Show all of it" }, "", Action::ToggleNote(index)));
+    list.push(entry("Drop this note", "", Action::DismissNote(index)));
     list
 }
 
