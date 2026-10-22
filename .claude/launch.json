@@ -1,0 +1,5 @@
+{
+  // capcom web runs as a service (contrib/capcom-web.service); this attaches the Browser pane to it
+  "version": "0.0.1",
+  "configurations": [{ "name": "capcom", "url": "http://127.0.0.1:7878", "port": 7878 }]
+}

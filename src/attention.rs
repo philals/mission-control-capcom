@@ -14,11 +14,18 @@ pub struct Attention {
     herdr: AtomicBool,
     /// The user's switch: off means always poll at the normal pace.
     slow_when_away: AtomicBool,
+    /// The least the feeds wait while away.
+    away_minimum: Duration,
 }
 
 impl Attention {
     pub fn new() -> Arc<Attention> {
-        Arc::new(Attention { terminal: AtomicBool::new(true), herdr: AtomicBool::new(true), slow_when_away: AtomicBool::new(true) })
+        Attention::waiting_at_least(AWAY_MINIMUM)
+    }
+
+    /// Like `new`, with a different least wait while away (a page nobody has open can wait very long).
+    pub fn waiting_at_least(away_minimum: Duration) -> Arc<Attention> {
+        Arc::new(Attention { terminal: AtomicBool::new(true), herdr: AtomicBool::new(true), slow_when_away: AtomicBool::new(true), away_minimum })
     }
 
     pub fn set_terminal(&self, focused: bool) {
@@ -45,7 +52,7 @@ impl Attention {
     /// The wait before the next poll: unchanged while looked at, much longer while away.
     pub fn wait(&self, base: Duration) -> Duration {
         if self.away() {
-            base.saturating_mul(AWAY_FACTOR).max(AWAY_MINIMUM)
+            base.saturating_mul(AWAY_FACTOR).max(self.away_minimum)
         } else {
             base
         }
@@ -70,6 +77,16 @@ mod tests {
         assert!(a.away(), "Herdr focus alone is enough");
         a.set_herdr(true);
         assert!(!a.away());
+    }
+
+    #[test]
+    fn a_longer_least_wait_applies_only_while_away() {
+        let a = Attention::waiting_at_least(Duration::from_secs(1800));
+        let base = Duration::from_secs(5);
+        assert_eq!(a.wait(base), base);
+        a.set_terminal(false);
+        assert_eq!(a.wait(base), Duration::from_secs(1800));
+        assert_eq!(a.wait(Duration::from_secs(600)), Duration::from_secs(2400), "four times a long base is still longer");
     }
 
     #[test]
