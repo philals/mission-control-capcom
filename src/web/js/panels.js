@@ -13,6 +13,38 @@ function prName(pr) {
   return `${pr.repo}#${pr.number}`;
 }
 
+// A console: the frame keeps its name plate and tools, and what is inside scrolls by itself.
+function shell(panel, plateParts, tools) {
+  panel.replaceChildren();
+  plate(panel, ...plateParts);
+  if (tools) panel.append(tools);
+  const body = el("div", "scroll");
+  panel.append(body);
+  return body;
+}
+
+const STATIONS = ["Booster", "Retro", "Fido", "Guidance", "Surgeon", "Control", "Telemetry", "Capcom"];
+
+// The 1960s go/no-go poll, while the first list comes back from GitHub.
+function pollNode(what) {
+  const wrap = el("div", "poll");
+  wrap.append(el("h5", "", `Go / no-go poll · ${what}`));
+  STATIONS.forEach((name, i) => {
+    const row = el("div", "row");
+    row.style.setProperty("--d", `${0.22 * (i + 1)}s`);
+    add(row, el("span", "lamp"), el("span", "", name), el("span", "dots"), el("span", "verdict", "go"));
+    wrap.append(row);
+  });
+  wrap.append(el("p", "", "All stations go. Standing by for the data."));
+  return wrap;
+}
+
+function lampButton(label, on, onclick, title) {
+  const b = btn("", onclick, on ? "tick on" : "tick", title);
+  add(b, el("span", "lamp" + (on ? " on green" : "")), document.createTextNode(label));
+  return b;
+}
+
 function kv(label, value) {
   const row = el("div", "kv");
   add(row, el("span", "k", label), typeof value === "string" ? el("span", "v", value) : value);
@@ -88,30 +120,47 @@ function prMenu(pr, x, y) {
 
 // ---- header -------------------------------------------------------------------------------
 
+function tile(lit, text, cls, onclick, title) {
+  const t = el("span", "tile" + (onclick ? " press" : "") + (lit ? " hot" : ""));
+  if (title) t.title = title;
+  if (onclick) t.addEventListener("click", onclick);
+  add(t, el("span", "lamp" + (lit ? ` on ${cls}` : "")), text);
+  return t;
+}
+
 function renderHeader() {
   const top = $("top");
   top.replaceChildren();
-  const light = data.red > 0 ? el("span", "light red", `● NO-GO · ${data.red} red`) : el("span", "light green", "● GO");
-  light.title = "click to jump to the first red PR";
-  light.addEventListener("click", jumpToRed);
-  add(top, el("span", "brand", "CAPCOM"), light);
-  if (data.redWithAutofix > 0) add(top, el("span", "cyan", `⟳ auto-fix on for ${data.redWithAutofix}`));
-  if (data.awaitingReview > 0) add(top, el("span", "green", `◉ ${data.awaitingReview} awaiting review`));
-  if (data.agents.needsYou > 0) add(top, el("span", "orange bold", `! ${data.agents.needsYou} agent${data.agents.needsYou === 1 ? "" : "s"} need you`));
+  const brand = el("span", "brand");
+  add(brand, el("span", "orbit"), document.createTextNode("CAPCOM"));
+  const gonogo = el("span", "gonogo");
+  add(
+    gonogo,
+    tile(data.red === 0, "go", "green"),
+    tile(data.red > 0, data.red > 0 ? `no-go · ${data.red} red` : "no-go", "red", jumpToRed, "jump to the first red PR"),
+  );
+  add(top, brand, gonogo);
+  if (data.redWithAutofix > 0) add(top, tile(true, `auto-fix on for ${data.redWithAutofix}`, "cyan"));
+  if (data.awaitingReview > 0) add(top, tile(true, `${data.awaitingReview} awaiting review`, "green"));
+  if (data.agents.needsYou > 0) add(top, tile(true, `${data.agents.needsYou} agent${data.agents.needsYou === 1 ? "" : "s"} need you`, "amber pulse"));
   add(top, el("span", "spacer"));
-  const status = el("span", "dim");
+  const status = el("span", "dim status");
   if (data.prError) {
     status.textContent = `GitHub: ${data.prError}`;
-    status.className = "red";
+    status.className = "red status";
   } else if (data.loading && !data.prUpdated) {
     status.textContent = "loading pull requests…";
   } else if (data.prUpdated) {
     add(status, document.createTextNode("PRs updated "), stamp(el("span"), data.prUpdated, "ago"));
   }
-  add(top, status);
+  const clock = el("span", "clock");
+  add(clock, el("small", "", "local"), el("span", "", ""));
+  clock.lastChild.id = "clock";
   const events = data.events.length;
   add(
     top,
+    status,
+    clock,
     btn("+ follow", followDialog, "head", "follow someone else's PR or a workflow run by its link (or just paste the link)"),
     btn("+ new story", newStoryDialog, "head", "start a Jira story's break-down in a new Claude Code session"),
     btn(events ? `log ${events}` : "log", eventsDialog, "head", "what capcom did by itself"),
@@ -119,6 +168,12 @@ function renderHeader() {
     btn("⌘", paletteDialog, "head", "every action (Ctrl-K)"),
     btn("?", helpDialog, "head", "keys and what things mean"),
   );
+  tickClock();
+}
+
+function tickClock() {
+  const c = $("clock");
+  if (c) c.textContent = new Date().toLocaleTimeString([], { hour12: false });
 }
 
 function jumpToRed() {
@@ -127,7 +182,7 @@ function jumpToRed() {
   ui.selPr = red.url;
   ui.allPrs = true;
   lastSig.prs = null;
-  render();
+  setView("prs");
   scrollToSelected();
   toast(`${prName(red)} is red`);
 }
@@ -274,7 +329,7 @@ function taskStatus(task) {
 }
 
 function taskCard(story, task) {
-  const card = el("div", "card task");
+  const card = el("div", "card task s-" + task.status);
   const head = el("div", "head");
   add(head, el("span", "key", task.id), el("span", "title", task.title), el("span", "badge dim", task.type));
   const [text, tone] = taskStatus(task);
@@ -302,11 +357,10 @@ function taskCard(story, task) {
 }
 
 function renderBoard() {
-  const board = $("board");
-  board.replaceChildren();
+  const panel = $("board");
   const story = routeStory();
   if (story) {
-    plate(board, document.createTextNode(`${story.key} · `), el("span", "count", `${story.tasks.length} tasks`));
+    const body = shell(panel, [document.createTextNode(`${story.key} · `), el("span", "count", `${story.tasks.length} tasks`)]);
     const crumb = el("div", "crumb");
     const back = el("button", "", "← stories");
     back.onclick = () => (location.hash = "");
@@ -316,23 +370,22 @@ function renderBoard() {
       const r = ev.target.getBoundingClientRect();
       storyMenu(story, r.left, r.bottom);
     }, "small"));
-    board.append(crumb);
+    body.append(crumb);
     const cols = el("div", "columns");
     for (const [status, label] of TASK_COLUMNS) {
       const tasks = story.tasks.filter((t) => t.status === status);
       if (status === "dropped" && tasks.length === 0) continue;
       cols.append(column(label, tasks.length, ...tasks.map((t) => taskCard(story, t))));
     }
-    board.append(cols);
+    body.append(cols);
     return;
   }
-  plate(board, document.createTextNode("STORIES · "), el("span", "count", String(data.stories.length)));
   const tools = el("div", "tools");
   const toggle = el("button", "toggle", ui.showDone ? "[ Hide done ]" : "[ Show done ]");
   toggle.onclick = toggleShowDone;
   tools.append(toggle);
-  board.append(tools);
-  if (data.stories.length === 0) add(board, el("div", "empty-note", "No stories yet. Use “+ new story” to break one down."));
+  const body = shell(panel, [document.createTextNode("STORIES · "), el("span", "count", String(data.stories.length))], tools);
+  if (data.stories.length === 0) add(body, el("div", "empty-note", "No stories yet. Use “+ new story” to break one down."));
   const cols = el("div", "columns");
   const groups = [
     ["todo", "TO DO"],
@@ -344,8 +397,8 @@ function renderBoard() {
     const stories = data.stories.filter((s) => storyColumn(s) === key);
     cols.append(column(label, stories.length, ...stories.map(storyCard)));
   }
-  board.append(cols);
-  for (const b of data.broken) add(board, el("div", "red", `${b.key}: ${b.error}`));
+  body.append(cols);
+  for (const b of data.broken) add(body, el("div", "red", `${b.key}: ${b.error}`));
 }
 
 function toggleShowDone() {
@@ -387,8 +440,7 @@ function railStep(pr, s) {
 }
 
 function tickButton(label, on, onclick, title) {
-  const b = btn(`${on ? "[x]" : "[ ]"} ${label}`, onclick, on ? "tick on" : "tick", title);
-  return b;
+  return lampButton(label, on, onclick, title);
 }
 
 function prButtons(pr) {
@@ -498,13 +550,11 @@ function visiblePrs() {
 
 function renderPrs() {
   const panel = $("prs");
-  panel.replaceChildren();
   const story = routeStory();
   const list = visiblePrs();
   const waiting = list.filter((p) => p.waiting === "reviewer").length;
   const parts = [document.createTextNode("PULL REQUESTS · "), el("span", "count", String(list.length))];
   if (waiting) parts.push(el("span", "go", ` · ${waiting} awaiting review`));
-  plate(panel, ...parts);
   const tools = el("div", "tools");
   if (story) {
     const toggle = el("button", "toggle", ui.allPrs ? "[ this story's PRs ]" : "[ all PRs ]");
@@ -519,12 +569,12 @@ function renderPrs() {
   refresh.title = "look at GitHub now";
   refresh.onclick = () => act("refresh");
   tools.append(refresh);
-  panel.append(tools);
+  const body = shell(panel, parts, tools);
   if (list.length === 0) {
-    const text = data.prError ? "Could not read GitHub." : data.loading && !data.prUpdated ? "Loading pull requests…" : "No open pull requests.";
-    add(panel, el("div", "empty-note", text));
+    if (data.loading && !data.prUpdated && !data.prError) body.append(pollNode("GitHub"));
+    else add(body, el("div", "empty-note", data.prError ? "Could not read GitHub." : "No open pull requests."));
   }
-  for (const pr of list) panel.append(prCard(pr));
+  for (const pr of list) body.append(prCard(pr));
 }
 
 function scrollToSelected() {
@@ -565,10 +615,11 @@ function runRow(run) {
 
 function renderRuns() {
   const panel = $("runs");
-  panel.replaceChildren();
   const r = data.runs;
+  document.querySelector("main").classList.toggle("no-runs", !r.on);
   if (!r.on) {
     panel.hidden = true;
+    panel.replaceChildren();
     return;
   }
   panel.hidden = false;
@@ -581,10 +632,13 @@ function renderRuns() {
   const active = list.filter((x) => x.active).length;
   const parts = [document.createTextNode("RUNS & WATCH · "), el("span", "count", String(list.length))];
   if (active) parts.push(el("span", "cyan", ` · ${active} running`));
-  plate(panel, ...parts);
-  if (r.error) add(panel, el("div", "red", `GitHub: ${r.error}`));
-  if (list.length === 0) add(panel, el("div", "empty-note", r.loading && !r.updated ? "Looking for your runs…" : "No manual runs of yours, and none watched. Paste a link to a run to watch it."));
-  for (const run of list) panel.append(runRow(run));
+  const body = shell(panel, parts);
+  if (r.error) add(body, el("div", "red", `GitHub: ${r.error}`));
+  if (list.length === 0) {
+    if (r.loading && !r.updated) body.append(pollNode("workflow runs"));
+    else add(body, el("div", "empty-note", "No manual runs of yours, and none watched. Paste a link to a run to watch it."));
+  }
+  for (const run of list) body.append(runRow(run));
 }
 
 // ---- sheets -------------------------------------------------------------------------------
@@ -734,20 +788,22 @@ function noteBlock(note, needs) {
 
 function renderAgents() {
   const panel = $("agents");
-  panel.replaceChildren();
   const a = data.agents;
   const hidden = a.count === 0 && a.earlier.length === 0;
   document.querySelector("main").classList.toggle("no-agents", hidden);
-  if (hidden) return;
+  if (hidden) {
+    panel.replaceChildren();
+    return;
+  }
   const parts = [document.createTextNode("AGENTS · "), el("span", "count", String(a.count))];
   if (a.working) parts.push(el("span", "cyan", ` · ${a.working} working`));
   if (a.needsYou) parts.push(el("span", "orange bold", ` · ${a.needsYou} need you`));
-  plate(panel, ...parts);
+  const body = shell(panel, parts);
   for (const g of a.groups) {
-    panel.append(el("div", "group " + (g.story ? "story" : "other"), g.label));
+    body.append(el("div", "group " + (g.story ? "story" : "other"), g.label));
     for (const e of g.entries) {
       const row = el("div", "agent " + e.state);
-      row.style.paddingLeft = `${e.depth * 14}px`;
+      row.style.paddingLeft = `${4 + e.depth * 14}px`;
       add(row, el("span", "icon", (e.depth ? "└ " : "") + e.icon), el("span", "label", e.label), e.source ? el("span", "src", e.source) : null, el("span", "word", e.status));
       if (e.deepLink && ui.opening.has(e.deepLink)) {
         row.classList.add("opening");
@@ -772,19 +828,19 @@ function renderAgents() {
       } else if (e.source === "cli") {
         row.title = "a terminal session: it can only be reached in its terminal";
       }
-      panel.append(row);
-      if (e.note !== null && a.notes[e.note]) panel.append(noteBlock(a.notes[e.note], e.state === "needs"));
-      else if (e.topic && e.topic !== e.label) panel.append(el("div", "dim", e.topic));
+      body.append(row);
+      if (e.note !== null && a.notes[e.note]) body.append(noteBlock(a.notes[e.note], e.state === "needs"));
+      else if (e.topic && e.topic !== e.label) body.append(el("div", "dim", e.topic));
     }
   }
   if (a.earlier.length) {
-    panel.append(el("div", "group other", `EARLIER · ${a.earlier.length}`));
+    body.append(el("div", "group other", `EARLIER · ${a.earlier.length}`));
     for (const i of a.earlier) {
       const note = a.notes[i];
       const row = el("div", "agent " + (note.needsYou ? "needs" : "idle"));
       add(row, el("span", "icon", note.needsYou ? "!" : "○"), el("span", "label", note.task || `session ${note.session.slice(0, 8)}`), stamp(el("span", "when"), note.updatedAt, "short"));
-      panel.append(row);
-      panel.append(noteBlock(note, note.needsYou));
+      body.append(row);
+      body.append(noteBlock(note, note.needsYou));
     }
   }
 }
