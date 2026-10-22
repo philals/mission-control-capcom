@@ -29,6 +29,8 @@ pub struct Settings {
     pub autocopilot_prs: Vec<(String, bool)>,
     /// Poll GitHub far less often while this pane is not in focus.
     pub slow_when_away: bool,
+    /// Tell you outside the page (a desktop notification) when a PR needs you, a review lands or a run ends.
+    pub notify: bool,
     /// Links of the PRs pasted into the PR panel.
     pub pasted_prs: Vec<String>,
     /// Whether the agents panel shows left of the story board, and how many columns wide it is.
@@ -50,6 +52,7 @@ impl Default for Settings {
             autocopilot: false,
             autocopilot_prs: Vec::new(),
             slow_when_away: true,
+            notify: false,
             pasted_prs: Vec::new(),
             agents_on: true,
             agents_width: DEFAULT_AGENTS_WIDTH,
@@ -128,7 +131,7 @@ mod tests {
     fn settings_survive_a_save_and_a_load() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("tui.json");
-        let saved = Settings { split_pct: 63, bottom_pct: Some(50), split_pinned: true, columns: vec![120, 80, 100, 100, 100, 100], auto_sync: true, watched: vec![], autofix: true, autofix_prs: vec![("https://github.com/acme/api/pull/1".into(), false)], autocopilot: true, autocopilot_prs: vec![("https://github.com/acme/api/pull/2".into(), true)], slow_when_away: false, pasted_prs: vec!["https://github.com/acme/api/pull/9".into()], agents_on: false, agents_width: 50 };
+        let saved = Settings { split_pct: 63, bottom_pct: Some(50), split_pinned: true, columns: vec![120, 80, 100, 100, 100, 100], auto_sync: true, watched: vec![], autofix: true, autofix_prs: vec![("https://github.com/acme/api/pull/1".into(), false)], autocopilot: true, autocopilot_prs: vec![("https://github.com/acme/api/pull/2".into(), true)], slow_when_away: false, notify: true, pasted_prs: vec!["https://github.com/acme/api/pull/9".into()], agents_on: false, agents_width: 50 };
         save(&path, &saved).unwrap();
         assert_eq!(load(&path), saved);
     }

@@ -384,15 +384,7 @@ fn step_span(step: Step, text: String) -> Span<'static> {
     Span::styled(format!("{text} {icon}"), Style::new().fg(color))
 }
 
-/// How long the running checks have left, the longest of them, when they have a usual time.
-fn time_left(pr: &PullRequest, now: DateTime<Utc>, durations: &Durations) -> Option<i64> {
-    pr.checks
-        .iter()
-        .filter(|c| !c.external && c.state == CheckState::Running)
-        .filter_map(|c| Some(durations.estimate(&pr.repo, c)? - check_seconds(c, now)?))
-        .filter(|left| *left > 0)
-        .max()
-}
+use capcom::durations::time_left;
 
 /// A PR's way to a merge in one line: ready, CI, Copilot, its conversations, approval, the merge.
 /// When it is too wide, the steps already done go first: what is left is what still needs something.

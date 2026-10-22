@@ -15,6 +15,13 @@ pub fn pane_of(entrypoint: &str, pid: u64, host: Option<&str>) -> String {
     }
 }
 
+/// The link that has the desktop app import a terminal session and open it (`claude://resume?session=…`);
+/// None unless the id looks like one (letters, digits and hyphens).
+pub fn import_link(session: &str) -> Option<String> {
+    let valid = !session.is_empty() && session.len() <= 64 && session.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    valid.then(|| format!("claude://resume?session={session}"))
+}
+
 /// The link that opens a desktop session in the Claude Code desktop app (`claude://code/continue?session=…`),
 /// from the id in its pane id; None for a session the desktop app does not know. The app accepts only
 /// ids of the form `local_` and letters, digits and hyphens.
@@ -138,6 +145,14 @@ mod tests {
             assert_eq!(desktop_link(&pane_of("claude-desktop", 7, Some(bad))), None, "{bad}");
         }
         assert_eq!(entrypoint_of(&pane_of("claude-desktop", 7, Some("local_a"))), "claude-desktop");
+    }
+
+    #[test]
+    fn a_terminal_session_can_be_imported_by_its_id() {
+        assert_eq!(import_link("6bd808b2-6f76-440e-b1b8-220d83f4a05c").as_deref(), Some("claude://resume?session=6bd808b2-6f76-440e-b1b8-220d83f4a05c"));
+        for bad in ["", "a b", "a&b=1", "../x", "é"] {
+            assert_eq!(import_link(bad), None, "{bad:?}");
+        }
     }
 
     #[test]

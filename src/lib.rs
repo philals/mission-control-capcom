@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod agents;
 pub mod attention;
+pub mod autopilot;
 pub mod cache;
 pub mod claude;
 pub mod durations;
