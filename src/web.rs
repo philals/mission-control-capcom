@@ -22,6 +22,8 @@ const FAVICON: &str = include_str!("web/favicon.svg");
 
 /// A browser that fetched the state this recently counts as looking.
 const VIEWED_FOR: i64 = 20;
+/// With no page looking, GitHub is asked this rarely (and at once when a page comes back).
+const AWAY_WAIT: Duration = Duration::from_secs(30 * 60);
 const MAX_CONNECTIONS: usize = 16;
 const MAX_REQUEST: usize = 8192;
 const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -219,7 +221,7 @@ impl Server {
             root,
             prs: Mutex::new(PrData { loading: true, ..PrData::default() }),
             viewed: AtomicI64::new(0),
-            attention: Attention::new(),
+            attention: Attention::waiting_at_least(AWAY_WAIT),
             wake: Mutex::new(None),
             connections: AtomicUsize::new(0),
             port,
@@ -389,6 +391,17 @@ mod tests {
         assert!(get(&s, "/api/state", "evil.example").starts_with("HTTP/1.1 403"));
         assert!(get(&s, "/nope", "127.0.0.1:7878").starts_with("HTTP/1.1 404"));
         assert!(get(&s, "/app.js?x=1", "127.0.0.1:7878").starts_with("HTTP/1.1 200 OK"), "a query string is ignored");
+    }
+
+    #[test]
+    fn with_nobody_looking_github_is_asked_only_every_half_hour() {
+        let (_root, s) = server();
+        let busy = Duration::from_secs(5);
+        s.attention.set_terminal(true);
+        assert_eq!(s.attention.wait(busy), busy, "a page is open: normal pace");
+        s.attention.set_terminal(false);
+        assert_eq!(s.attention.wait(busy), AWAY_WAIT);
+        assert!(AWAY_WAIT >= Duration::from_secs(1800));
     }
 
     #[test]

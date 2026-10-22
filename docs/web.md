@@ -22,19 +22,30 @@ Nothing on the page changes anything: PRs, checks and Jira link out, and that is
 
 ## It polls only while someone looks
 
-While no page has fetched the state for 20 seconds, the poll slows down to a quarter of its pace (at least a minute). When a page comes back it asks GitHub at once. A hidden browser tab pauses its own polling. With no browser open it costs next to nothing.
+While no page has fetched the state for 20 seconds (a hidden browser tab pauses its own polling), GitHub is asked once every 30 minutes at most. When a page comes back it asks GitHub at once and shows the fresh answer within a second or two. With no browser open it costs next to nothing, which is what makes it fine to leave running.
+
+## Keep it running
+
+`contrib/capcom-web.service` is a systemd user service that starts `capcom web` at login:
+
+```
+mkdir -p ~/.config/systemd/user
+cp contrib/capcom-web.service ~/.config/systemd/user/     # then edit CAPCOM_ROOT in it
+systemctl --user daemon-reload && systemctl --user enable --now capcom-web
+journalctl --user -u capcom-web                           # its log
+```
+
+It runs with a read-only view of your home folder (it writes only `~/.cache/capcom`), no new privileges and a private `/tmp`. After you reinstall `capcom`, run `systemctl --user restart capcom-web`.
 
 ## In the Claude Code desktop app
 
-The desktop app's Browser pane can show a local server beside a session. According to Claude Code's docs (the Desktop page, "Configure preview servers"), it reads `.claude/launch.json` from the folder the session started in:
+The desktop app's Browser pane can show a local server beside a session. According to Claude Code's docs (the Desktop page, "Configure preview servers"), it reads `.claude/launch.json` from the folder the session started in, and an entry with a `url` and no command attaches to a server that is already running:
 
 ```json
 {
   "version": "0.0.1",
-  "configurations": [
-    { "name": "capcom", "runtimeExecutable": "capcom", "runtimeArgs": ["web", "--port", "7878"], "port": 7878 }
-  ]
+  "configurations": [{ "name": "capcom", "url": "http://127.0.0.1:7878", "port": 7878 }]
 }
 ```
 
-with `CAPCOM_ROOT` set in your environment (or add `"--root", "/path/to/stories"` to the arguments). The docs say nothing about the pane reloading by itself; the page refreshes its own data every few seconds, so it does not need to.
+This repository has that file in `.claude/launch.json`. Put the same file in `.claude/` of any other folder you start sessions from. The docs describe no setting that opens the pane by itself and no folder-independent config, so the pane is opened from the **Dev servers** menu or by asking Claude to preview it; the page refreshes its own data every few seconds, so it never needs reloading.
