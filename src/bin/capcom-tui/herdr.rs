@@ -66,27 +66,7 @@ pub trait Herdr: Send + Sync {
     }
 }
 
-const SHORT_NAME_WORDS: usize = 3;
-const SHORT_NAME_CHARS: usize = 28;
-const TRAILING_FILLER: [&str; 9] = ["a", "an", "the", "to", "of", "for", "and", "or", "in"];
-
-/// A very short name for a story: its first few words, without trailing filler words.
-pub fn short_name(title: &str) -> String {
-    let mut words: Vec<&str> = Vec::new();
-    let mut length = 0;
-    for word in title.split_whitespace().map(|w| w.trim_matches(|c: char| !c.is_alphanumeric())).filter(|w| !w.is_empty()) {
-        let added = length + word.chars().count() + usize::from(!words.is_empty());
-        if words.len() == SHORT_NAME_WORDS || added > SHORT_NAME_CHARS {
-            break;
-        }
-        words.push(word);
-        length = added;
-    }
-    while words.len() > 1 && TRAILING_FILLER.contains(&words[words.len() - 1].to_lowercase().as_str()) {
-        words.pop();
-    }
-    words.join(" ")
-}
+pub use capcom::agents::short_name;
 
 /// The Herdr workspace name for a story: the key, a hyphen and a few words naming the feature.
 pub fn workspace_label(key: &str, title: &str) -> String {

@@ -1,4 +1,6 @@
+pub mod agents;
 pub mod attention;
+pub mod claude;
 pub mod cache;
 pub mod github;
 pub mod kodiak;

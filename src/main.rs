@@ -61,6 +61,9 @@ enum Cmd {
         /// Do not fetch pull requests from GitHub
         #[arg(long)]
         no_prs: bool,
+        /// Command that opens a link when you click one on the page (default: xdg-open, so your default browser)
+        #[arg(long, env = "CAPCOM_BROWSER")]
+        browser: Option<String>,
     },
     /// Print the stories folder in use (from --root or CAPCOM_ROOT)
     Root,
@@ -284,9 +287,10 @@ fn main() -> Result<()> {
             print(&json!({ "key": key, "dir": store::story_dir(root, &key)? }))
         }
         Cmd::Note { .. } => unreachable!("handled before the root is needed"),
-        Cmd::Web { port, pr_query, no_prs } => {
+        Cmd::Web { port, pr_query, no_prs, browser } => {
             let (listener, port) = capcom::web::bind(port)?;
             let server = capcom::web::Server::new(root.to_path_buf(), port);
+            server.set_opener(std::sync::Arc::new(capcom::web::SystemBrowser { command: browser }));
             if !no_prs {
                 let cadence = capcom::prs::Cadence::default();
                 let live: std::sync::Arc<dyn capcom::prs::PrSource> = std::sync::Arc::new(capcom::prs::GhSource::new(pr_query.clone()));
@@ -295,6 +299,14 @@ fn main() -> Result<()> {
                     None => live,
                 };
                 server.poll(source);
+            }
+            if let Some(config) = capcom::session::config_dir() {
+                server.watch_agents(
+                    std::sync::Arc::new(capcom::web::ClaudeSessions { config }),
+                    capcom::notes::dir(),
+                    capcom::web::AGENTS_EVERY,
+                    std::time::Duration::from_secs(1),
+                );
             }
             print(&json!({ "url": format!("http://127.0.0.1:{port}") }))?;
             server.serve(listener);

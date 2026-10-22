@@ -130,6 +130,19 @@ pub fn read_all(dir: &Path, now: chrono::DateTime<chrono::Utc>) -> Vec<Note> {
     notes
 }
 
+/// Notes of agents that are no longer running, newest first (`notes` is newest first), as indexes
+/// into `notes`: what you may have forgotten about. Only those touched in the last `days`, at most `most`.
+pub fn earlier(notes: &[Note], running: &std::collections::HashSet<&str>, now: chrono::DateTime<chrono::Utc>, days: i64, most: usize) -> Vec<usize> {
+    notes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| !running.contains(n.session.as_str()))
+        .filter(|(_, n)| chrono::DateTime::parse_from_rfc3339(&n.updated_at).is_ok_and(|t| now.signed_duration_since(t).num_days() < days))
+        .map(|(i, _)| i)
+        .take(most)
+        .collect()
+}
+
 /// Cheap to compute: changes whenever a note is added, changed or removed.
 pub fn stamp(dir: &Path) -> Vec<(std::ffi::OsString, Option<std::time::SystemTime>)> {
     let mut all: Vec<_> = std::fs::read_dir(dir)

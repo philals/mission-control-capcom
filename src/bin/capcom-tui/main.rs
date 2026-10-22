@@ -1,5 +1,4 @@
-use capcom::{attention, cache, kodiak, prs};
-mod agents;
+use capcom::{agents, attention, cache, kodiak, prs};
 mod app;
 mod demo;
 mod durations;

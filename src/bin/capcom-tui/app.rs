@@ -2228,22 +2228,12 @@ impl App {
     /// Notes of agents that are no longer running, newest first: what you may have forgotten about.
     pub fn earlier_notes(&self) -> Vec<usize> {
         let running: std::collections::HashSet<&str> = self.agents.iter().filter_map(|a| a.session.as_deref()).collect();
-        let now = chrono::Utc::now();
-        self.notes
-            .iter()
-            .enumerate()
-            .filter(|(_, n)| !running.contains(n.session.as_str()))
-            .filter(|(_, n)| chrono::DateTime::parse_from_rfc3339(&n.updated_at).is_ok_and(|t| now.signed_duration_since(t).num_days() < EARLIER_DAYS))
-            .map(|(i, _)| i)
-            .take(EARLIER_MAX)
-            .collect()
+        capcom::notes::earlier(&self.notes, &running, chrono::Utc::now(), EARLIER_DAYS, EARLIER_MAX)
     }
 
-    /// Whether an agent is waiting on you: Herdr says it is blocked, or it says so in its note while
-    /// not at work (a note left from before it carried on does not count).
+    /// Whether an agent is waiting on you (see `agents::needs_you`).
     pub fn agent_needs_you(&self, agent: &crate::agents::AgentInfo) -> bool {
-        use crate::agents::Status;
-        agent.status == Status::Blocked || (agent.status != Status::Working && self.note_of(agent).is_some_and(|i| self.notes[i].needs_you))
+        crate::agents::needs_you(agent.status, self.note_of(agent).map(|i| &self.notes[i]))
     }
 
     pub fn toggle_note(&mut self, index: usize) {
