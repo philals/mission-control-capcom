@@ -531,6 +531,7 @@ function tickButton(label, on, onclick, title) {
 
 function prButtons(pr) {
   const row = el("div", "pr-buttons");
+  if (pr.draft) add(row, btn("mark ready…", () => toggleReady(pr), "small primary", "take it out of draft so reviewers see it (gh pr ready)"));
   if (pr.managed) {
     add(row, tickButton("auto-fix", pr.autofix, () => toggleTick(pr, true), "when CI fails or Copilot comments, mark this PR so you can fix it in one click; a behind branch is updated for you"));
     add(row, tickButton("auto-review", pr.autoreview, () => toggleTick(pr, false), "ask Copilot to review this PR, once"));
@@ -592,7 +593,10 @@ function prCard(pr) {
   if (pr.waiting === "reviewer") add(rail, el("span", "golight", "GO · ◉ AWAITING REVIEW"));
   else if (pr.waiting === "merge") add(rail, el("span", "green bold", "✔ APPROVED · READY TO MERGE"));
   else if (pr.waiting === "green") add(rail, el("span", "green bold", "✔ ALL GREEN"));
-  for (const s of pr.rail) add(rail, el("span", "step " + s.state, railStep(pr, s)));
+  for (const [i, s] of pr.rail.entries()) {
+    if (i === 0 && pr.draft) add(rail, btn(railStep(pr, s), () => toggleReady(pr), "step " + s.state + " toggle", "mark ready for review…"));
+    else add(rail, el("span", "step " + s.state, railStep(pr, s)));
+  }
   card.append(rail);
 
   if (pr.fix && (pr.autofix || pr.red)) {
