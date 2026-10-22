@@ -8,6 +8,7 @@ let data = null;
 let failures = 0;
 const openPrs = new Set();
 const openNotes = new Set();
+const opening = new Set();
 const lastSig = {};
 let showDone = false;
 try {
@@ -489,10 +490,26 @@ function renderAgents() {
       const row = el("div", "agent " + e.state);
       row.style.paddingLeft = `${e.depth * 14}px`;
       add(row, el("span", "icon", (e.depth ? "└ " : "") + e.icon), el("span", "label", e.label), e.source ? el("span", "src", e.source) : null, el("span", "word", e.status));
+      if (e.deepLink && opening.has(e.deepLink)) {
+        row.classList.add("opening");
+        row.querySelector(".word").textContent = "opening…";
+      }
       if (e.deepLink) {
         row.classList.add("clickable");
         row.title = "open this session in Claude Code desktop";
-        row.onclick = () => openExternal(e.deepLink, "opening in Claude Code desktop");
+        row.onclick = () => {
+          if (opening.has(e.deepLink)) return;
+          opening.add(e.deepLink);
+          row.classList.add("opening");
+          const word = row.querySelector(".word");
+          if (word) word.textContent = "opening…";
+          setTimeout(() => {
+            opening.delete(e.deepLink);
+            lastSig.agents = null;
+            render();
+          }, 3000);
+          openExternal(e.deepLink, "asked Claude Code desktop to open it: this can take a couple of seconds");
+        };
       } else if (e.source === "cli") {
         row.title = "a terminal session: it can only be reached in its terminal";
       }

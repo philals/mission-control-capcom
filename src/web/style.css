@@ -141,3 +141,6 @@ a.card:hover, button.card:hover { background: var(--select); text-decoration: no
 #toast { position: fixed; right: 16px; bottom: 16px; background: var(--header); color: var(--fg); border: 2px solid var(--frame); padding: 4px 12px; z-index: 5; }
 .agent.clickable { cursor: pointer; }
 .agent.clickable:hover { background: var(--select); }
+@keyframes wait { 50% { opacity: .4; } }
+.agent.opening { animation: wait 1s ease-in-out infinite; cursor: progress; }
+@media (prefers-reduced-motion: reduce) { .agent.opening { animation: none; } }
