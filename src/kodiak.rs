@@ -84,7 +84,7 @@ pub enum Found {
 /// Look in the two places Kodiak reads its config from.
 pub fn fetch(repo: &str) -> Found {
     for file in [".kodiak.toml", ".github/.kodiak.toml"] {
-        match capcom::github::rest(&format!("repos/{repo}/contents/{file}")) {
+        match crate::github::rest(&format!("repos/{repo}/contents/{file}")) {
             Ok(json) => {
                 return from_contents(&json).map_or(Found::Unknown, Found::Config);
             }

@@ -50,6 +50,18 @@ enum Cmd {
         #[arg(long, env = "CLAUDE_CODE_SESSION_ID")]
         session: String,
     },
+    /// Serve the boards and your open PRs as a page on localhost (read-only; it polls GitHub itself while a browser is open)
+    Web {
+        /// Port on 127.0.0.1 to listen on
+        #[arg(long, env = "CAPCOM_WEB_PORT", default_value_t = 7878)]
+        port: u16,
+        /// GitHub search for the pull request list (@me is resolved by GitHub)
+        #[arg(long, env = "CAPCOM_PR_QUERY", default_value = capcom::prs::DEFAULT_QUERY)]
+        pr_query: String,
+        /// Do not fetch pull requests from GitHub
+        #[arg(long)]
+        no_prs: bool,
+    },
     /// Print the stories folder in use (from --root or CAPCOM_ROOT)
     Root,
     /// List every story with its title and task count
@@ -272,6 +284,22 @@ fn main() -> Result<()> {
             print(&json!({ "key": key, "dir": store::story_dir(root, &key)? }))
         }
         Cmd::Note { .. } => unreachable!("handled before the root is needed"),
+        Cmd::Web { port, pr_query, no_prs } => {
+            let (listener, port) = capcom::web::bind(port)?;
+            let server = capcom::web::Server::new(root.to_path_buf(), port);
+            if !no_prs {
+                let cadence = capcom::prs::Cadence::default();
+                let live: std::sync::Arc<dyn capcom::prs::PrSource> = std::sync::Arc::new(capcom::prs::GhSource::new(pr_query.clone()));
+                let source: std::sync::Arc<dyn capcom::prs::PrSource> = match capcom::cache::Cache::default_dir().and_then(capcom::cache::Cache::open) {
+                    Some(cache) => std::sync::Arc::new(capcom::prs::SharedSource::new(live, cache, &pr_query, cadence)),
+                    None => live,
+                };
+                server.poll(source);
+            }
+            print(&json!({ "url": format!("http://127.0.0.1:{port}") }))?;
+            server.serve(listener);
+            Ok(())
+        }
         Cmd::Root => print(&json!({ "root": root })),
         Cmd::List => {
             let mut rows = Vec::new();

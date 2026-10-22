@@ -8,7 +8,7 @@ use std::process::Command;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use capcom::refresh::run_with_timeout;
+use crate::refresh::run_with_timeout;
 
 pub const DEFAULT_QUERY: &str =
     "is:pr author:@me state:open archived:false sort:updated-desc -label:icebox";
@@ -752,7 +752,7 @@ impl GhSource {
     }
 
     fn graphql(&self, query: &str, vars: &Value) -> Result<String> {
-        capcom::github::graphql(query, vars)
+        crate::github::graphql(query, vars)
     }
 
     fn fetch_all(&self) -> Result<Vec<PullRequest>> {
@@ -817,7 +817,7 @@ impl GhSource {
 
     /// The budget is spent: find out when it comes back, remember it, and say so.
     fn limited(&self) -> anyhow::Error {
-        let from_headers = capcom::github::graphql_budget().and_then(|b| DateTime::from_timestamp(b.reset, 0));
+        let from_headers = crate::github::graphql_budget().and_then(|b| DateTime::from_timestamp(b.reset, 0));
         let reset_at = from_headers.or_else(|| {
             // the direct route was not used, so ask for the headers through gh
             let mut cmd = Command::new("gh");

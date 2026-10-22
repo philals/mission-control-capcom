@@ -100,7 +100,7 @@ A typical run, in order: break the story down and approve the table; plan each t
 - **Resizable and remembered:** drag any divider; sizes are saved.
 - **Accessible by design:** a fixed theme with at least 4.5:1 text contrast on every screen (a test checks it), state shown with words and icons as well as colour, and focus shown by a double border.
 
-Everything it does, every key and every setting is in [docs/tui.md](docs/tui.md).
+Everything it does, every key and every setting is in [docs/tui.md](docs/tui.md). The same boards and PRs are also a page in a browser: `capcom web` ([docs/web.md](docs/web.md)).
 
 ## Configuration
 
@@ -144,7 +144,7 @@ src/bin/capcom-tui/       the terminal board (app state, drawing, GitHub polling
 skills/                   the six Claude Code skills
 schemas/board.schema.json JSON Schema for board.json
 herdr-plugin.toml         the Herdr plugin manifest (scripts/open.sh is its action)
-docs/                     design notes, command reference, TUI guide, README pictures
+docs/                     design notes, command reference, TUI and web guides, README pictures
 ```
 
 ## Contributing

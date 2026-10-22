@@ -1,8 +1,13 @@
+pub mod attention;
+pub mod cache;
 pub mod github;
+pub mod kodiak;
 pub mod model;
 pub mod notes;
+pub mod prs;
 pub mod ops;
 pub mod refresh;
 pub mod rules;
 pub mod session;
 pub mod store;
+pub mod web;
