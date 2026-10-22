@@ -125,6 +125,8 @@ pub(super) struct Engine {
     pub runs_on: Mutex<bool>,
     /// The state GitHub gave each recorded PR at the last look.
     pub known: Mutex<HashMap<String, crate::model::PrState>>,
+    /// Where the status line writes the plan usage it was given.
+    pub usage_path: Mutex<Option<PathBuf>>,
     /// Look at the recorded PRs now.
     pub check_now: std::sync::atomic::AtomicBool,
 }
@@ -150,6 +152,7 @@ impl Default for Engine {
             events: Mutex::new(Vec::new()),
             runs_on: Mutex::new(false),
             known: Mutex::new(HashMap::new()),
+            usage_path: Mutex::new(None),
             check_now: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -172,6 +175,11 @@ impl Server {
     /// The folder new Claude Code sessions start in.
     pub fn set_workdir(&self, dir: PathBuf) {
         *lock(&self.eng.workdir) = dir;
+    }
+
+    /// Where to read the plan usage from (see [`crate::usage`]).
+    pub fn set_usage_file(&self, path: Option<PathBuf>) {
+        *lock(&self.eng.usage_path) = path;
     }
 
     pub fn set_extra_repos(&self, repos: Vec<String>) {

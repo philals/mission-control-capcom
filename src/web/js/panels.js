@@ -13,13 +13,15 @@ function prName(pr) {
   return `${pr.repo}#${pr.number}`;
 }
 
-// A console: the frame keeps its name plate and tools, and what is inside scrolls by itself.
+// A console: a heading strip (its name, and its tools at the right) that stays put, and what is
+// inside scrolls by itself.
 function shell(panel, plateParts, tools) {
   panel.replaceChildren();
-  plate(panel, ...plateParts);
-  if (tools) panel.append(tools);
+  const head = el("div", "h");
+  plate(head, ...plateParts);
+  if (tools) head.append(tools);
   const body = el("div", "scroll");
-  panel.append(body);
+  panel.append(head, body);
   return body;
 }
 
@@ -128,7 +130,81 @@ function tile(lit, text, cls, onclick, title) {
   return t;
 }
 
+// The working week: Monday to Friday, 06:00 to 17:00, local time.
+const WORK_START = 6 * 60;
+const WORK_END = 17 * 60;
+const WORK_DAYS = 5;
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// How far through the working week it is, as whole percent, and a label for the moment.
+function workWeek(now = new Date()) {
+  const dow = now.getDay() || 7; // Monday is 1, Sunday is 7
+  const day = WORK_END - WORK_START;
+  const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  if (dow > WORK_DAYS) return { pct: 100, label: `${DAY_NAMES[now.getDay()]} ${hhmm}`, over: true };
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  const today = Math.max(0, Math.min(day, minutes - WORK_START));
+  return { pct: Math.floor(((dow - 1) * day + today) * 100 / (day * WORK_DAYS)), label: `${DAY_NAMES[now.getDay()]} ${hhmm}`, over: false };
+}
+
+// A gauge: a name, a row of segments lit up to `pct`, the figure, and a note.
+function gauge(name, pct, tone, note, title, id) {
+  const t = el("span", `tile gauge ${tone}`);
+  if (title) t.title = title;
+  const seg = el("span", "seg");
+  if (id) seg.id = `${id}-seg`;
+  const lit = pct === null ? 0 : Math.max(0, Math.min(10, Math.round(pct / 10)));
+  for (let i = 0; i < 10; i++) seg.append(el("i", i < lit ? "on" : ""));
+  const value = el("span", "num", pct === null ? "—" : `${Math.round(pct)}%`);
+  if (id) value.id = `${id}-pct`;
+  add(t, el("span", "", name), seg, value);
+  if (note) {
+    const n = el("span", "note-g", note);
+    if (id) n.id = `${id}-note`;
+    t.append(n);
+  }
+  return t;
+}
+
+function untilText(iso) {
+  const s = Math.round((Date.parse(iso) - Date.now()) / 1000);
+  if (!(s > 0)) return "";
+  const m = Math.round(s / 60);
+  if (m < 90) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 36) return `${h}h ${String(m % 60).padStart(2, "0")}m`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+// Plan usage as the status line last reported it, and the working week.
+function usageGauges() {
+  const out = [];
+  const u = data.usage;
+  const stale = u && Date.now() - Date.parse(u.at) > 20 * 60 * 1000;
+  const tone = (p) => (p >= 85 ? "hot" : p >= 60 ? "warn" : "ok");
+  const one = (name, w, what) => {
+    if (!w) return null;
+    const over = w.resetsAt && Date.parse(w.resetsAt) < Date.now();
+    const note = over ? "reset" : w.resetsAt ? `resets in ${untilText(w.resetsAt)}` : "";
+    const title = `${what}: ${Math.round(w.pct)}% used${w.resetsAt ? `, resets ${new Date(w.resetsAt).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : ""}. As of ${ago(u.at)}${stale ? " (it only updates while a Claude Code session is running)" : ""}.`;
+    return gauge(name, over ? null : w.pct, over || stale ? "old" : tone(w.pct), note, title);
+  };
+  if (u) {
+    const five = one("5h", u.fiveHour, "Plan usage in the 5-hour window");
+    const week = one("7d", u.sevenDay, "Plan usage in the weekly window");
+    if (five) out.push(five);
+    if (week) out.push(week);
+  }
+  const w = workWeek();
+  out.push(gauge("week", w.pct, "wk", w.label, `${w.pct}% of the working week (Monday to Friday, 06:00 to 17:00) has gone`, "wk"));
+  return out;
+}
+
 function renderHeader() {
+  renderHeaderNow();
+}
+
+function renderHeaderNow() {
   const top = $("top");
   top.replaceChildren();
   const brand = el("span", "brand");
@@ -144,6 +220,7 @@ function renderHeader() {
   if (data.awaitingReview > 0) add(top, tile(true, `${data.awaitingReview} awaiting review`, "green"));
   if (data.agents.needsYou > 0) add(top, tile(true, `${data.agents.needsYou} agent${data.agents.needsYou === 1 ? "" : "s"} need you`, "amber pulse"));
   add(top, el("span", "spacer"));
+  for (const g of usageGauges()) top.append(g);
   const status = el("span", "dim status");
   if (data.prError) {
     status.textContent = `GitHub: ${data.prError}`;
@@ -174,6 +251,14 @@ function renderHeader() {
 function tickClock() {
   const c = $("clock");
   if (c) c.textContent = new Date().toLocaleTimeString([], { hour12: false });
+  const pct = $("wk-pct");
+  if (pct) {
+    const w = workWeek();
+    pct.textContent = `${w.pct}%`;
+    const lit = Math.max(0, Math.min(10, Math.round(w.pct / 10)));
+    [...$("wk-seg").children].forEach((n, i) => n.classList.toggle("on", i < lit));
+    $("wk-note").textContent = w.label;
+  }
 }
 
 function jumpToRed() {
@@ -260,27 +345,26 @@ function storyMenu(story, x, y) {
   ]);
 }
 
-function storyCard(story) {
+function storyRow(story, col) {
   const c = counts(story);
   const total = story.tasks.length;
   const done = c.done || 0;
-  const card = el("a", "card story");
-  card.href = `#/story/${encodeURIComponent(story.key)}`;
-  card.addEventListener("contextmenu", (ev) => {
+  const row = el("a", "srow " + col);
+  row.href = `#/story/${encodeURIComponent(story.key)}`;
+  row.addEventListener("contextmenu", (ev) => {
     ev.preventDefault();
     storyMenu(story, ev.clientX, ev.clientY);
   });
-  const head = el("div", "head");
-  add(head, el("span", "key", story.key), el("span", "title", story.title));
-  const bar = el("span", "bar");
+  const parts = ["todo", "planning", "planned", "implementing", "done"].filter((s) => c[s]).map((s) => `${c[s]} ${s}`);
+  const mid = el("span");
+  add(mid, el("div", "ttl", story.title), el("div", "meta", total ? `${done}/${total} done · ${parts.join(" · ")}` : "not broken down yet"));
+  const bar = el("span");
+  const track = el("div", "bar");
   const fill = el("i");
   fill.style.width = total ? `${Math.round((100 * done) / total)}%` : "0%";
-  bar.append(fill);
-  const parts = ["todo", "planning", "planned", "implementing", "done"].filter((s) => c[s]).map((s) => `${c[s]} ${s}`);
-  const meta = el("div", "meta");
-  add(meta, el("span", done === total && total > 0 ? "green" : "", `${done}/${total} done`), bar, document.createTextNode(parts.join(" · ")));
-  add(card, head, meta);
-  const more = el("button", "card-more", "⋯");
+  track.append(fill);
+  bar.append(track);
+  const more = el("button", "more", "⋯");
   more.type = "button";
   more.title = "actions for this story (or right-click)";
   more.addEventListener("click", (ev) => {
@@ -289,8 +373,8 @@ function storyCard(story) {
     const r = more.getBoundingClientRect();
     storyMenu(story, r.left, r.bottom);
   });
-  card.append(more);
-  return card;
+  add(row, el("span", "key", story.key), mid, bar, more);
+  return row;
 }
 
 function prChip(task) {
@@ -386,18 +470,20 @@ function renderBoard() {
   tools.append(toggle);
   const body = shell(panel, [document.createTextNode("STORIES · "), el("span", "count", String(data.stories.length))], tools);
   if (data.stories.length === 0) add(body, el("div", "empty-note", "No stories yet. Use “+ new story” to break one down."));
-  const cols = el("div", "columns");
   const groups = [
-    ["todo", "TO DO"],
     ["doing", "DOING"],
     ["review", "IN REVIEW"],
+    ["todo", "TO DO"],
   ];
   if (ui.showDone) groups.push(["done", "DONE"]);
   for (const [key, label] of groups) {
     const stories = data.stories.filter((s) => storyColumn(s) === key);
-    cols.append(column(label, stories.length, ...stories.map(storyCard)));
+    if (stories.length === 0) continue;
+    const sep = el("div", "sep");
+    add(sep, document.createTextNode(`${label} · `), el("span", "count", String(stories.length)));
+    body.append(sep);
+    for (const s of stories) body.append(storyRow(s, key));
   }
-  body.append(cols);
   for (const b of data.broken) add(body, el("div", "red", `${b.key}: ${b.error}`));
 }
 
@@ -786,11 +872,44 @@ function noteBlock(note, needs) {
   return line;
 }
 
+function renderAgentRow(body, e, a) {
+  const row = el("div", "agent " + e.state);
+  row.style.paddingLeft = `${4 + e.depth * 14}px`;
+  add(row, el("span", "icon", (e.depth ? "└ " : "") + e.icon), el("span", "label", e.label), e.source ? el("span", "src", e.source) : null, el("span", "word", e.status));
+  if (e.deepLink && ui.opening.has(e.deepLink)) {
+    row.classList.add("opening");
+    row.querySelector(".word").textContent = "opening…";
+  }
+  if (e.deepLink) {
+    row.classList.add("clickable");
+    row.title = "open this session in Claude Code desktop";
+    row.onclick = () => {
+      if (ui.opening.has(e.deepLink)) return;
+      ui.opening.add(e.deepLink);
+      row.classList.add("opening");
+      const word = row.querySelector(".word");
+      if (word) word.textContent = "opening…";
+      setTimeout(() => {
+        ui.opening.delete(e.deepLink);
+        lastSig.agents = null;
+        render();
+      }, 3000);
+      openExternal(e.deepLink, "asked Claude Code desktop to open it: this can take a couple of seconds");
+    };
+  } else if (e.source === "cli") {
+    row.title = "a terminal session: it can only be reached in its terminal";
+  }
+  body.append(row);
+  if (e.note !== null && a.notes[e.note]) body.append(noteBlock(a.notes[e.note], e.state === "needs"));
+  else if (e.topic && e.topic !== e.label) body.append(el("div", "dim", e.topic));
+}
+
 function renderAgents() {
   const panel = $("agents");
   const a = data.agents;
   const hidden = a.count === 0 && a.earlier.length === 0;
   document.querySelector("main").classList.toggle("no-agents", hidden);
+  panel.hidden = hidden;
   if (hidden) {
     panel.replaceChildren();
     return;
@@ -799,38 +918,25 @@ function renderAgents() {
   if (a.working) parts.push(el("span", "cyan", ` · ${a.working} working`));
   if (a.needsYou) parts.push(el("span", "orange bold", ` · ${a.needsYou} need you`));
   const body = shell(panel, parts);
-  for (const g of a.groups) {
-    body.append(el("div", "group " + (g.story ? "story" : "other"), g.label));
-    for (const e of g.entries) {
-      const row = el("div", "agent " + e.state);
-      row.style.paddingLeft = `${4 + e.depth * 14}px`;
-      add(row, el("span", "icon", (e.depth ? "└ " : "") + e.icon), el("span", "label", e.label), e.source ? el("span", "src", e.source) : null, el("span", "word", e.status));
-      if (e.deepLink && ui.opening.has(e.deepLink)) {
-        row.classList.add("opening");
-        row.querySelector(".word").textContent = "opening…";
-      }
-      if (e.deepLink) {
-        row.classList.add("clickable");
-        row.title = "open this session in Claude Code desktop";
-        row.onclick = () => {
-          if (ui.opening.has(e.deepLink)) return;
-          ui.opening.add(e.deepLink);
-          row.classList.add("opening");
-          const word = row.querySelector(".word");
-          if (word) word.textContent = "opening…";
-          setTimeout(() => {
-            ui.opening.delete(e.deepLink);
-            lastSig.agents = null;
-            render();
-          }, 3000);
-          openExternal(e.deepLink, "asked Claude Code desktop to open it: this can take a couple of seconds");
-        };
-      } else if (e.source === "cli") {
-        row.title = "a terminal session: it can only be reached in its terminal";
-      }
-      body.append(row);
-      if (e.note !== null && a.notes[e.note]) body.append(noteBlock(a.notes[e.note], e.state === "needs"));
-      else if (e.topic && e.topic !== e.label) body.append(el("div", "dim", e.topic));
+  // Desktop sessions first, then terminal ones; each keeps its folder groups. The two headings only
+  // appear when both kinds are running.
+  const isDesktop = (e) => e.source === "desktop";
+  const kinds = [
+    ["DESKTOP", (e) => isDesktop(e)],
+    ["TERMINAL", (e) => !isDesktop(e)],
+  ].map(([label, keep]) => {
+    const groups = a.groups.map((g) => ({ ...g, entries: g.entries.filter(keep) })).filter((g) => g.entries.length > 0);
+    return { label, groups, count: groups.reduce((n, g) => n + g.entries.length, 0) };
+  }).filter((k) => k.count > 0);
+  for (const kind of kinds) {
+    if (kinds.length > 1) {
+      const sep = el("div", "sep");
+      add(sep, document.createTextNode(`${kind.label} · `), el("span", "count", String(kind.count)));
+      body.append(sep);
+    }
+    for (const g of kind.groups) {
+      body.append(el("div", "group " + (g.story ? "story" : "other"), g.label));
+      for (const e of g.entries) renderAgentRow(body, e, a);
     }
   }
   if (a.earlier.length) {
