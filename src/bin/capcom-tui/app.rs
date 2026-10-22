@@ -76,9 +76,7 @@ pub struct Geometry {
     pub agents_x: u16,
 }
 
-pub const SPLIT_RANGE: (u16, u16) = (25, 80);
-pub const AGENTS_WIDTH_RANGE: (u16, u16) = (24, 70);
-pub const HEIGHT_RANGE: (u16, u16) = (15, 80);
+pub use capcom::settings::{AGENTS_WIDTH_RANGE, HEIGHT_RANGE, SPLIT_RANGE};
 
 /// What a mouse click on a rectangle does. Rectangles are recorded while drawing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -537,56 +535,17 @@ fn copy_to_clipboard(text: &str) {
     }
 }
 
-fn gh_mark_ready(url: &str) -> Result<(), String> {
-    gh_pr_ready(url, false)
+/// What finishing found, as messages for the app.
+fn to_app(msgs: Vec<finish::Msg>) -> Vec<AppMsg> {
+    msgs.into_iter()
+        .map(|m| match m {
+            finish::Msg::Notice(t) => AppMsg::Notice(t),
+            finish::Msg::Cleanup(id) => AppMsg::Cleanup(id),
+        })
+        .collect()
 }
 
-/// Back to draft: `gh pr ready --undo` (GitHub only offers this through its GraphQL API, which gh speaks).
-fn gh_mark_draft(url: &str) -> Result<(), String> {
-    gh_pr_ready(url, true)
-}
-
-fn gh_pr_ready(url: &str, undo: bool) -> Result<(), String> {
-    if !url.starts_with("https://") {
-        return Err("not a pull request link".into());
-    }
-    let mut cmd = Command::new("gh");
-    cmd.args(["pr", "ready", url]);
-    if undo {
-        cmd.arg("--undo");
-    }
-    match capcom::refresh::run_with_timeout(cmd, std::time::Duration::from_secs(30)) {
-        Ok(Some(out)) if out.status.success() => Ok(()),
-        Ok(Some(out)) => Err(String::from_utf8_lossy(&out.stderr).lines().next().unwrap_or("gh failed").to_string()),
-        Ok(None) => Err("gh timed out".into()),
-        Err(e) => Err(e.to_string()),
-    }
-}
-
-fn gh_request_copilot(url: &str) -> Result<(), String> {
-    if !url.starts_with("https://") {
-        return Err("not a pull request link".into());
-    }
-    let mut cmd = Command::new("gh");
-    cmd.args(["pr", "edit", url, "--add-reviewer", "@copilot"]);
-    match capcom::refresh::run_with_timeout(cmd, std::time::Duration::from_secs(30)) {
-        Ok(Some(out)) if out.status.success() => Ok(()),
-        Ok(Some(out)) => Err(String::from_utf8_lossy(&out.stderr).lines().next().unwrap_or("gh failed").to_string()),
-        Ok(None) => Err("gh timed out".into()),
-        Err(e) => Err(e.to_string()),
-    }
-}
-
-/// Put a label on a PR, or take it off.
-fn gh_set_label(repo: &str, number: u64, label: &str, on: bool) -> Result<(), String> {
-    let result = if on { capcom::github::add_label(repo, number, label) } else { capcom::github::remove_label(repo, number, label) };
-    result.map_err(|e| format!("{e:#}"))
-}
-
-/// Bring a PR's branch up to date with its base through GitHub, as the "Update branch" button does.
-fn gh_update_branch(repo: &str, number: u64, head: &str) -> Result<(), String> {
-    capcom::github::update_branch(repo, number, head).map_err(|e| format!("{e:#}"))
-}
+use capcom::actions::{gh_mark_draft, gh_mark_ready, gh_request_copilot, gh_set_label, gh_update_branch};
 
 pub struct App {
     pub root: PathBuf,
@@ -2796,7 +2755,7 @@ impl App {
         }
         self.set_notice(format!("checking {id}'s PRs on GitHub…"));
         let id = id.to_string();
-        self.in_background(move |root, lookup| finish::finish(root, &key, &id, lookup));
+        self.in_background(move |root, lookup| to_app(finish::finish(root, &key, &id, lookup)));
     }
 
     pub fn finish_selected(&mut self) {
@@ -2811,7 +2770,7 @@ impl App {
             return;
         };
         self.set_notice(format!("syncing {key}'s PRs with GitHub…"));
-        self.in_background(move |root, lookup| finish::sync_story(root, &key, lookup));
+        self.in_background(move |root, lookup| to_app(finish::sync_story(root, &key, lookup)));
     }
 
     fn in_background(&self, work: impl FnOnce(&Path, &dyn PrLookup) -> Vec<AppMsg> + Send + 'static) {

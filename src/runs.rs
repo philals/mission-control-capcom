@@ -386,7 +386,7 @@ impl<A: RunApi> RunSource for Fetcher<A> {
     }
 }
 
-/// Talks to GitHub from inside capcom (see `capcom::github`). Your login is looked up once, at run
+/// Talks to GitHub from inside capcom (see `crate::github`). Your login is looked up once, at run
 /// time, and kept in memory.
 #[derive(Default)]
 pub struct GhApi {
@@ -397,7 +397,7 @@ impl GhApi {
     fn login(&self) -> Result<String> {
         self.login
             .get_or_init(|| {
-                let user = capcom::github::rest("user").map_err(|e| format!("{e:#}"))?;
+                let user = crate::github::rest("user").map_err(|e| format!("{e:#}"))?;
                 let login = serde_json::from_str::<Value>(&user)
                     .ok()
                     .and_then(|v| v.get("login").and_then(Value::as_str).map(str::to_string))
@@ -415,17 +415,17 @@ impl GhApi {
 impl RunApi for GhApi {
     fn runs(&self, repo: &str) -> Result<String> {
         let login = self.login()?;
-        capcom::github::rest(&format!(
+        crate::github::rest(&format!(
             "repos/{repo}/actions/runs?event=workflow_dispatch&actor={login}&per_page=10&exclude_pull_requests=true"
         ))
     }
 
     fn run(&self, repo: &str, run_id: u64) -> Result<String> {
-        capcom::github::rest(&format!("repos/{repo}/actions/runs/{run_id}"))
+        crate::github::rest(&format!("repos/{repo}/actions/runs/{run_id}"))
     }
 
     fn jobs(&self, repo: &str, run_id: u64) -> Result<String> {
-        capcom::github::rest(&format!("repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"))
+        crate::github::rest(&format!("repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"))
     }
 }
 

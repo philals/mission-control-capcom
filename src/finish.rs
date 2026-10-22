@@ -1,13 +1,20 @@
 //! Finishing a task from the board: check its PRs on GitHub, record what was found and, only when
 //! every PR is merged, move the task to done. Runs on a background thread.
-use crate::app::AppMsg;
-use capcom::model::{Board, PrState, Status, Task};
-use capcom::refresh::{self, PrLookup};
-use capcom::{rules, store};
+use crate::model::{Board, PrState, Status, Task};
+use crate::refresh::{self, PrLookup};
+use crate::{rules, store};
 use std::path::Path;
 
-fn notice(text: impl Into<String>) -> Vec<AppMsg> {
-    vec![AppMsg::Notice(text.into())]
+/// What finishing or syncing has to say, for whoever runs it to show.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Msg {
+    Notice(String),
+    /// The task is done and its progress notes mention a worktree: ask whether an agent should clean up.
+    Cleanup(String),
+}
+
+fn notice(text: impl Into<String>) -> Vec<Msg> {
+    vec![Msg::Notice(text.into())]
 }
 
 fn pr_number(url: &str) -> String {
@@ -54,7 +61,7 @@ fn every_task_finished(board: &Board) -> bool {
 }
 
 /// Check one task's PRs and move it to done if they are all merged (or it has none to wait for).
-pub fn finish(root: &Path, key: &str, id: &str, lookup: &dyn PrLookup) -> Vec<AppMsg> {
+pub fn finish(root: &Path, key: &str, id: &str, lookup: &dyn PrLookup) -> Vec<Msg> {
     let board = match store::load(root, key) {
         Ok(b) => b,
         Err(e) => return notice(format!("could not read {key}: {e:#}")),
@@ -90,14 +97,14 @@ pub fn finish(root: &Path, key: &str, id: &str, lookup: &dyn PrLookup) -> Vec<Ap
     let mut out = notice(text);
     let notes = store::story_dir(root, key).ok().and_then(|d| std::fs::read_to_string(d.join(&task.file)).ok());
     if notes.is_some_and(|t| mentions_worktrees(&t)) {
-        out.push(AppMsg::Cleanup(id.to_string()));
+        out.push(Msg::Cleanup(id.to_string()));
     }
     out
 }
 
 /// What `capcom refresh` does: look up every unfinished task's PRs, record them, finish tasks whose
 /// PRs are all merged.
-pub fn sync_story(root: &Path, key: &str, lookup: &dyn PrLookup) -> Vec<AppMsg> {
+pub fn sync_story(root: &Path, key: &str, lookup: &dyn PrLookup) -> Vec<Msg> {
     let board = match store::load(root, key) {
         Ok(b) => b,
         Err(e) => return notice(format!("could not read {key}: {e:#}")),
@@ -122,8 +129,8 @@ pub fn sync_story(root: &Path, key: &str, lookup: &dyn PrLookup) -> Vec<AppMsg> 
 mod tests {
     use super::*;
     use anyhow::Result;
-    use capcom::model::TaskType;
-    use capcom::ops;
+    use crate::model::TaskType;
+    use crate::ops;
     use std::collections::HashMap;
     use tempfile::TempDir;
 
@@ -159,12 +166,11 @@ mod tests {
         store::load(root.path(), "PROJ-1").unwrap().task("T1").unwrap().status
     }
 
-    fn notices(msgs: &[AppMsg]) -> String {
+    fn notices(msgs: &[Msg]) -> String {
         msgs.iter()
             .map(|m| match m {
-                AppMsg::Notice(t) => t.clone(),
-                AppMsg::Cleanup(id) => format!("cleanup {id}"),
-                AppMsg::PrLinks(_) | AppMsg::Agents(_) | AppMsg::Notes(_) | AppMsg::Spawns(_) | AppMsg::FixSent(..) | AppMsg::FixRetry(_) | AppMsg::UpdateConflict(..) => String::new(),
+                Msg::Notice(t) => t.clone(),
+                Msg::Cleanup(id) => format!("cleanup {id}"),
             })
             .collect::<Vec<_>>()
             .join(" | ")
@@ -220,10 +226,10 @@ mod tests {
         let task_file = std::fs::read_dir(&file).unwrap().next().unwrap().unwrap().path();
         std::fs::write(&task_file, "## Progress\n- worktree: /work/api-t1\n").unwrap();
         let out = finish(root.path(), "PROJ-1", "T1", &Fake([(U.to_string(), PrState::Merged)].into()));
-        assert!(out.iter().any(|m| matches!(m, AppMsg::Cleanup(id) if id == "T1")), "{}", notices(&out));
+        assert!(out.iter().any(|m| matches!(m, Msg::Cleanup(id) if id == "T1")), "{}", notices(&out));
         let plain = board(TaskType::Pr, Some(PrState::Merged));
         let out = finish(plain.path(), "PROJ-1", "T1", &Fake([(U.to_string(), PrState::Merged)].into()));
-        assert!(!out.iter().any(|m| matches!(m, AppMsg::Cleanup(_))));
+        assert!(!out.iter().any(|m| matches!(m, Msg::Cleanup(_))));
     }
 
     #[test]

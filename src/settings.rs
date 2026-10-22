@@ -1,9 +1,11 @@
 //! The remembered panel sizes, kept in the user's config folder (never in a repository).
-use crate::app::{AGENTS_WIDTH_RANGE, HEIGHT_RANGE, SPLIT_RANGE};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+pub const SPLIT_RANGE: (u16, u16) = (25, 80);
+pub const AGENTS_WIDTH_RANGE: (u16, u16) = (24, 70);
+pub const HEIGHT_RANGE: (u16, u16) = (15, 80);
 pub const COLUMNS: usize = 6;
 pub const MIN_COLUMN_WEIGHT: u16 = 20;
 pub const DEFAULT_SPLIT: u16 = 58;

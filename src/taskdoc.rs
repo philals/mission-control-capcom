@@ -1,5 +1,5 @@
 //! What a task's markdown file says, for the details sheet: what is still to be planned, or the plan.
-use capcom::model::Status;
+use crate::model::Status;
 
 /// The text under a `## name` heading, up to the next `## ` heading (`###` headings stay inside it).
 pub fn section(doc: &str, name: &str) -> Option<String> {
