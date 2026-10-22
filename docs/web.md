@@ -1,42 +1,80 @@
 # capcom web
 
-The story boards and your open pull requests as a page in a browser, with the same look as `capcom-tui`: a kanban of stories (click one for its task columns) and the PR list with each PR's way to a merge and its CI stages.
+The story boards, your open pull requests, your workflow runs and your Claude Code sessions as a page in a browser. It does what `capcom-tui` does, with two differences: it talks to Claude Code (the terminal program and the desktop app) where the TUI talks to Herdr, and it can run all the time as a service, polling GitHub only while a page is looking.
 
 ```
 capcom web                  # prints {"url": "http://127.0.0.1:7878"} and serves until stopped
 capcom web --port 8080
-capcom web --no-prs         # boards only, no GitHub
+capcom web --workdir ~/code # where new Claude Code sessions started from the page begin
+capcom web --no-prs --no-runs
 ```
 
-It needs the stories folder (`--root` or `CAPCOM_ROOT`) and the GitHub CLI (`gh`) signed in, like `capcom-tui` (it uses the token `gh auth token` prints). It is a separate program, so you can run it instead of `capcom-tui`, or beside it: both share one cache of GitHub answers in `~/.cache/capcom`, so two of them do not ask GitHub twice.
+It needs the stories folder (`--root` or `CAPCOM_ROOT`) and the GitHub CLI (`gh`) signed in, like `capcom-tui` (it uses the token `gh auth token` prints). It shares with the TUI the settings file (`~/.config/capcom/tui.json`: the per-PR ticks, the defaults, the PRs and runs you follow), the cache of GitHub answers and the learned check durations, so you can run either, or both.
 
 ## What the page shows
 
-- **Header:** a `GO` or `NO-GO · n red` light, how many PRs wait for a reviewer, and when the PRs were last read.
-- **Stories:** TO DO, DOING and IN REVIEW columns (`[ Show done ]` adds DONE) with a progress bar and the task counts. Click a story for its tasks in columns (TO DO, PLANNING, PLANNED, IMPLEMENTING, DONE), each with what it is waiting for, a chip for the worst state of its PRs and links to the PRs.
-- **Pull requests:** newest first. Each has the draft or ready badge, the repo and number, the story and task it belongs to, labels, how long ago it changed, the branch with a 📋 button that copies its name, and the rail (`draft · CI · copilot · threads · approved · automerge · merge`, coloured done, going, wrong or not yet). A PR that is green and waiting for a reviewer is lit green. Running, queued and failed checks are listed under it with a running clock; `show all checks` lists the rest. Inside a story, only that story's PRs are shown (`[ all PRs ]` shows every one).
+- **Header:** a `GO` or `NO-GO · n red` light (click it to jump to the first red PR), how many PRs wait for a reviewer, how many agents need you, when the PRs were last read, and the buttons `+ follow`, `+ new story`, `log`, `⚙`, `⌘` (the palette) and `?`.
+- **Agents:** the Claude Code sessions running on this machine, from the terminal program and from the desktop app, with their notes and an EARLIER list of sessions that ended (below).
+- **Stories:** TO DO, DOING and IN REVIEW columns (`[ Show done ]` adds DONE). Click a story, or its `⋯`, or right-click it. Inside a story the tasks are in columns (TO DO, PLANNING, PLANNED, IMPLEMENTING, DONE) with what each waits for, a chip for the worst state of its PRs and links to them. An implementing task whose PRs are all merged says so and offers `finish ✓`.
+- **Pull requests:** newest first, like the TUI. Each shows its badge, the story and task it belongs to, labels, review and comments, the branch with a 📋 button, and the **rail**: `ready · CI · copilot · threads · approved · automerge · merge`, coloured done, going, wrong or not yet, with `CI 4m left` while checks run (from how long they usually take). Running, queued and failed checks are listed with a running clock (`running 2m 05s of ~4m`). A PR that is green and waiting for a reviewer is lit up. A PR with nothing to do takes one line; click it to open it. The `details` sheet has every check grouped, the merge state, Copilot, automerge and what is in the way.
+- **Runs & watch:** your manual workflow runs and the ones you follow, with their stages, in the repos of your open PRs and recorded PRs (plus `--deploy-repos`).
+
+## What the page can change
+
+Every change shows what it will do and waits for your click, except the cheap, reversible ones:
+
+| Where | What | Asks first |
+|---|---|---|
+| a PR's badge, `m` | mark it ready for review, or back to a draft (`gh pr ready`) | yes |
+| `[ ] automerge` | adds the merge bot's first label, or takes every one off | yes |
+| `[ ] auto-fix`, `[ ] auto-review` | per-PR ticks, kept in the shared settings file | no |
+| `+ follow`, or paste a link | follow someone else's PR (it joins the list marked *followed*; auto-fix and auto-review start off), or watch a run (you are told when it finishes) | no |
+| a story's `⋯` or right-click | mark done (or accept a review), reopen, sync PR states with GitHub | yes |
+| a task | finish it (its PRs are looked up first; it only finishes when they are all merged) | yes |
+| `⚙` | the defaults, auto-sync, notifications, slow polling | no |
+
+Changes to the boards go through the same code as `capcom` and the TUI, so the same rules apply (a story only moves to done when every task is done or dropped, and so on).
+
+## Starting skills
+
+The page cannot type into a running agent, but it can open a **new Claude Code desktop session with the command already typed in**, in the right folder (Claude Desktop's own `claude://code/new?prompt=…&folder=…` link). You press Enter. That is how a story is broken down (`+ new story`, or a story with no tasks), a task is planned or implemented (`plan ↗`, `implement ↗`), a finished story is reviewed, and a PR is fixed (`fix it in a new session ↗`, which types `/pr-address <url>`; the session starts in the folder the PR's own session began in, else the repo's folder under the work folder). Nothing starts without you.
+
+## What the autopilot does by itself
+
+For the PRs you ticked (and the defaults in `⚙`), whenever the PR list changes:
+
+- **auto-review:** asks Copilot to review a new PR, once.
+- **auto-fix, a branch that is only behind its base:** brings it up to date through GitHub (what the "Update branch" button does), with no agent; not while Actions run, not on a PR whose merge bot keeps it up to date, at most once every 15 minutes, and a conflict is left for you.
+- **auto-fix, anything else** (failing checks, Copilot's comments, a merge conflict): marks the PR with a banner and `fix it in a new session ↗`, and lists it under `log`. The TUI messages the agent through Herdr; Claude Code has no supported way for another program to type into a running session, so here the last step is yours.
+
+It also tells you (under `log`, and as a desktop notification when `⚙ Desktop notifications` is on) when a PR turns green and waits for a reviewer, when Copilot finishes a review, when a PR needs fixing, and when a run you follow finishes. What it did is kept in the `log`.
 
 ## Agents
 
 The **AGENTS** panel lists the Claude Code sessions running on this machine, from the terminal program and from the desktop app alike, each tagged `cli` or `desktop`, grouped by the folder they run in, with whether each is working or idle. It reads the file Claude Code keeps for each live session (`~/.claude/sessions/<pid>.json`), so it needs no Herdr and no setup. Those files are Claude Code's own and not documented, so a future version of Claude Code could change them; a file that does not look right is skipped.
 
-Add `/agent-note` (see the README) and each agent also says what it was asked, where it has got to, what it waits on and what you need to do (`capcom note`, one small file per session). The note shows under the agent: `you: pick option A or B` in orange when it waits on you (the header counts those), `waiting: CI on the PR` when it waits on something else, otherwise where it has got to; click it for all of it. Below the running sessions, **EARLIER** lists the notes of sessions that have ended, for a week, newest first with how long ago: the "what was that agent doing yesterday" view. A session whose note says it needs you only shouts while the session is not working (a note from before it carried on is ignored).
+Add `/agent-note` (see the README) and each agent also says what it was asked, where it has got to, what it waits on and what you need to do (`capcom note`, one small file per session). The note shows under the agent: `you: pick option A or B` in orange when it waits on you (the header counts those), `waiting: CI on the PR` when it waits on something else, otherwise where it has got to; click it for all of it. Below the running sessions, **EARLIER** lists the notes of sessions that have ended, for a week, newest first with how long ago. A session whose note says it needs you only shouts while the session is not working.
 
-A `desktop` session is clickable: the click opens it in the Claude Code desktop app, through the app's own `claude://code/continue?session=…` link (the id is the one the app keeps for the session, `hostSessionId` in the session file; the app's link handler accepts only that kind of id). A `cli` session has no such link, because the desktop app does not know it. The app takes a second or two to come forward (the system starts a whole second copy of it that hands the link over, about 1.9 s whatever the flags); the row says `opening…` meanwhile, and the same link clicked again within 4 seconds is ignored so clicks do not pile up launches.
+A `desktop` session is clickable: the click opens it in the Claude Code desktop app, through the app's own `claude://code/continue?session=…` link (the id is the one the app keeps for the session, `hostSessionId` in the session file). The 🤖 on a PR opens the session that made it: the same link when that session is running in the desktop app, else `claude://resume?session=…`, which has the app import the terminal session. The app takes a second or two to come forward (the system starts a whole second copy of it that hands the link over, about 1.9 s whatever the flags); the row says `opening…` meanwhile, and the same link clicked again within 4 seconds is ignored so clicks do not pile up launches. A `cli` session has no link of its own, because the desktop app does not know it. (`capcom-tui` lists the agents of Herdr instead; the notes are shared by both.)
 
-The page shows the panel only when there is something to show. The agents are looked at every 3 seconds while a page is looking and not at all otherwise. (`capcom-tui` lists the agents of Herdr instead; the notes are shared by both.)
+## Keys
+
+`j`/`k` or `↓`/`↑` select a PR, `Enter` its details, `o` open its diff, `c` copy its link, `b` copy its branch, `m` ready or draft, `t` / `v` / `g` auto-fix / auto-review / automerge, `f` fix it in a new session, `a` go to the session that made it, `u` stop following it, `r` look at GitHub now, `n` new story, `F` follow, `d` show done stories, `Ctrl-K` or `/` the palette (every action that fits where you are, narrowed as you type), `?` help, `Esc` closes a dialog or goes back to the stories. Right-click a PR or a story for its actions. Paste a link to a PR or a run anywhere on the page to follow it.
 
 ## Links open in your own browser
 
-A click on a link (a PR, its diff, a check, Jira) asks the service to open it with your system's default browser (`xdg-open`; `--browser CMD` or `CAPCOM_BROWSER` picks another command), not inside whatever shows the page. The service starts the browser through `systemd-run --user` with `KillMode=process`, so it does not run inside the service's sandbox and systemd does not cut off the browser's launcher while it hands the link to the running browser (without that, `xdg-open` appears to succeed and nothing opens). The same route opens a desktop session's `claude://` link in the desktop app. If that fails, the link opens the usual way.
+A click on a link (a PR, its diff, a check, Jira) asks the service to open it with your system's default browser (`xdg-open`; `--browser CMD` or `CAPCOM_BROWSER` picks another command), not inside whatever shows the page. The service starts the browser through `systemd-run --user` with `KillMode=process`, so it does not run inside the service's sandbox and systemd does not cut off the browser's launcher while it hands the link to the running browser (without that, `xdg-open` appears to succeed and nothing opens). The same route opens the `claude://` links.
 
-## It does not change anything
+## How it is kept safe
 
-Nothing on the page changes anything in capcom, GitHub or Jira. The one thing a click does is open a link. The server listens on `127.0.0.1` only, refuses any request whose `Host` is not `127.0.0.1:<port>` or `localhost:<port>` (so a website cannot read it through your browser by rebinding a name), answers `GET`, and accepts one `POST`, `/open`. That one only opens a link the page is showing at that moment, and only when the request carries a header (`X-Capcom`) that a website cannot add without a CORS preflight this server never grants, comes from the page's own origin and is not cross-site. It sends a strict content security policy. All text from GitHub and the boards is put in the page as text, never as HTML.
+The server listens on `127.0.0.1` only, refuses any request whose `Host` is not `127.0.0.1:<port>` or `localhost:<port>` (so a website cannot reach it by rebinding a name), and sends a strict content security policy. All text from GitHub and the boards is put in the page as text, never as HTML. It answers `GET`, and two kinds of `POST`, each only from the page itself: they need a header (`X-Capcom`) that a website cannot add without a CORS preflight this server never grants, the page's own origin, and no cross-site marker.
+
+- `POST /open` only opens a link the page is showing at that moment (a link in a PR's title is not on the list).
+- `POST /api/do` only does the actions in the table above, checks each against what the service knows (the PR must be in the list, the story must exist, the transition must be allowed), and refuses the ones that need confirming unless the request says it was confirmed.
 
 ## It polls only while someone looks
 
-While no page has fetched the state for 20 seconds (a hidden browser tab pauses its own polling), GitHub is asked once every 30 minutes at most. When a page comes back it asks GitHub at once and shows the fresh answer within a second or two. With no browser open it costs next to nothing, which is what makes it fine to leave running.
+While no page has fetched the state for 20 seconds (a hidden browser tab pauses its own polling), GitHub is asked once every 30 minutes at most. When a page comes back it asks GitHub at once and shows the fresh answer within a second or two. With no browser open it costs next to nothing, which is what makes it fine to leave running. The cost of that is that nothing can notice a change while nobody looks: with `⚙ Desktop notifications` on, the service also polls every couple of minutes when nobody does, so a PR that turns green or a run that ends can still tell you.
 
 ## Keep it running
 
@@ -44,12 +82,12 @@ While no page has fetched the state for 20 seconds (a hidden browser tab pauses 
 
 ```
 mkdir -p ~/.config/systemd/user
-cp contrib/capcom-web.service ~/.config/systemd/user/     # then edit CAPCOM_ROOT in it
+cp contrib/capcom-web.service ~/.config/systemd/user/     # then edit CAPCOM_ROOT, CAPCOM_WORKDIR and the stories folder in it
 systemctl --user daemon-reload && systemctl --user enable --now capcom-web
 journalctl --user -u capcom-web                           # its log
 ```
 
-It runs with a read-only view of your home folder (it writes only `~/.cache/capcom`), no new privileges and a private `/tmp`; it reads `~/.claude/sessions` and the notes in `~/.local/state/capcom/notes`. After you reinstall `capcom`, run `systemctl --user restart capcom-web`.
+It runs with a read-only view of your home folder, writing only `~/.cache/capcom`, the settings in `~/.config/capcom` and your stories folder (everything the page changes), no new privileges and a private `/tmp`; it reads `~/.claude/sessions` and the notes in `~/.local/state/capcom/notes`. After you reinstall `capcom`, run `systemctl --user restart capcom-web`.
 
 ## In the Claude Code desktop app
 
@@ -62,4 +100,11 @@ The desktop app's Browser pane can show a local server beside a session. Accordi
 }
 ```
 
-This repository has that file in `.claude/launch.json`. Put the same file in `.claude/` of any other folder you start sessions from. The docs describe no setting that opens the pane by itself and no folder-independent config, so the pane is opened from the **Dev servers** menu or by asking Claude to preview it; the page refreshes its own data every few seconds, so it never needs reloading.
+This repository has that file in `.claude/launch.json`. Put the same file in `.claude/` of any other folder you start sessions from. The docs describe no setting that opens the pane by itself and no folder-independent config, so the pane is opened from the **Dev servers** menu or by asking Claude to preview it.
+
+## What is not the same as the TUI
+
+- **Layout:** the page has a responsive layout of its own, so dragging dividers and the sizing keys do not exist.
+- **Herdr:** no workspaces, tabs or panes: skills start in new desktop sessions (above), and "go to the agent" opens a session in the desktop app.
+- **Auto-fix's last step:** marked on the PR with a one-click session, not sent to the agent (above).
+- **Loading screens, the bell and the terminal clipboard:** not ported (the page has a toast, the `log` and 📋 buttons).

@@ -235,6 +235,8 @@ impl Server {
         lock(&self.eng.pasted).urls = s.pasted_prs.clone();
         *lock(&self.eng.run_watched) = s.watched.iter().map(|w| (w.repo.clone(), w.id)).collect();
         self.attention.set_slow_when_away(s.slow_when_away);
+        // with notifications on, a change has to be noticed within minutes even with no page open
+        self.attention.set_away_minimum(if s.notify { NOTIFY_AWAY } else { AWAY_WAIT });
     }
 
     /// Change the settings: read the file again first (the TUI may have changed it), change, save.

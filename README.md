@@ -100,7 +100,7 @@ A typical run, in order: break the story down and approve the table; plan each t
 - **Resizable and remembered:** drag any divider; sizes are saved.
 - **Accessible by design:** a fixed theme with at least 4.5:1 text contrast on every screen (a test checks it), state shown with words and icons as well as colour, and focus shown by a double border.
 
-Everything it does, every key and every setting is in [docs/tui.md](docs/tui.md). The same boards and PRs are also a page in a browser, with a panel of your running Claude Code sessions (terminal and desktop app): `capcom web` ([docs/web.md](docs/web.md)).
+Everything it does, every key and every setting is in [docs/tui.md](docs/tui.md). Everything the TUI does is also a page in a browser, for people who live in Claude Code (terminal and desktop app) rather than Herdr: `capcom web` ([docs/web.md](docs/web.md)) shows the boards, your PRs with their CI, your workflow runs and your running Claude Code sessions, can mark PRs ready, toggle automerge, finish tasks and sync stories after asking, and opens a Claude Code desktop session with a skill typed in to plan, implement, review or fix.
 
 ## Configuration
 

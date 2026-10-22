@@ -32,7 +32,7 @@ use engine::Engine;
 use view::*;
 
 const INDEX: &str = include_str!("web/index.html");
-const SCRIPT: &str = include_str!("web/app.js");
+const SCRIPT: &str = concat!(include_str!("web/js/core.js"), "\n", include_str!("web/js/panels.js"), "\n", include_str!("web/js/extras.js"));
 const STYLE: &str = include_str!("web/style.css");
 const FAVICON: &str = include_str!("web/favicon.svg");
 
@@ -40,6 +40,8 @@ const FAVICON: &str = include_str!("web/favicon.svg");
 const VIEWED_FOR: i64 = 20;
 /// With no page looking, GitHub is asked this rarely (and at once when a page comes back).
 const AWAY_WAIT: Duration = Duration::from_secs(30 * 60);
+/// ... or this rarely while desktop notifications are on.
+const NOTIFY_AWAY: Duration = Duration::from_secs(2 * 60);
 /// While a page is looking, the Claude Code sessions are looked at this often.
 pub const AGENTS_EVERY: Duration = Duration::from_secs(3);
 /// Notes of agents that ended stay listed this many days, at most this many of them.
