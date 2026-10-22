@@ -43,6 +43,8 @@ Valid task statuses: `todo`, `planning`, `planned`, `implementing`, `done`, `dro
     capcom set-agent <KEY> <ID> --pane P --skill S
     capcom clear-agent <KEY> <ID>
     capcom set-session <KEY> <ID> --skill S [--session ID] [--cwd DIR]   # Claude Code session, kept for resuming; ID defaults to $CLAUDE_CODE_SESSION_ID
+    capcom note [--task T] [--progress P] [--waiting W] [--needs-you true|false] [--next N]   # an agent's TLDR for the agents panel; needs no stories folder; session from $CLAUDE_CODE_SESSION_ID
+    capcom web [--port 7878] [--pr-query Q] [--no-prs]   # the boards and your open PRs as a read-only page on 127.0.0.1 (see docs/web.md)
     capcom set-subtask <KEY> <ID> <JIRA-KEY>
     capcom refresh <KEY>                     # reads PR states with gh, marks tasks done once every PR is merged
 
