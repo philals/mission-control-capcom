@@ -3,7 +3,7 @@
 The story boards, your open pull requests, your workflow runs and your Claude Code sessions as a page in a browser. It does what `capcom-tui` does, with two differences: it talks to Claude Code (the terminal program and the desktop app) where the TUI talks to Herdr, and it can run all the time as a service, polling GitHub only while a page is looking.
 
 ```
-capcom web                  # prints {"url": "http://127.0.0.1:7878"} and serves until stopped
+capcom web                  # port 1969, the year of Apollo 11; prints {"url": "http://127.0.0.1:1969"} and serves until stopped
 capcom web --port 8080
 capcom web --workdir ~/code # where new Claude Code sessions started from the page begin
 capcom web --no-prs --no-runs
@@ -119,7 +119,7 @@ The desktop app's Browser pane can show a local server beside a session. Accordi
 ```json
 {
   "version": "0.0.1",
-  "configurations": [{ "name": "capcom", "url": "http://127.0.0.1:7878", "port": 7878 }]
+  "configurations": [{ "name": "capcom", "url": "http://127.0.0.1:1969", "port": 1969 }]
 }
 ```
 
