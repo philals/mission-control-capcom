@@ -16,9 +16,21 @@ It needs the stories folder (`--root` or `CAPCOM_ROOT`) and the GitHub CLI (`gh`
 - **Stories:** TO DO, DOING and IN REVIEW columns (`[ Show done ]` adds DONE) with a progress bar and the task counts. Click a story for its tasks in columns (TO DO, PLANNING, PLANNED, IMPLEMENTING, DONE), each with what it is waiting for, a chip for the worst state of its PRs and links to the PRs.
 - **Pull requests:** newest first. Each has the draft or ready badge, the repo and number, the story and task it belongs to, labels, how long ago it changed, the branch with a 📋 button that copies its name, and the rail (`draft · CI · copilot · threads · approved · automerge · merge`, coloured done, going, wrong or not yet). A PR that is green and waiting for a reviewer is lit green. Running, queued and failed checks are listed under it with a running clock; `show all checks` lists the rest. Inside a story, only that story's PRs are shown (`[ all PRs ]` shows every one).
 
-## It only reads
+## Agents
 
-Nothing on the page changes anything: PRs, checks and Jira link out, and that is all. The server listens on `127.0.0.1` only, answers `GET` only, refuses any request whose `Host` is not `127.0.0.1:<port>` or `localhost:<port>` (so a website cannot read it through your browser by rebinding a name), and sends a strict content security policy. All text from GitHub and the boards is put in the page as text, never as HTML.
+The **AGENTS** panel lists the Claude Code sessions running on this machine, from the terminal program and from the desktop app alike, each tagged `cli` or `desktop`, grouped by the folder they run in, with whether each is working or idle. It reads the file Claude Code keeps for each live session (`~/.claude/sessions/<pid>.json`), so it needs no Herdr and no setup. Those files are Claude Code's own and not documented, so a future version of Claude Code could change them; a file that does not look right is skipped.
+
+Add `/agent-note` (see the README) and each agent also says what it was asked, where it has got to, what it waits on and what you need to do (`capcom note`, one small file per session). The note shows under the agent: `you: pick option A or B` in orange when it waits on you (the header counts those), `waiting: CI on the PR` when it waits on something else, otherwise where it has got to; click it for all of it. Below the running sessions, **EARLIER** lists the notes of sessions that have ended, for a week, newest first with how long ago: the "what was that agent doing yesterday" view. A session whose note says it needs you only shouts while the session is not working (a note from before it carried on is ignored).
+
+The page shows the panel only when there is something to show. The agents are looked at every 3 seconds while a page is looking and not at all otherwise. (`capcom-tui` lists the agents of Herdr instead; the notes are shared by both.)
+
+## Links open in your own browser
+
+A click on a link (a PR, its diff, a check, Jira) asks the service to open it with your system's default browser (`xdg-open`; `--browser CMD` or `CAPCOM_BROWSER` picks another command), not inside whatever shows the page. The service starts the browser through `systemd-run --user`, so it does not run inside the service's sandbox. If that fails, the link opens the usual way.
+
+## It does not change anything
+
+Nothing on the page changes anything in capcom, GitHub or Jira. The one thing a click does is open a link. The server listens on `127.0.0.1` only, refuses any request whose `Host` is not `127.0.0.1:<port>` or `localhost:<port>` (so a website cannot read it through your browser by rebinding a name), answers `GET`, and accepts one `POST`, `/open`. That one only opens a link the page is showing at that moment, and only when the request carries a header (`X-Capcom`) that a website cannot add without a CORS preflight this server never grants, comes from the page's own origin and is not cross-site. It sends a strict content security policy. All text from GitHub and the boards is put in the page as text, never as HTML.
 
 ## It polls only while someone looks
 
@@ -35,7 +47,7 @@ systemctl --user daemon-reload && systemctl --user enable --now capcom-web
 journalctl --user -u capcom-web                           # its log
 ```
 
-It runs with a read-only view of your home folder (it writes only `~/.cache/capcom`), no new privileges and a private `/tmp`. After you reinstall `capcom`, run `systemctl --user restart capcom-web`.
+It runs with a read-only view of your home folder (it writes only `~/.cache/capcom`), no new privileges and a private `/tmp`; it reads `~/.claude/sessions` and the notes in `~/.local/state/capcom/notes`. After you reinstall `capcom`, run `systemctl --user restart capcom-web`.
 
 ## In the Claude Code desktop app
 

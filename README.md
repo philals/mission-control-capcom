@@ -100,7 +100,7 @@ A typical run, in order: break the story down and approve the table; plan each t
 - **Resizable and remembered:** drag any divider; sizes are saved.
 - **Accessible by design:** a fixed theme with at least 4.5:1 text contrast on every screen (a test checks it), state shown with words and icons as well as colour, and focus shown by a double border.
 
-Everything it does, every key and every setting is in [docs/tui.md](docs/tui.md). The same boards and PRs are also a page in a browser: `capcom web` ([docs/web.md](docs/web.md)).
+Everything it does, every key and every setting is in [docs/tui.md](docs/tui.md). The same boards and PRs are also a page in a browser, with a panel of your running Claude Code sessions (terminal and desktop app): `capcom web` ([docs/web.md](docs/web.md)).
 
 ## Configuration
 

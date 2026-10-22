@@ -7,6 +7,7 @@ const $ = (id) => document.getElementById(id);
 let data = null;
 let failures = 0;
 const openPrs = new Set();
+const openNotes = new Set();
 const lastSig = {};
 let showDone = false;
 try {
@@ -35,6 +36,32 @@ function safeUrl(u) {
   }
 }
 
+let toastTimer = null;
+function toast(text) {
+  const t = $("toast");
+  t.textContent = text;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.hidden = true), 2500);
+}
+
+// A link opens in your own browser: the server starts it. If that cannot be done, the browser
+// showing this page opens the link itself.
+async function openExternal(href) {
+  try {
+    const response = await fetch("/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Capcom": "open" },
+      body: JSON.stringify({ url: href }),
+    });
+    if (response.status === 204) {
+      toast("opened in your browser");
+      return;
+    }
+  } catch (_) {}
+  window.open(href, "_blank", "noopener,noreferrer");
+}
+
 function link(text, url, cls) {
   const href = safeUrl(url);
   if (!href) return el("span", cls, text);
@@ -42,6 +69,11 @@ function link(text, url, cls) {
   a.href = href;
   a.target = "_blank";
   a.rel = "noopener noreferrer";
+  a.addEventListener("click", (ev) => {
+    if (ev.button !== 0 || ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) return;
+    ev.preventDefault();
+    openExternal(href);
+  });
   return a;
 }
 
@@ -55,6 +87,15 @@ function ago(iso) {
   const h = Math.floor(m / 60);
   if (h < 48) return `${h} hour${h === 1 ? "" : "s"} ago`;
   return `${Math.floor(h / 24)} days ago`;
+}
+
+function shortAgo(iso) {
+  const t = Date.parse(iso);
+  if (!t) return "";
+  const m = Math.max(0, Math.floor((Date.now() - t) / 60000));
+  if (m < 60) return `${m}m`;
+  if (m < 1440) return `${Math.floor(m / 60)}h`;
+  return `${Math.floor(m / 1440)}d`;
 }
 
 function dur(seconds) {
@@ -73,6 +114,7 @@ function tick() {
   for (const n of document.querySelectorAll("[data-ts]")) {
     const iso = n.dataset.ts;
     if (n.dataset.kind === "ago") n.textContent = ago(iso);
+    else if (n.dataset.kind === "short") n.textContent = shortAgo(iso);
     else if (n.dataset.kind === "run") n.textContent = `running ${dur((Date.now() - Date.parse(iso)) / 1000)}`;
   }
 }
@@ -118,6 +160,7 @@ function renderHeader() {
   const light = data.red > 0 ? el("span", "light red", `● NO-GO · ${data.red} red`) : el("span", "light green", "● GO");
   add(top, el("span", "brand", "CAPCOM"), light);
   if (data.awaitingReview > 0) add(top, el("span", "green", `◉ ${data.awaitingReview} awaiting review`));
+  if (data.agents.needsYou > 0) add(top, el("span", "orange bold", `! ${data.agents.needsYou} agent${data.agents.needsYou === 1 ? "" : "s"} need you`));
   add(top, el("span", "spacer"));
   const status = el("span", "dim");
   if (data.prError) {
@@ -394,6 +437,75 @@ function renderPrs() {
   for (const pr of list) panel.append(prCard(pr));
 }
 
+// ---- agents -------------------------------------------------------------------------------
+
+function noteSummary(note, needs) {
+  const first = (...parts) => parts.find((p) => p) || "";
+  if (needs) return [`you: ${first(note.next, note.waiting, note.progress)}`, "note needs"];
+  if (note.waiting) return [`waiting: ${note.waiting}`, "note waiting"];
+  return [first(note.progress, note.task), "note"];
+}
+
+function noteBlock(note, needs) {
+  const key = note.session;
+  if (openNotes.has(key)) {
+    const full = el("div", "notefull");
+    full.title = "click to show one line";
+    for (const [label, text, cls] of [["asked", note.task, "asked"], ["now", note.progress, ""], ["wait", note.waiting, "wait"], ["you", note.next, "you"]]) {
+      if (text) add(full, add(el("div", cls), el("b", "", label), el("span", "", text)));
+    }
+    full.onclick = () => {
+      openNotes.delete(key);
+      lastSig.agents = null;
+      render();
+    };
+    return full;
+  }
+  const [text, cls] = noteSummary(note, needs);
+  const line = el("button", cls, text);
+  line.title = "click to show all of it";
+  line.onclick = () => {
+    openNotes.add(key);
+    lastSig.agents = null;
+    render();
+  };
+  return line;
+}
+
+function renderAgents() {
+  const panel = $("agents");
+  panel.replaceChildren();
+  const a = data.agents;
+  const hidden = a.count === 0 && a.earlier.length === 0;
+  document.querySelector("main").classList.toggle("no-agents", hidden);
+  if (hidden) return;
+  const parts = [document.createTextNode("AGENTS · "), el("span", "count", String(a.count))];
+  if (a.working) parts.push(el("span", "cyan", ` · ${a.working} working`));
+  if (a.needsYou) parts.push(el("span", "orange bold", ` · ${a.needsYou} need you`));
+  plate(panel, ...parts);
+  for (const g of a.groups) {
+    panel.append(el("div", "group " + (g.story ? "story" : "other"), g.label));
+    for (const e of g.entries) {
+      const row = el("div", "agent " + e.state);
+      row.style.paddingLeft = `${e.depth * 14}px`;
+      add(row, el("span", "icon", (e.depth ? "└ " : "") + e.icon), el("span", "label", e.label), e.source ? el("span", "src", e.source) : null, el("span", "word", e.status));
+      panel.append(row);
+      if (e.note !== null && a.notes[e.note]) panel.append(noteBlock(a.notes[e.note], e.state === "needs"));
+      else if (e.topic && e.topic !== e.label) panel.append(el("div", "dim", e.topic));
+    }
+  }
+  if (a.earlier.length) {
+    panel.append(el("div", "group other", `EARLIER · ${a.earlier.length}`));
+    for (const i of a.earlier) {
+      const note = a.notes[i];
+      const row = el("div", "agent " + (note.needsYou ? "needs" : "idle"));
+      add(row, el("span", "icon", note.needsYou ? "!" : "○"), el("span", "label", note.task || `session ${note.session.slice(0, 8)}`), stamp(el("span", "when"), note.updatedAt, "short"));
+      panel.append(row);
+      panel.append(noteBlock(note, note.needsYou));
+    }
+  }
+}
+
 // ---- loop ---------------------------------------------------------------------------------
 
 function sig(value) {
@@ -402,10 +514,15 @@ function sig(value) {
 
 function render() {
   if (!data) return;
-  const header = sig([data.red, data.awaitingReview, data.prError, data.prUpdated, data.loading]);
+  const header = sig([data.red, data.awaitingReview, data.prError, data.prUpdated, data.loading, data.agents.needsYou]);
   if (header !== lastSig.header) {
     lastSig.header = header;
     renderHeader();
+  }
+  const agents = sig([data.agents, [...openNotes]]);
+  if (agents !== lastSig.agents) {
+    lastSig.agents = agents;
+    renderAgents();
   }
   const board = sig([data.stories, data.broken, location.hash, showDone, data.prs.map((p) => [p.url, p.red, p.waiting, p.counts, p.review])]);
   if (board !== lastSig.board) {

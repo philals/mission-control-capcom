@@ -36,11 +36,17 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #top .light { font-weight: 700; }
 #banner { padding: 6px 16px; background: #5a2316; color: var(--fg); border-bottom: 2px solid var(--red); }
 
-main { display: grid; grid-template-columns: minmax(0, 58fr) minmax(0, 42fr); gap: 14px; padding: 14px 16px 24px; align-items: start; }
-@media (max-width: 1000px) { main { grid-template-columns: minmax(0, 1fr); } }
+main { display: grid; grid-template-columns: 330px minmax(0, 58fr) minmax(0, 42fr); grid-template-areas: "agents board prs"; gap: 14px; padding: 14px 16px 24px; align-items: start; }
+#agents { grid-area: agents; }
+#board { grid-area: board; }
+#prs { grid-area: prs; }
+main.no-agents { grid-template-columns: minmax(0, 58fr) minmax(0, 42fr); grid-template-areas: "board prs"; }
+main.no-agents #agents { display: none; }
+@media (max-width: 1300px) { main { grid-template-columns: minmax(0, 58fr) minmax(0, 42fr); grid-template-areas: "board prs" "agents agents"; } }
+@media (max-width: 1000px) { main, main.no-agents { grid-template-columns: minmax(0, 1fr); grid-template-areas: "board" "prs" "agents"; } }
 
 .panel { position: relative; border: 4px solid var(--frame); padding: 22px 12px 12px; min-width: 0; }
-.panel > .plate { position: absolute; top: -13px; left: 10px; background: var(--header); color: var(--fg); padding: 0 8px; font-weight: 700; letter-spacing: .06em; }
+.panel > .plate { white-space: nowrap; max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; position: absolute; top: -13px; left: 10px; background: var(--header); color: var(--fg); padding: 0 8px; font-weight: 700; letter-spacing: .06em; }
 .panel > .plate .count { color: var(--cyan); }
 .panel > .plate .go { color: var(--green); }
 .panel > .tools { position: absolute; top: -13px; right: 10px; background: var(--bg); padding: 0 6px; }
@@ -107,3 +113,29 @@ a.card:hover, button.card:hover { background: var(--select); text-decoration: no
 @keyframes pulse { 50% { opacity: .45; } }
 .step.going, .checks li.running .icon { animation: pulse 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .step.going, .checks li.running .icon { animation: none; } }
+
+.group { font-weight: 700; margin: 8px 0 2px; overflow-wrap: anywhere; }
+.group:first-child { margin-top: 0; }
+.group.story { color: var(--cyan); }
+.group.other { color: var(--muted); }
+.agent { display: flex; gap: 6px; align-items: baseline; padding: 1px 0; }
+.agent .label { flex: 1; overflow-wrap: anywhere; }
+.agent .word { white-space: nowrap; }
+.agent .icon { font-weight: 700; }
+.agent.working .icon, .agent.working .word { color: var(--cyan); }
+.agent.needs .icon, .agent.needs .word { color: var(--orange); }
+.agent.done .icon, .agent.done .word { color: var(--green); }
+.agent.idle .icon, .agent.idle .word { color: var(--dim); }
+.note { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 0 0 3px; margin: 0; color: var(--dim); overflow-wrap: anywhere; }
+.note:hover { background: var(--select); }
+.note.needs { color: var(--orange); font-weight: 700; }
+.note.waiting { color: var(--cyan); }
+.notefull { padding: 0 0 4px; }
+.notefull div { display: flex; gap: 6px; }
+.notefull b { color: var(--dim); font-weight: 400; min-width: 5ch; }
+.notefull .asked { color: var(--muted); }
+.notefull .wait { color: var(--cyan); }
+.notefull .you { color: var(--orange); font-weight: 700; }
+.agent .when { color: var(--dim); white-space: nowrap; }
+.agent .src { color: var(--dim); font-size: 12px; border: 1px solid var(--dim); padding: 0 4px; white-space: nowrap; }
+#toast { position: fixed; right: 16px; bottom: 16px; background: var(--header); color: var(--fg); border: 2px solid var(--frame); padding: 4px 12px; z-index: 5; }

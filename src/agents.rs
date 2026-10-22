@@ -57,6 +57,34 @@ pub struct AgentInfo {
     pub session: Option<String>,
 }
 
+const SHORT_NAME_WORDS: usize = 3;
+const SHORT_NAME_CHARS: usize = 28;
+const TRAILING_FILLER: [&str; 9] = ["a", "an", "the", "to", "of", "for", "and", "or", "in"];
+
+/// A very short name for a story: its first few words, without trailing filler words.
+pub fn short_name(title: &str) -> String {
+    let mut words: Vec<&str> = Vec::new();
+    let mut length = 0;
+    for word in title.split_whitespace().map(|w| w.trim_matches(|c: char| !c.is_alphanumeric())).filter(|w| !w.is_empty()) {
+        let added = length + word.chars().count() + usize::from(!words.is_empty());
+        if words.len() == SHORT_NAME_WORDS || added > SHORT_NAME_CHARS {
+            break;
+        }
+        words.push(word);
+        length = added;
+    }
+    while words.len() > 1 && TRAILING_FILLER.contains(&words[words.len() - 1].to_lowercase().as_str()) {
+        words.pop();
+    }
+    words.join(" ")
+}
+
+/// Whether an agent is waiting on you: Herdr says it is blocked, or its note says so while it is not
+/// at work (a note left from before it carried on does not count).
+pub fn needs_you(status: Status, note: Option<&crate::notes::Note>) -> bool {
+    status == Status::Blocked || (status != Status::Working && note.is_some_and(|n| n.needs_you))
+}
+
 /// The agents in `herdr agent list`, each with its workspace's label from `herdr workspace list`.
 pub fn parse(agents: &Value, workspaces: &Value) -> Vec<AgentInfo> {
     let label_of = |id: &str| {
@@ -143,7 +171,7 @@ pub fn parents(agents: &[AgentInfo], spawns: &[(String, String)]) -> Vec<Option<
 pub fn groups(agents: &[AgentInfo], stories: &[(String, String)], parents: &[Option<usize>]) -> Vec<Group> {
     let label_of = |agent: &AgentInfo| match agent.name.as_deref().and_then(|n| named_for(n, stories)) {
         Some((_, label)) => label,
-        None if agent.topic.is_empty() => "agent".to_string(),
+        None if agent.topic.is_empty() => agent.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| "agent".to_string()),
         None => agent.topic.clone(),
     };
     let top = |i: usize| parents.get(i).copied().flatten().is_none();
