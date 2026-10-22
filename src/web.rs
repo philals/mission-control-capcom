@@ -35,6 +35,8 @@ const EARLIER_MAX: usize = 12;
 const MAX_CONNECTIONS: usize = 16;
 const MAX_REQUEST: usize = 8192;
 const MAX_BODY: usize = 4096;
+/// A launch can take a couple of seconds to show, so the same link within this long is one click.
+const SAME_CLICK: Duration = Duration::from_secs(4);
 const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 #[derive(Default)]
@@ -130,6 +132,8 @@ pub struct Server {
     prs: Mutex<PrData>,
     live: Mutex<Live>,
     opener: Mutex<Option<Arc<dyn Opener>>>,
+    /// The last link opened and when: the same link again within a few seconds is the same click, not a new launch.
+    last_open: Mutex<Option<(String, std::time::Instant)>>,
     viewed: AtomicI64,
     attention: Arc<Attention>,
     wake: Mutex<Option<std::sync::mpsc::Sender<()>>>,
@@ -360,6 +364,7 @@ impl Server {
             prs: Mutex::new(PrData { loading: true, ..PrData::default() }),
             live: Mutex::new(Live::default()),
             opener: Mutex::new(None),
+            last_open: Mutex::new(None),
             viewed: AtomicI64::new(0),
             attention: Attention::waiting_at_least(AWAY_WAIT),
             wake: Mutex::new(None),
@@ -433,6 +438,13 @@ impl Server {
         let Some(opener) = self.opener.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
             return plain("501 Not Implemented", "no browser to open it in");
         };
+        {
+            let mut last = self.last_open.lock().unwrap_or_else(|e| e.into_inner());
+            if last.as_ref().is_some_and(|(u, at)| *u == url && at.elapsed() < SAME_CLICK) {
+                return plain("204 No Content", "");
+            }
+            *last = Some((url.clone(), std::time::Instant::now()));
+        }
         match opener.open(&url) {
             Ok(()) => plain("204 No Content", ""),
             Err(_) => plain("502 Bad Gateway", "the browser could not be started"),
@@ -810,6 +822,22 @@ mod tests {
     }
 
     #[test]
+    fn the_same_link_again_within_a_few_seconds_is_one_click_and_launches_once() {
+        let (_root, s) = server();
+        store::update(&s.root, "PROJ-1", |b| crate::ops::add_pr(b, "T1", "widgets", "https://github.com/acme/widgets/pull/12", crate::model::PrState::Draft)).unwrap();
+        let opened = Arc::new(Recorder(Mutex::new(Vec::new())));
+        s.set_opener(opened.clone());
+        let link = r#"{"url":"https://github.com/acme/widgets/pull/12"}"#;
+        for _ in 0..3 {
+            assert!(post(&s, PAGE, link).starts_with("HTTP/1.1 204"), "every click is answered the same");
+        }
+        assert_eq!(opened.0.lock().unwrap().len(), 1, "but only the first started anything");
+        *s.last_open.lock().unwrap() = Some(("https://github.com/acme/widgets/pull/12".into(), std::time::Instant::now() - SAME_CLICK - Duration::from_millis(10)));
+        post(&s, PAGE, link);
+        assert_eq!(opened.0.lock().unwrap().len(), 2, "a click after the wait starts it again");
+    }
+
+    #[test]
     fn the_browser_is_started_so_that_systemd_does_not_cut_its_launcher_off() {
         let args = launch_args("xdg-open", "https://github.com/");
         assert!(args.windows(2).any(|w| w == ["-p", "KillMode=process"]), "{args:?}");
@@ -868,7 +896,7 @@ mod tests {
     fn it_answers_over_a_real_socket_and_refuses_a_slow_or_huge_request() {
         let (_root, s) = server();
         let (listener, port) = bind(0).unwrap();
-        let s = Arc::new(Server { root: s.root.clone(), prs: Mutex::new(PrData::default()), live: Mutex::new(Live::default()), opener: Mutex::new(None), viewed: AtomicI64::new(0), attention: Attention::new(), wake: Mutex::new(None), connections: AtomicUsize::new(0), port });
+        let s = Arc::new(Server { root: s.root.clone(), prs: Mutex::new(PrData::default()), live: Mutex::new(Live::default()), opener: Mutex::new(None), last_open: Mutex::new(None), viewed: AtomicI64::new(0), attention: Attention::new(), wake: Mutex::new(None), connections: AtomicUsize::new(0), port });
         let server = s.clone();
         std::thread::spawn(move || server.serve(listener));
         let mut conn = TcpStream::connect(("127.0.0.1", port)).unwrap();
