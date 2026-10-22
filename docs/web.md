@@ -48,7 +48,7 @@ Every change shows what it will do and waits for your click, except the cheap, r
 
 | Where | What | Asks first |
 |---|---|---|
-| a PR's badge, `m` | mark it ready for review, or back to a draft (`gh pr ready`) | yes |
+| a PR's badge, `mark ready…` on a draft, its `DRAFT` lamp, `m` | mark it ready for review, or back to a draft (`gh pr ready`) | yes |
 | `[ ] automerge` | adds the merge bot's first label, or takes every one off | yes |
 | `[ ] auto-fix`, `[ ] auto-review` | per-PR ticks, kept in the shared settings file | no |
 | `+ follow`, or paste a link | follow someone else's PR (it joins the list marked *followed*; auto-fix and auto-review start off), or watch a run (you are told when it finishes) | no |
