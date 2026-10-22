@@ -13,15 +13,32 @@ It needs the stories folder (`--root` or `CAPCOM_ROOT`) and the GitHub CLI (`gh`
 
 ## The look, and every size
 
-It keeps the TUI's 1960s mission control look, made for a browser: steel-framed consoles with bevels and screws, engraved enamel name plates, backlit lamps (the GO / NO-GO lights, the rail of each PR, the ticks, which are lamp switches), a segmented LED bar for progress, a clock in the top rail, the 1960s go/no-go poll while GitHub's first answer is awaited, and the log on green-bar teletype paper. Type is a condensed grotesque for labels (Eurostile, Bahnschrift or a narrow sans, whatever the machine has) and a monospace for data; no fonts are downloaded.
+It keeps the TUI's 1960s mission control look, made light for a browser: hairline steel frames with corner brackets, a blue rule under a small-caps heading for each console, backlit lamps (the GO / NO-GO lights, the rail of each PR, the ticks, which are lamp switches), segmented gauges, a clock in the top rail, the 1960s go/no-go poll while GitHub's first answer is awaited, and the log on green-bar teletype paper. Frames take as little room as they can, so the content gets the window. Type is a condensed grotesque for labels (Eurostile, Bahnschrift or a narrow sans, whatever the machine has) and a monospace for data; no fonts are downloaded.
 
 It lays itself out for the window: at 1900 px and wider, four consoles side by side (agents, stories, pull requests, runs); from 1300 px, three; from 1000 px, two, with the agents under the stories; below that, one console at a time, chosen on the switch bar at the bottom (stories, PRs, runs, agents, each with a lamp that lights for what needs you), with larger touch targets and dialogs that rise from the bottom on a phone. On a screen that is wide and tall enough each console scrolls by itself and keeps its place when the data refreshes.
+
+**Resizing:** on those wide layouts a thin handle sits in each gap between consoles (it lights up when you point at it). Drag it to move the edge between the two consoles beside it, or focus it with the keyboard and use the arrow keys (`Shift` for bigger steps). Double-click a handle, press `Home` on it, or use "Reset the layout" in the palette to go back to the default. Each layout (how many columns there is room for, and which consoles are showing) remembers its own sizes in this browser.
+
+## Plan usage and the working week
+
+The top rail has three gauges: **5H** and **7D** are how much of your Claude plan's 5-hour and weekly limits is used (with when each starts again), and **WEEK** is how far through the working week it is (Monday to Friday, 06:00 to 17:00, local time; 100% from Friday 17:00 through the weekend). The usage ones turn yellow from 60% and red from 85%, and dim when the figures are old.
+
+Claude Code gives the plan usage to a session's status line command (`rate_limits.five_hour.used_percentage`, `rate_limits.seven_day.used_percentage` and their `resets_at`, documented under the status line), and only while a session is running; nothing else on this machine has it. So the page reads a small file that your status line script writes. Add this to your status line script, after it has read its JSON input into `$input`:
+
+```bash
+usage_file="${CAPCOM_USAGE_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/capcom/usage.json}"
+mkdir -p "$(dirname "$usage_file")" &&
+    echo "$input" | jq -c '{at: (now | floor), rate_limits: .rate_limits}' > "$usage_file.tmp" &&
+    mv "$usage_file.tmp" "$usage_file"
+```
+
+(Several sessions each write it; they all see the same account, so the last one wins and that is fine.) The figures are as old as the last time any session's status line ran, and the gauges say so. They exist for Pro and Max plans; with no usage in the file, only the WEEK gauge shows.
 
 ## What the page shows
 
 - **Header:** a `GO` or `NO-GO · n red` light (click it to jump to the first red PR), how many PRs wait for a reviewer, how many agents need you, when the PRs were last read, and the buttons `+ follow`, `+ new story`, `log`, `⚙`, `⌘` (the palette) and `?`.
 - **Agents:** the Claude Code sessions running on this machine, from the terminal program and from the desktop app, with their notes and an EARLIER list of sessions that ended (below).
-- **Stories:** TO DO, DOING and IN REVIEW columns (`[ Show done ]` adds DONE). Click a story, or its `⋯`, or right-click it. Inside a story the tasks are in columns (TO DO, PLANNING, PLANNED, IMPLEMENTING, DONE) with what each waits for, a chip for the worst state of its PRs and links to them. An implementing task whose PRs are all merged says so and offers `finish ✓`.
+- **Stories:** a list grouped into DOING, IN REVIEW and TO DO (`[ Show done ]` adds DONE), each with its progress bar. Click a story, or its `⋯`, or right-click it. Inside a story the tasks are in columns (TO DO, PLANNING, PLANNED, IMPLEMENTING, DONE) with what each waits for, a chip for the worst state of its PRs and links to them. An implementing task whose PRs are all merged says so and offers `finish ✓`.
 - **Pull requests:** newest first, like the TUI. Each shows its badge, the story and task it belongs to, labels, review and comments, the branch with a 📋 button, and the **rail**: `ready · CI · copilot · threads · approved · automerge · merge`, coloured done, going, wrong or not yet, with `CI 4m left` while checks run (from how long they usually take). Running, queued and failed checks are listed with a running clock (`running 2m 05s of ~4m`). A PR that is green and waiting for a reviewer is lit up. A PR with nothing to do takes one line; click it to open it. The `details` sheet has every check grouped, the merge state, Copilot, automerge and what is in the way.
 - **Runs & watch:** your manual workflow runs and the ones you follow, with their stages, in the repos of your open PRs and recorded PRs (plus `--deploy-repos`).
 
@@ -57,7 +74,7 @@ It also tells you (under `log`, and as a desktop notification when `⚙ Desktop 
 
 ## Agents
 
-The **AGENTS** panel lists the Claude Code sessions running on this machine, from the terminal program and from the desktop app alike, each tagged `cli` or `desktop`, grouped by the folder they run in, with whether each is working or idle. It reads the file Claude Code keeps for each live session (`~/.claude/sessions/<pid>.json`), so it needs no Herdr and no setup. Those files are Claude Code's own and not documented, so a future version of Claude Code could change them; a file that does not look right is skipped.
+The **AGENTS** panel lists the Claude Code sessions running on this machine, from the terminal program and from the desktop app alike: the **desktop** sessions first, then the **terminal** ones, each tagged `cli` or `desktop` and grouped by the folder they run in, with whether each is working or idle. It reads the file Claude Code keeps for each live session (`~/.claude/sessions/<pid>.json`), so it needs no Herdr and no setup. Those files are Claude Code's own and not documented, so a future version of Claude Code could change them; a file that does not look right is skipped.
 
 Add `/agent-note` (see the README) and each agent also says what it was asked, where it has got to, what it waits on and what you need to do (`capcom note`, one small file per session). The note shows under the agent: `you: pick option A or B` in orange when it waits on you (the header counts those), `waiting: CI on the PR` when it waits on something else, otherwise where it has got to; click it for all of it. Below the running sessions, **EARLIER** lists the notes of sessions that have ended, for a week, newest first with how long ago. A session whose note says it needs you only shouts while the session is not working.
 
@@ -110,7 +127,7 @@ This repository has that file in `.claude/launch.json`. Put the same file in `.c
 
 ## What is not the same as the TUI
 
-- **Layout:** the page has a responsive layout of its own, so dragging dividers and the sizing keys do not exist.
+- **Layout:** the page has a responsive layout of its own, with draggable edges between consoles (above) instead of the TUI's divider keys.
 - **Herdr:** no workspaces, tabs or panes: skills start in new desktop sessions (above), and "go to the agent" opens a session in the desktop app.
 - **Auto-fix's last step:** marked on the PR with a one-click session, not sent to the agent (above).
 - **Loading screens, the bell and the terminal clipboard:** not ported (the page has a toast, the `log` and 📋 buttons).

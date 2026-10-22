@@ -91,6 +91,7 @@ const KEYS = [
   ["Ctrl-K or /", "the command palette: every action that fits where you are"],
   ["Esc", "close a dialog, or go back to the stories"],
   ["right-click", "the actions of a PR or a story"],
+  ["drag an edge", "resize the consoles (arrow keys on a focused edge; double-click or Home resets)"],
 ];
 
 function helpDialog() {
@@ -148,6 +149,7 @@ function paletteItems() {
   push("Follow a PR or a run by its link", "F", followDialog);
   push("New story (break a Jira story down)", "n", newStoryDialog);
   push(ui.showDone ? "Hide done stories" : "Show done stories", "d", toggleShowDone);
+  push("Reset the layout (undo the panel sizes you dragged)", "", resetLayout);
   push("Settings", "", settingsDialog);
   push("What capcom did by itself", "", eventsDialog);
   push("Keys and what things mean", "?", helpDialog);
@@ -361,7 +363,7 @@ function keepScroll(id, draw) {
 
 function render() {
   if (!data) return;
-  const header = sig([data.red, data.redWithAutofix, data.awaitingReview, data.prError, data.prUpdated, data.loading, data.agents.needsYou, data.events.length]);
+  const header = sig([data.red, data.redWithAutofix, data.awaitingReview, data.prError, data.prUpdated, data.loading, data.agents.needsYou, data.events.length, data.usage, Math.floor(Date.now() / 60000)]);
   if (header !== lastSig.header) {
     lastSig.header = header;
     renderHeader();
@@ -393,6 +395,7 @@ function render() {
   }
   refreshModal();
   tick();
+  layoutRefresh();
 }
 
 async function load() {

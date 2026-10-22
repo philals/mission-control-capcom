@@ -488,3 +488,19 @@ fn an_open_pr_in_the_list_is_not_looked_up_again_and_says_draft_or_ready_for_its
     assert!(r.server.recorded_urls().is_empty(), "the open list vouches for it");
     assert_eq!(state(&r)["stories"][0]["tasks"][0]["prs"][0]["state"], "ready", "the live list wins over the board");
 }
+
+#[test]
+fn the_plan_usage_the_status_line_wrote_is_in_the_state_and_missing_is_null() {
+    let r = rig();
+    assert_eq!(state(&r)["usage"], Value::Null, "nothing written yet");
+    let file = r._dir.path().join("usage.json");
+    r.server.set_usage_file(Some(file.clone()));
+    assert_eq!(state(&r)["usage"], Value::Null, "no file");
+    std::fs::write(&file, r#"{"at": 1790000000, "rate_limits": {"five_hour": {"used_percentage": 23.5, "resets_at": 1790003600}, "seven_day": {"used_percentage": 41}}}"#).unwrap();
+    let usage = state(&r)["usage"].clone();
+    assert_eq!(usage["fiveHour"]["pct"], 23.5);
+    assert_eq!(usage["fiveHour"]["resetsAt"], "2026-09-21T15:13:20Z");
+    assert_eq!(usage["sevenDay"]["pct"], 41.0);
+    assert_eq!(usage["sevenDay"]["resetsAt"], Value::Null);
+    assert_eq!(usage["at"], "2026-09-21T14:13:20Z");
+}

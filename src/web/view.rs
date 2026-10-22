@@ -400,6 +400,17 @@ impl Server {
                 "slowWhenAway": settings.slow_when_away,
             },
             "workdir": workdir.to_string_lossy(),
+            "usage": lock(&self.eng.usage_path).as_deref().and_then(crate::usage::read).map(|u| {
+                let win = |w: &Option<crate::usage::Window>| w.as_ref().map(|w| json!({
+                    "pct": w.used_percent,
+                    "resetsAt": w.resets_at.map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+                }));
+                json!({
+                    "at": u.at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                    "fiveHour": win(&u.five_hour),
+                    "sevenDay": win(&u.seven_day),
+                })
+            }),
         })
     }
 }

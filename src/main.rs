@@ -305,6 +305,7 @@ fn main() -> Result<()> {
             server.set_tools(web::Tools::real());
             server.set_workdir(workdir.or_else(|| std::env::current_dir().ok()).unwrap_or_default());
             server.set_extra_repos(deploy_repos);
+            server.set_usage_file(capcom::usage::path());
             server.load_settings(settings::default_path());
             let cache_dir = cache::Cache::default_dir();
             server.load_durations(cache_dir.as_ref().map(|d| d.join("check-durations.json")));

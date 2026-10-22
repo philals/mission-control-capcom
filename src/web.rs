@@ -32,7 +32,7 @@ use engine::Engine;
 use view::*;
 
 const INDEX: &str = include_str!("web/index.html");
-const SCRIPT: &str = concat!(include_str!("web/js/core.js"), "\n", include_str!("web/js/panels.js"), "\n", include_str!("web/js/extras.js"));
+const SCRIPT: &str = concat!(include_str!("web/js/core.js"), "\n", include_str!("web/js/panels.js"), "\n", include_str!("web/js/layout.js"), "\n", include_str!("web/js/extras.js"));
 const STYLE: &str = include_str!("web/style.css");
 const FAVICON: &str = include_str!("web/favicon.svg");
 
