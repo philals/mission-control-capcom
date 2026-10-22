@@ -22,11 +22,13 @@ The **AGENTS** panel lists the Claude Code sessions running on this machine, fro
 
 Add `/agent-note` (see the README) and each agent also says what it was asked, where it has got to, what it waits on and what you need to do (`capcom note`, one small file per session). The note shows under the agent: `you: pick option A or B` in orange when it waits on you (the header counts those), `waiting: CI on the PR` when it waits on something else, otherwise where it has got to; click it for all of it. Below the running sessions, **EARLIER** lists the notes of sessions that have ended, for a week, newest first with how long ago: the "what was that agent doing yesterday" view. A session whose note says it needs you only shouts while the session is not working (a note from before it carried on is ignored).
 
+A `desktop` session is clickable: the click opens it in the Claude Code desktop app, through the app's own `claude://code/continue?session=…` link (the id is the one the app keeps for the session, `hostSessionId` in the session file; the app's link handler accepts only that kind of id). A `cli` session has no such link, because the desktop app does not know it.
+
 The page shows the panel only when there is something to show. The agents are looked at every 3 seconds while a page is looking and not at all otherwise. (`capcom-tui` lists the agents of Herdr instead; the notes are shared by both.)
 
 ## Links open in your own browser
 
-A click on a link (a PR, its diff, a check, Jira) asks the service to open it with your system's default browser (`xdg-open`; `--browser CMD` or `CAPCOM_BROWSER` picks another command), not inside whatever shows the page. The service starts the browser through `systemd-run --user`, so it does not run inside the service's sandbox. If that fails, the link opens the usual way.
+A click on a link (a PR, its diff, a check, Jira) asks the service to open it with your system's default browser (`xdg-open`; `--browser CMD` or `CAPCOM_BROWSER` picks another command), not inside whatever shows the page. The service starts the browser through `systemd-run --user` with `KillMode=process`, so it does not run inside the service's sandbox and systemd does not cut off the browser's launcher while it hands the link to the running browser (without that, `xdg-open` appears to succeed and nothing opens). The same route opens a desktop session's `claude://` link in the desktop app. If that fails, the link opens the usual way.
 
 ## It does not change anything
 

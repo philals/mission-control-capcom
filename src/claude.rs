@@ -6,9 +6,22 @@ use crate::agents::{AgentInfo, Status};
 use serde_json::Value;
 use std::path::Path;
 
-/// `cli:1234` or `claude-desktop:1234`: who runs the session, and its process. Opaque to everything else.
-pub fn pane_of(entrypoint: &str, pid: u64) -> String {
-    format!("{entrypoint}:{pid}")
+/// `cli:1234` or `claude-desktop:1234:local_…`: who runs the session, its process and, for the desktop
+/// app, the id the app knows the session by. Opaque to everything else.
+pub fn pane_of(entrypoint: &str, pid: u64, host: Option<&str>) -> String {
+    match host {
+        Some(host) => format!("{entrypoint}:{pid}:{host}"),
+        None => format!("{entrypoint}:{pid}"),
+    }
+}
+
+/// The link that opens a desktop session in the Claude Code desktop app (`claude://code/continue?session=…`),
+/// from the id in its pane id; None for a session the desktop app does not know. The app accepts only
+/// ids of the form `local_` and letters, digits and hyphens.
+pub fn desktop_link(pane: &str) -> Option<String> {
+    let host = pane.splitn(3, ':').nth(2)?;
+    let valid = host.strip_prefix("local_").is_some_and(|rest| !rest.is_empty() && rest.len() <= 64 && rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+    valid.then(|| format!("claude://code/continue?session={host}"))
 }
 
 /// The part before the colon of a `pane_of` id: `cli`, `claude-desktop`.
@@ -63,7 +76,7 @@ pub fn live(config: &Path) -> Vec<AgentInfo> {
             Some((
                 v["startedAt"].as_u64().unwrap_or(0),
                 AgentInfo {
-                    pane: pane_of(v["entrypoint"].as_str().unwrap_or("cli"), pid),
+                    pane: pane_of(v["entrypoint"].as_str().unwrap_or("cli"), pid, v["hostSessionId"].as_str()),
                     name,
                     status: status_of(v["status"].as_str().unwrap_or_default()),
                     topic: String::new(),
@@ -114,6 +127,17 @@ mod tests {
         assert_eq!(agents[1].name.as_deref(), Some("capcom work"));
         assert_eq!(entrypoint_of(&agents[1].pane), "claude-desktop");
         assert_eq!(entrypoint_of(&agents[0].pane), "cli");
+    }
+
+    #[test]
+    fn a_desktop_session_has_a_link_that_opens_it_and_nothing_else_does() {
+        assert_eq!(desktop_link(&pane_of("claude-desktop", 7, Some("local_f54e7d98-8fe4-40e1"))).as_deref(), Some("claude://code/continue?session=local_f54e7d98-8fe4-40e1"));
+        assert_eq!(desktop_link(&pane_of("cli", 7, None)), None, "a terminal session is not in the app");
+        assert_eq!(desktop_link(&pane_of("claude-desktop", 7, None)), None);
+        for bad in ["local_", "local_a b", "local_a&x=1", "local_../x", "session_abc", "local_é"] {
+            assert_eq!(desktop_link(&pane_of("claude-desktop", 7, Some(bad))), None, "{bad}");
+        }
+        assert_eq!(entrypoint_of(&pane_of("claude-desktop", 7, Some("local_a"))), "claude-desktop");
     }
 
     #[test]

@@ -139,3 +139,5 @@ a.card:hover, button.card:hover { background: var(--select); text-decoration: no
 .agent .when { color: var(--dim); white-space: nowrap; }
 .agent .src { color: var(--dim); font-size: 12px; border: 1px solid var(--dim); padding: 0 4px; white-space: nowrap; }
 #toast { position: fixed; right: 16px; bottom: 16px; background: var(--header); color: var(--fg); border: 2px solid var(--frame); padding: 4px 12px; z-index: 5; }
+.agent.clickable { cursor: pointer; }
+.agent.clickable:hover { background: var(--select); }

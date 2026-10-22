@@ -69,10 +69,17 @@ pub struct SystemBrowser {
     pub command: Option<String>,
 }
 
+/// How the browser is started under `systemd-run`. `KillMode=process` matters: `xdg-open` returns at
+/// once, and by default systemd then kills what it started (the browser's own launcher, which is
+/// still handing the link to the running browser) as the unit ends.
+fn launch_args(program: &str, url: &str) -> Vec<String> {
+    ["--user", "--collect", "--quiet", "-p", "KillMode=process", "--", program, url].iter().map(|s| s.to_string()).collect()
+}
+
 impl Opener for SystemBrowser {
     fn open(&self, url: &str) -> Result<(), String> {
         let program = self.command.clone().unwrap_or_else(|| if cfg!(target_os = "macos") { "open".into() } else { "xdg-open".into() });
-        let through_systemd = Command::new("systemd-run").args(["--user", "--collect", "--quiet", "--", &program, url]).output();
+        let through_systemd = Command::new("systemd-run").args(launch_args(&program, url)).output();
         if through_systemd.is_ok_and(|o| o.status.success()) {
             return Ok(());
         }
@@ -89,7 +96,9 @@ fn shown_urls(value: &Value, out: &mut std::collections::HashSet<String>) {
     match value {
         Value::Object(map) => {
             for (key, v) in map {
-                if (key == "url" || key == "jiraUrl") && v.as_str().is_some_and(|u| u.starts_with("https://")) {
+                if key == "deepLink" && v.as_str().is_some_and(|u| u.starts_with("claude://code/continue?session=local_")) {
+                    out.insert(v.as_str().unwrap_or_default().to_string());
+                } else if (key == "url" || key == "jiraUrl") && v.as_str().is_some_and(|u| u.starts_with("https://")) {
                     let url = v.as_str().unwrap_or_default();
                     out.insert(url.to_string());
                     if map.contains_key("number") {
@@ -313,6 +322,7 @@ fn agents_view(live: &Live, boards: &[Board], now: DateTime<Utc>) -> Value {
                         "state": if needs_you { "needs" } else { match a.status { AgentStatus::Working => "working", AgentStatus::Done => "done", _ => "idle" } },
                         "topic": a.topic,
                         "source": match crate::claude::entrypoint_of(&a.pane) { "claude-desktop" => "desktop", other => other },
+                        "deepLink": crate::claude::desktop_link(&a.pane),
                         "note": note_of(a),
                     })
                 }).collect::<Vec<_>>(),
@@ -684,6 +694,7 @@ mod tests {
         assert_eq!(agents["needsYou"], 3, "the idle ask, the blocked agent and the ended one");
         assert_eq!(agents["working"], 1);
         assert_eq!(agents["notes"][0]["next"], "do it");
+        assert_eq!(agents["groups"][0]["entries"][0]["deepLink"], Value::Null, "no desktop id: nothing to open");
     }
 
     #[test]
@@ -757,6 +768,24 @@ mod tests {
     }
 
     #[test]
+    fn a_desktop_session_opens_in_the_desktop_app_but_only_one_that_is_listed() {
+        let (_root, s) = server();
+        let opened = Arc::new(Recorder(Mutex::new(Vec::new())));
+        s.set_opener(opened.clone());
+        s.live.lock().unwrap().agents = vec![agent("claude-desktop:7:local_abc-123", None, AgentStatus::Idle, Some("s-1")), agent("cli:8", None, AgentStatus::Idle, Some("s-2"))];
+        let state = agents_state(&s);
+        let entries: Vec<&Value> = state["groups"].as_array().unwrap().iter().flat_map(|g| g["entries"].as_array().unwrap()).collect();
+        let desktop = entries.iter().find(|e| e["source"] == "desktop").unwrap();
+        let cli = entries.iter().find(|e| e["source"] == "cli").unwrap();
+        assert_eq!(desktop["deepLink"], "claude://code/continue?session=local_abc-123");
+        assert_eq!(cli["deepLink"], Value::Null, "a terminal session has no link");
+        assert!(post(&s, PAGE, r#"{"url":"claude://code/continue?session=local_abc-123"}"#).starts_with("HTTP/1.1 204"));
+        assert!(post(&s, PAGE, r#"{"url":"claude://code/continue?session=local_other"}"#).starts_with("HTTP/1.1 403"), "not a session on the list");
+        assert!(post(&s, PAGE, r#"{"url":"claude://code/new"}"#).starts_with("HTTP/1.1 403"));
+        assert_eq!(*opened.0.lock().unwrap(), vec!["claude://code/continue?session=local_abc-123".to_string()]);
+    }
+
+    #[test]
     fn the_pr_diff_and_the_jira_link_are_among_the_links_it_will_open() {
         let (_root, s) = server();
         store::update(&s.root, "PROJ-1", |b| {
@@ -778,6 +807,13 @@ mod tests {
         for want in ["https://github.com/acme/widgets/pull/12", "https://github.com/acme/widgets/pull/12/files", "https://github.com/acme/widgets/actions/runs/1/job/2", "https://jira.example/browse/PROJ-1"] {
             assert!(urls.contains(want), "{want} missing from {urls:?}");
         }
+    }
+
+    #[test]
+    fn the_browser_is_started_so_that_systemd_does_not_cut_its_launcher_off() {
+        let args = launch_args("xdg-open", "https://github.com/");
+        assert!(args.windows(2).any(|w| w == ["-p", "KillMode=process"]), "{args:?}");
+        assert_eq!(args[args.len() - 2..], ["xdg-open", "https://github.com/"], "the link is the last, single argument");
     }
 
     #[test]
