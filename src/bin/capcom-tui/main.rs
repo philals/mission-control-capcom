@@ -1,19 +1,12 @@
-use capcom::{agents, attention, cache, kodiak, prs};
+use capcom::{agents, attention, cache, durations, finish, fixstate, kodiak, pr_state, prs, runs, settings, taskdoc};
 mod app;
 mod demo;
-mod durations;
-mod finish;
-mod fixstate;
 mod herdr;
 mod loading;
 mod palette;
 mod panel;
-mod pr_state;
-mod runs;
 mod runs_ui;
-mod settings;
 mod svg;
-mod taskdoc;
 mod theme;
 mod ui;
 

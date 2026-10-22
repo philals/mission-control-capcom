@@ -1,8 +1,8 @@
 //! Looks up the real state (draft, ready, merged, closed) of the PRs recorded on a story's tasks,
 //! in the background, so the board can tell you a task is finished and, if you choose, update itself.
 use crate::cache::Cache;
-use capcom::model::PrState;
-use capcom::refresh::{Lookups, PrLookup};
+use crate::model::PrState;
+use crate::refresh::{Lookups, PrLookup};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
 use std::time::Duration;
