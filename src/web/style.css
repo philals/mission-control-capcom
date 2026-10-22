@@ -304,6 +304,16 @@ button.badge:hover { background: var(--select); }
 .agent.clickable { cursor: pointer; }
 .agent.clickable:hover { background: var(--select); }
 .agent.opening { animation: lamp 1s ease-in-out infinite; cursor: progress; }
+.agent.sub { font-size: 12px; }
+.agent.sub .label { color: var(--muted); }
+.transcript { max-height: 60vh; overflow: auto; margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; font-size: 12px; }
+.transcript .t { display: flex; gap: 8px; padding: 2px 0; }
+.transcript .t b { color: var(--dim); font-weight: 400; min-width: 5ch; flex: none; font-family: var(--label); text-transform: uppercase; letter-spacing: .08em; font-size: 10px; padding-top: 2px; }
+.transcript .t span { white-space: pre-wrap; overflow-wrap: anywhere; }
+.transcript .t.prompt span { color: var(--muted); }
+.transcript .t.report span { color: var(--green); }
+.transcript .t.tool span { color: var(--cyan); font-family: var(--mono, monospace); }
+.transcript .t.result span { color: var(--dim); font-family: var(--mono, monospace); max-height: 8em; overflow: hidden; }
 .note { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 0 4px 3px 22px; margin: 0; color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
 .note:hover { background: var(--select); }
 .note.needs { color: var(--orange); font-weight: 600; }

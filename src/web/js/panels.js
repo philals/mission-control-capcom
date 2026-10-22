@@ -902,6 +902,72 @@ function renderAgentRow(body, e, a) {
   body.append(row);
   if (e.note !== null && a.notes[e.note]) body.append(noteBlock(a.notes[e.note], e.state === "needs"));
   else if (e.topic && e.topic !== e.label) body.append(el("div", "dim", e.topic));
+  for (const sub of e.subagents || []) {
+    const r = el("div", "agent sub clickable " + (sub.running ? "working" : "idle"));
+    r.style.paddingLeft = `${4 + (e.depth + sub.depth) * 14}px`;
+    add(r, el("span", "icon", "└ " + (sub.running ? "◐" : "✓")), el("span", "label", sub.description || sub.kind), el("span", "src", sub.kind));
+    add(r, sub.running ? el("span", "word", "working") : stamp(el("span", "when"), sub.updatedAt, "short"));
+    r.title = "show what this subagent did";
+    r.onclick = () => subagentSheet(e, sub);
+    body.append(r);
+  }
+}
+
+// A subagent's conversation, read from its transcript and kept up to date while it runs.
+function subagentSheet(parent, sub) {
+  let entries = null;
+  let failed = false;
+  let stuck = true;
+  let pos = 0;
+  const current = () => {
+    for (const g of data.agents.groups) for (const e of g.entries) if (e.session === parent.session) return (e.subagents || []).find((x) => x.id === sub.id);
+    return null;
+  };
+  const label = { prompt: "asked", text: "said", tool: "tool", result: "got", report: "report" };
+  const sheet = openModal("Subagent", () => {
+    const body = el("div", "sheet");
+    add(body, el("h3", "", sub.description || sub.kind));
+    add(body, kv("Type", sub.kind));
+    add(body, kv("Of", parent.label));
+    add(body, kv("State", sub.running ? "working" : "finished"));
+    const log = el("div", "transcript");
+    if (failed) add(log, el("p", "dim", "The transcript could not be read (the session may have ended)."));
+    else if (!entries) add(log, el("p", "dim", "loading…"));
+    else for (const t of entries) add(log, add(el("div", "t " + t.kind), el("b", "", label[t.kind] || t.kind), el("span", "", t.text)));
+    log.onscroll = () => {
+      pos = log.scrollTop;
+      stuck = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
+    };
+    requestAnimationFrame(() => {
+      log.scrollTop = stuck ? log.scrollHeight : pos;
+    });
+    add(body, log);
+    const foot = [];
+    if (parent.deepLink) foot.push(btn("Open its session ↗", () => openExternal(parent.deepLink, "asked Claude Code desktop to open it: this can take a couple of seconds")));
+    foot.push(btn("Close", closeModal));
+    return { body, foot };
+  }, { wide: true, kind: "subagent" });
+  const load = () => {
+    if (modal !== sheet) return;
+    fetch(`/api/subagent?session=${encodeURIComponent(parent.session)}&agent=${encodeURIComponent(sub.id)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => {
+        const now = current();
+        if (now) sub = now;
+        const before = entries ? entries.length : -1;
+        entries = d.entries;
+        failed = false;
+        if (modal === sheet && entries.length !== before) fillModal();
+      })
+      .catch(() => {
+        failed = true;
+        if (modal === sheet) fillModal();
+      })
+      .finally(() => {
+        if (sub.running && modal === sheet) setTimeout(load, POLL_MS);
+      });
+  };
+  load();
 }
 
 function renderAgents() {

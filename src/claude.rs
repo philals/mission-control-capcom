@@ -3,7 +3,7 @@
 //! That file format belongs to Claude Code and is not documented, so everything here is lenient:
 //! a file that does not look right is skipped, and a status word it does not know is shown as is.
 use crate::agents::{AgentInfo, Status};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::Path;
 
 /// `cli:1234` or `claude-desktop:1234:local_…`: who runs the session, its process and, for the desktop
@@ -98,6 +98,143 @@ pub fn live(config: &Path) -> Vec<AgentInfo> {
     found.into_iter().map(|(_, a)| a).collect()
 }
 
+/// A subagent a session started with its Agent tool, from `projects/<folder>/<session>/subagents/agent-<id>.meta.json`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Subagent {
+    pub id: String,
+    pub kind: String,
+    pub description: String,
+    pub running: bool,
+    /// When its transcript last changed, in seconds since 1970.
+    pub updated: u64,
+    pub depth: u64,
+}
+
+/// A subagent not marked finished that has written nothing for this long has stopped (the parent was
+/// interrupted, or an older Claude Code that never marks them finished).
+const SUBAGENT_QUIET: u64 = 10 * 60;
+/// Finished subagents stay listed this long, at most this many.
+const SUBAGENT_KEPT: u64 = 30 * 60;
+const SUBAGENTS_MAX: usize = 8;
+
+fn safe_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn subagent_dirs(config: &Path, session: &str) -> Vec<std::path::PathBuf> {
+    if !safe_id(session) {
+        return Vec::new();
+    }
+    std::fs::read_dir(config.join("projects")).into_iter().flatten().flatten().map(|e| e.path().join(session).join("subagents")).filter(|d| d.is_dir()).collect()
+}
+
+fn modified(path: &Path) -> u64 {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs())
+}
+
+/// The subagents of a session that are running or finished lately, newest first.
+pub fn subagents(config: &Path, session: &str, now: u64) -> Vec<Subagent> {
+    let mut found: Vec<Subagent> = subagent_dirs(config, session)
+        .iter()
+        .flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let id = name.strip_prefix("agent-")?.strip_suffix(".meta.json")?.to_string();
+            if !safe_id(&id) {
+                return None;
+            }
+            let meta: Value = serde_json::from_slice(&std::fs::read(e.path()).ok()?).ok()?;
+            let updated = modified(&e.path().with_file_name(format!("agent-{id}.jsonl"))).max(modified(&e.path()));
+            let running = !meta["finished"].as_bool().unwrap_or(false) && now.saturating_sub(updated) < SUBAGENT_QUIET;
+            let text = |k: &str| meta[k].as_str().unwrap_or_default().to_string();
+            Some(Subagent { id, kind: text("agentType"), description: text("description"), running, updated, depth: meta["spawnDepth"].as_u64().unwrap_or(1).max(1) })
+        })
+        .filter(|s| s.running || now.saturating_sub(s.updated) < SUBAGENT_KEPT)
+        .collect();
+    found.sort_by_key(|s| (!s.running, std::cmp::Reverse(s.updated)));
+    found.truncate(SUBAGENTS_MAX);
+    found
+}
+
+const TRANSCRIPT_MAX: usize = 300;
+const TOOL_TEXT_MAX: usize = 600;
+
+fn clip(text: &str, max: usize) -> String {
+    let text = text.trim();
+    match text.char_indices().nth(max) {
+        Some((at, _)) => format!("{}…", &text[..at]),
+        None => text.to_string(),
+    }
+}
+
+/// What a tool was asked, in a line: its most telling input.
+fn tool_line(name: &str, input: &Value) -> String {
+    let pick = ["description", "command", "file_path", "pattern", "query", "url", "prompt"].iter().find_map(|k| input[*k].as_str());
+    match pick {
+        Some(p) => format!("{name} · {}", clip(p, 200)),
+        None => name.to_string(),
+    }
+}
+
+/// Text without the `<system-reminder>` blocks Claude Code adds to a conversation.
+fn without_reminders(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find("<system-reminder>") {
+        out.push_str(&rest[..at]);
+        rest = rest[at..].find("</system-reminder>").map_or("", |end| &rest[at + end + "</system-reminder>".len()..]);
+    }
+    out.push_str(rest);
+    out.trim().to_string()
+}
+
+fn result_text(content: &Value) -> String {
+    match content {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("\n"),
+        _ => String::new(),
+    }
+}
+
+/// A subagent's conversation, simplified for reading: `{kind, text}` with kind `prompt`, `text`,
+/// `tool` or `result`; the last few hundred of them. None when there is no such subagent.
+pub fn subagent_transcript(config: &Path, session: &str, agent: &str) -> Option<Vec<Value>> {
+    if !safe_id(agent) {
+        return None;
+    }
+    let file = subagent_dirs(config, session).into_iter().map(|d| d.join(format!("agent-{agent}.jsonl"))).find(|f| f.is_file())?;
+    let raw = std::fs::read_to_string(file).ok()?;
+    let mut out: Vec<Value> = Vec::new();
+    let mut said = |out: &mut Vec<Value>, kind: &str, text: &str| {
+        let text = without_reminders(text);
+        if !text.is_empty() {
+            let kind = if kind == "text" && out.is_empty() { "prompt" } else { kind };
+            out.push(json!({ "kind": kind, "text": text }));
+        }
+    };
+    for line in raw.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        let content = &v["message"]["content"];
+        match (v["type"].as_str(), content) {
+            (Some("user"), Value::String(text)) => said(&mut out, "text", text),
+            (Some("user" | "assistant"), Value::Array(parts)) => {
+                for part in parts {
+                    match part["type"].as_str() {
+                        Some("text") => said(&mut out, "text", part["text"].as_str().unwrap_or_default()),
+                        Some("tool_use") if part["name"] == "SubagentHandback" => said(&mut out, "report", part["input"]["message"].as_str().unwrap_or_default()),
+                        Some("tool_use") => out.push(json!({ "kind": "tool", "text": tool_line(part["name"].as_str().unwrap_or("tool"), &part["input"]) })),
+                        Some("tool_result") => out.push(json!({ "kind": "result", "text": clip(&result_text(&part["content"]), TOOL_TEXT_MAX) })),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let skip = out.len().saturating_sub(TRANSCRIPT_MAX);
+    Some(out.split_off(skip))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,5 +303,44 @@ mod tests {
     #[test]
     fn a_missing_folder_is_no_sessions() {
         assert!(live(Path::new("/nonexistent/claude")).is_empty());
+    }
+
+    fn subagent(config: &Path, session: &str, id: &str, meta: Value, lines: &[Value]) {
+        let dir = config.join("projects").join("-w-capcom").join(session).join("subagents");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("agent-{id}.meta.json")), serde_json::to_vec(&meta).unwrap()).unwrap();
+        std::fs::write(dir.join(format!("agent-{id}.jsonl")), lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n")).unwrap();
+    }
+
+    #[test]
+    fn a_sessions_subagents_are_listed_running_first_and_old_finished_ones_are_left_out() {
+        let dir = tempfile::tempdir().unwrap();
+        subagent(dir.path(), "s-1", "a1", json!({ "agentType": "Explore", "description": "Scan things", "finished": true, "spawnDepth": 1 }), &[]);
+        subagent(dir.path(), "s-1", "a2", json!({ "agentType": "general-purpose", "description": "Fix it" }), &[]);
+        subagent(dir.path(), "s-2", "a3", json!({ "agentType": "Explore" }), &[]);
+        let now = modified(&dir.path().join("projects/-w-capcom/s-1/subagents/agent-a1.jsonl"));
+        let list = subagents(dir.path(), "s-1", now);
+        assert_eq!(list.iter().map(|s| (s.id.as_str(), s.running)).collect::<Vec<_>>(), vec![("a2", true), ("a1", false)]);
+        assert_eq!(list[1].kind, "Explore");
+        assert_eq!(list[1].description, "Scan things");
+        assert!(subagents(dir.path(), "s-1", now + SUBAGENT_KEPT + SUBAGENT_QUIET).is_empty(), "long quiet: stopped and too old to list");
+        assert!(subagents(dir.path(), "../s-1", now).is_empty());
+    }
+
+    #[test]
+    fn a_subagents_transcript_is_simplified_for_reading() {
+        let dir = tempfile::tempdir().unwrap();
+        subagent(dir.path(), "s-1", "a1", json!({}), &[
+            json!({ "type": "user", "message": { "role": "user", "content": "Find the leak" } }),
+            json!({ "type": "assistant", "message": { "role": "assistant", "content": [{ "type": "text", "text": "<system-reminder>\nhush\n</system-reminder>" }, { "type": "text", "text": "Looking." }, { "type": "tool_use", "name": "Bash", "input": { "command": "ls" } }] } }),
+            json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "tool_result", "content": [{ "type": "text", "text": "a.rs" }] }] } }),
+            json!({ "type": "summary" }),
+            json!({ "type": "assistant", "message": { "role": "assistant", "content": [{ "type": "tool_use", "name": "SubagentHandback", "input": { "message": "Found it." } }] } }),
+        ]);
+        let t = subagent_transcript(dir.path(), "s-1", "a1").unwrap();
+        let kinds: Vec<(&str, &str)> = t.iter().map(|e| (e["kind"].as_str().unwrap(), e["text"].as_str().unwrap())).collect();
+        assert_eq!(kinds, vec![("prompt", "Find the leak"), ("text", "Looking."), ("tool", "Bash · ls"), ("result", "a.rs"), ("report", "Found it.")]);
+        assert!(subagent_transcript(dir.path(), "s-1", "nope").is_none());
+        assert!(subagent_transcript(dir.path(), "s-1", "../a1").is_none());
     }
 }
