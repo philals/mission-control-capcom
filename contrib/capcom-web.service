@@ -11,12 +11,15 @@ After=network-online.target
 [Service]
 ExecStart=%h/.local/bin/capcom web --port 7878
 Environment=CAPCOM_ROOT=%h/stories
+# the folder new Claude Code sessions started from the page begin in
+Environment=CAPCOM_WORKDIR=%h/code
 Restart=on-failure
 RestartSec=10
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=read-only
-ReadWritePaths=%h/.cache/capcom
+# what the page changes: its cache, the settings it shares with capcom-tui and the stories folder
+ReadWritePaths=%h/.cache/capcom %h/.config/capcom %h/stories
 Nice=10
 
 [Install]

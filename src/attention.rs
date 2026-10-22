@@ -1,5 +1,5 @@
 //! Whether anyone is looking at the board. When nobody is, GitHub is asked about far less often.
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,8 +14,8 @@ pub struct Attention {
     herdr: AtomicBool,
     /// The user's switch: off means always poll at the normal pace.
     slow_when_away: AtomicBool,
-    /// The least the feeds wait while away.
-    away_minimum: Duration,
+    /// The least the feeds wait while away, in seconds.
+    away_minimum: AtomicU64,
 }
 
 impl Attention {
@@ -25,7 +25,7 @@ impl Attention {
 
     /// Like `new`, with a different least wait while away (a page nobody has open can wait very long).
     pub fn waiting_at_least(away_minimum: Duration) -> Arc<Attention> {
-        Arc::new(Attention { terminal: AtomicBool::new(true), herdr: AtomicBool::new(true), slow_when_away: AtomicBool::new(true), away_minimum })
+        Arc::new(Attention { terminal: AtomicBool::new(true), herdr: AtomicBool::new(true), slow_when_away: AtomicBool::new(true), away_minimum: AtomicU64::new(away_minimum.as_secs()) })
     }
 
     pub fn set_terminal(&self, focused: bool) {
@@ -34,6 +34,11 @@ impl Attention {
 
     pub fn set_herdr(&self, focused: bool) {
         self.herdr.store(focused, Ordering::Relaxed);
+    }
+
+    /// Change the least wait while away (a page with notifications on cannot wait half an hour).
+    pub fn set_away_minimum(&self, least: Duration) {
+        self.away_minimum.store(least.as_secs(), Ordering::Relaxed);
     }
 
     pub fn set_slow_when_away(&self, on: bool) {
@@ -52,7 +57,7 @@ impl Attention {
     /// The wait before the next poll: unchanged while looked at, much longer while away.
     pub fn wait(&self, base: Duration) -> Duration {
         if self.away() {
-            base.saturating_mul(AWAY_FACTOR).max(self.away_minimum)
+            base.saturating_mul(AWAY_FACTOR).max(Duration::from_secs(self.away_minimum.load(Ordering::Relaxed)))
         } else {
             base
         }
@@ -87,6 +92,15 @@ mod tests {
         a.set_terminal(false);
         assert_eq!(a.wait(base), Duration::from_secs(1800));
         assert_eq!(a.wait(Duration::from_secs(600)), Duration::from_secs(2400), "four times a long base is still longer");
+    }
+
+    #[test]
+    fn the_least_wait_can_change_while_running() {
+        let a = Attention::waiting_at_least(Duration::from_secs(1800));
+        a.set_terminal(false);
+        assert_eq!(a.wait(Duration::from_secs(5)), Duration::from_secs(1800));
+        a.set_away_minimum(Duration::from_secs(120));
+        assert_eq!(a.wait(Duration::from_secs(5)), Duration::from_secs(120));
     }
 
     #[test]

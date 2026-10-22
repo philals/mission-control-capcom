@@ -161,6 +161,12 @@ fn ticks_are_kept_in_the_settings_file_the_tui_reads_and_start_afresh_when_ticke
 #[test]
 fn settings_are_changed_one_by_one_and_unknown_ones_are_refused() {
     let r = rig();
+    r.server.attention.set_terminal(false);
+    assert_eq!(r.server.attention.wait(Duration::from_secs(5)), AWAY_WAIT);
+    act(&r, json!({ "action": "settings", "key": "notify", "value": true }));
+    assert_eq!(r.server.attention.wait(Duration::from_secs(5)), NOTIFY_AWAY, "notifications on: it cannot wait half an hour");
+    act(&r, json!({ "action": "settings", "key": "notify", "value": false }));
+    assert_eq!(r.server.attention.wait(Duration::from_secs(5)), AWAY_WAIT);
     for key in ["autofix", "autoreview", "auto_sync", "notify", "slow_when_away"] {
         assert_eq!(act(&r, json!({ "action": "settings", "key": key, "value": true })).1["ok"], true, "{key}");
     }
