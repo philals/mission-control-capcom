@@ -64,6 +64,15 @@ enum Cmd {
         /// Command that opens a link when you click one on the page (default: xdg-open, so your default browser)
         #[arg(long, env = "CAPCOM_BROWSER")]
         browser: Option<String>,
+        /// Folder new Claude Code sessions started from the page begin in (default: the current folder)
+        #[arg(long, env = "CAPCOM_WORKDIR")]
+        workdir: Option<PathBuf>,
+        /// Extra repos (owner/name, comma separated) to look for your manual workflow runs in
+        #[arg(long, env = "CAPCOM_DEPLOY_REPOS", value_delimiter = ',')]
+        deploy_repos: Vec<String>,
+        /// Do not fetch your manual workflow runs from GitHub
+        #[arg(long)]
+        no_runs: bool,
     },
     /// Print the stories folder in use (from --root or CAPCOM_ROOT)
     Root,
@@ -287,27 +296,44 @@ fn main() -> Result<()> {
             print(&json!({ "key": key, "dir": store::story_dir(root, &key)? }))
         }
         Cmd::Note { .. } => unreachable!("handled before the root is needed"),
-        Cmd::Web { port, pr_query, no_prs, browser } => {
-            let (listener, port) = capcom::web::bind(port)?;
-            let server = capcom::web::Server::new(root.to_path_buf(), port);
-            server.set_opener(std::sync::Arc::new(capcom::web::SystemBrowser { command: browser }));
+        Cmd::Web { port, pr_query, no_prs, browser, workdir, deploy_repos, no_runs } => {
+            use capcom::{cache, fixstate, prs, runs, settings, web};
+            use std::sync::Arc;
+            let (listener, port) = web::bind(port)?;
+            let server = web::Server::new(root.to_path_buf(), port);
+            server.set_opener(Arc::new(web::SystemBrowser { command: browser }));
+            server.set_tools(web::Tools::real());
+            server.set_workdir(workdir.or_else(|| std::env::current_dir().ok()).unwrap_or_default());
+            server.set_extra_repos(deploy_repos);
+            server.load_settings(settings::default_path());
+            let cache_dir = cache::Cache::default_dir();
+            server.load_durations(cache_dir.as_ref().map(|d| d.join("check-durations.json")));
+            server.set_fix_store(cache_dir.clone().map(fixstate::Store::new));
+            let shared = || cache::Cache::default_dir().and_then(cache::Cache::open);
             if !no_prs {
-                let cadence = capcom::prs::Cadence::default();
-                let live: std::sync::Arc<dyn capcom::prs::PrSource> = std::sync::Arc::new(capcom::prs::GhSource::new(pr_query.clone()));
-                let source: std::sync::Arc<dyn capcom::prs::PrSource> = match capcom::cache::Cache::default_dir().and_then(capcom::cache::Cache::open) {
-                    Some(cache) => std::sync::Arc::new(capcom::prs::SharedSource::new(live, cache, &pr_query, cadence)),
+                let cadence = prs::Cadence::default();
+                let gh = Arc::new(prs::GhSource::new(pr_query.clone()));
+                let live: Arc<dyn prs::PrSource> = gh.clone();
+                let listed: Arc<dyn prs::PrSource> = match shared() {
+                    Some(cache) => Arc::new(prs::SharedSource::new(live, cache, &pr_query, cadence)),
                     None => live,
                 };
-                server.poll(source);
+                server.poll(server.with_followed(gh, listed));
+            }
+            if !no_runs {
+                let cadence = runs::RunCadence::default();
+                let live: Arc<dyn runs::RunSource> = Arc::new(runs::Fetcher::new(runs::GhApi::default(), chrono::Duration::minutes(30)));
+                let source: Arc<dyn runs::RunSource> = match shared() {
+                    Some(cache) => Arc::new(runs::SharedSource { inner: live, cache, cadence }),
+                    None => live,
+                };
+                server.poll_runs(source);
             }
             if let Some(config) = capcom::session::config_dir() {
-                server.watch_agents(
-                    std::sync::Arc::new(capcom::web::ClaudeSessions { config }),
-                    capcom::notes::dir(),
-                    capcom::web::AGENTS_EVERY,
-                    std::time::Duration::from_secs(1),
-                );
+                server.watch_agents(Arc::new(web::ClaudeSessions { config: config.clone() }), capcom::notes::dir(), web::AGENTS_EVERY, std::time::Duration::from_secs(1));
+                server.watch_sessions(config, cache_dir.map(|d| d.join("web-links.json")), std::time::Duration::from_secs(30), std::time::Duration::from_secs(1));
             }
+            server.watch_pr_states(std::time::Duration::from_secs(1));
             print(&json!({ "url": format!("http://127.0.0.1:{port}") }))?;
             server.serve(listener);
             Ok(())

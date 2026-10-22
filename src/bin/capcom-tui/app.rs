@@ -278,14 +278,7 @@ pub struct RunData {
     pub disabled: bool,
 }
 
-/// What to ask a PR's agent to fix, and why.
-pub struct FixNeed {
-    /// The state of the PR that is being asked about: the same state is never asked twice.
-    pub fingerprint: String,
-    pub why: String,
-    /// Nothing is wrong but the branch being behind its base.
-    pub only_behind: bool,
-}
+pub use capcom::autopilot::FixNeed;
 
 /// Asking an agent only to bring a branch up to date waits this long after the last such ask, so a busy
 /// repo's every merge does not start a new round.
@@ -1271,45 +1264,7 @@ impl App {
     /// settled) and Copilot's unresolved comments (once its review is in). `(fingerprint, why)`.
     /// What is wrong with a PR that its agent should be asked to fix, if anything.
     pub fn fix_needed(pr: &PullRequest) -> Option<FixNeed> {
-        use crate::prs::{CopilotState, MergeState};
-        if !pr.managed() {
-            return None;
-        }
-        let mut failing: Vec<String> = pr.fixable_failures().iter().map(|c| c.name.clone()).collect();
-        let mut threads: Vec<String> =
-            if pr.feedback.copilot == CopilotState::Requested { Vec::new() } else { pr.copilot_open().iter().map(|t| t.id.clone()).collect() };
-        let conflicts = pr.feedback.merge == MergeState::Conflicting;
-        // Behind the base: bring it up to date, but not while checks run (a push cancels them) and not on a
-        // PR whose merge bot keeps it up to date already.
-        let behind = pr.feedback.merge == MergeState::Behind && pr.settled() && !pr.bot_updates();
-        if failing.is_empty() && threads.is_empty() && !conflicts && !behind {
-            return None;
-        }
-        failing.sort();
-        threads.sort();
-        let mut why = Vec::new();
-        if !failing.is_empty() {
-            why.push(format!("{} failing check{}", failing.len(), if failing.len() == 1 { "" } else { "s" }));
-        }
-        if !threads.is_empty() {
-            why.push(format!("{} unresolved Copilot comment{}", threads.len(), if threads.len() == 1 { "" } else { "s" }));
-        }
-        if conflicts {
-            why.push("merge conflicts with the default branch".to_string());
-        }
-        if behind {
-            why.push("the branch is behind the default branch".to_string());
-        }
-        let state = format!("{}|{}|{}", pr.feedback.head, failing.join(","), threads.join(","));
-        // a conflict, or being behind, is its own state, so clearing it (or a new one) is a new ask; neither leaves the key as it was
-        let fingerprint = if conflicts {
-            format!("{state}|conflict")
-        } else if behind {
-            format!("{state}|behind")
-        } else {
-            state
-        };
-        Some(FixNeed { fingerprint, why: why.join(" and "), only_behind: behind && failing.is_empty() && threads.is_empty() })
+        capcom::autopilot::fix_needed(pr)
     }
 
     /// Auto-fix is on for this PR and the agent has been asked about what is wrong with it.
@@ -1908,6 +1863,7 @@ impl App {
             pasted_prs: self.pasted.clone(),
             agents_on: self.agents_on,
             agents_width: self.agents_width,
+            ..Settings::default()
         }
     }
 
@@ -1939,7 +1895,10 @@ impl App {
     /// Remember the sizes; failing to write them never gets in the way.
     fn save_settings(&self) {
         if let Some(path) = &self.settings_path {
-            let _ = settings::save(path, &self.settings());
+            // what only the web page sets stays as it is in the file
+            let mut mine = self.settings();
+            mine.notify = settings::load(path).notify;
+            let _ = settings::save(path, &mine);
         }
     }
 

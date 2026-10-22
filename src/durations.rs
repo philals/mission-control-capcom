@@ -91,6 +91,16 @@ impl Durations {
     }
 }
 
+/// How long the running checks of a PR have left, the longest of them, when they have a usual time.
+pub fn time_left(pr: &PullRequest, now: chrono::DateTime<Utc>, durations: &Durations) -> Option<i64> {
+    pr.checks
+        .iter()
+        .filter(|c| !c.external && c.state == CheckState::Running)
+        .filter_map(|c| Some(durations.estimate(&pr.repo, c)? - check_seconds(c, now)?))
+        .filter(|left| *left > 0)
+        .max()
+}
+
 /// `~4m`, `~45s` or `~1h 20m`: a rounded figure for an estimate.
 pub fn approx(seconds: i64) -> String {
     match seconds {

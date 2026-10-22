@@ -6,6 +6,7 @@ use crate::attention::Attention;
 use crate::model::{Board, Status, Task};
 use crate::prs::{self, CheckState, CopilotState, MergeState, PrMsg, PrSource, PullRequest, Review, Waiting};
 use crate::notes::{self, Note};
+use crate::session::PrSession;
 use crate::store;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -17,6 +18,18 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+mod actions;
+mod autopilot;
+mod engine;
+mod runs_poll;
+mod states;
+#[cfg(test)]
+mod tests_more;
+mod view;
+pub use engine::Tools;
+use engine::Engine;
+use view::*;
 
 const INDEX: &str = include_str!("web/index.html");
 const SCRIPT: &str = include_str!("web/app.js");
@@ -93,29 +106,6 @@ impl Opener for SystemBrowser {
     }
 }
 
-/// Every link the page offers: what `/open` is willing to open.
-fn shown_urls(value: &Value, out: &mut std::collections::HashSet<String>) {
-    match value {
-        Value::Object(map) => {
-            for (key, v) in map {
-                if key == "deepLink" && v.as_str().is_some_and(|u| u.starts_with("claude://code/continue?session=local_")) {
-                    out.insert(v.as_str().unwrap_or_default().to_string());
-                } else if (key == "url" || key == "jiraUrl") && v.as_str().is_some_and(|u| u.starts_with("https://")) {
-                    let url = v.as_str().unwrap_or_default();
-                    out.insert(url.to_string());
-                    if map.contains_key("number") {
-                        out.insert(format!("{url}/files"));
-                    }
-                } else {
-                    shown_urls(v, out);
-                }
-            }
-        }
-        Value::Array(items) => items.iter().for_each(|v| shown_urls(v, out)),
-        _ => {}
-    }
-}
-
 /// The Claude Code sessions on this machine, the terminal program's and the desktop app's.
 pub struct ClaudeSessions {
     pub config: PathBuf,
@@ -129,6 +119,8 @@ impl AgentSource for ClaudeSessions {
 
 pub struct Server {
     root: PathBuf,
+    eng: Engine,
+    me: std::sync::Weak<Server>,
     prs: Mutex<PrData>,
     live: Mutex<Live>,
     opener: Mutex<Option<Arc<dyn Opener>>>,
@@ -139,212 +131,6 @@ pub struct Server {
     wake: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     connections: AtomicUsize,
     port: u16,
-}
-
-fn same_url(a: &str, b: &str) -> bool {
-    a.trim_end_matches('/').eq_ignore_ascii_case(b.trim_end_matches('/'))
-}
-
-fn check_state(state: CheckState) -> &'static str {
-    match state {
-        CheckState::Queued => "queued",
-        CheckState::Running => "running",
-        CheckState::Passed => "passed",
-        CheckState::Failed => "failed",
-        CheckState::Cancelled => "cancelled",
-        CheckState::Skipped => "skipped",
-    }
-}
-
-/// A step on a PR's way to a merge: ready, CI, Copilot, its conversations, approval, the merge.
-fn rail(pr: &PullRequest) -> Vec<Value> {
-    let c = pr.counts();
-    let failed = pr.real_failures().len();
-    let step = |state: &str, text: String| json!({ "state": state, "text": text });
-    let ci = if failed > 0 {
-        step("wrong", format!("CI {failed} failed"))
-    } else if pr.is_busy() {
-        step("going", "CI running".into())
-    } else if c.passed > 0 {
-        step("done", "CI".into())
-    } else {
-        step("pending", "CI no checks".into())
-    };
-    let (copilot, threads) = match pr.feedback.copilot {
-        CopilotState::None => (step("pending", "copilot".into()), step("pending", "threads".into())),
-        CopilotState::Requested => (step("going", "copilot".into()), step("pending", "threads".into())),
-        CopilotState::Reviewed => (
-            step("done", "copilot".into()),
-            match pr.copilot_open().len() {
-                0 => step("done", "threads".into()),
-                n => step("wrong", format!("threads {n}")),
-            },
-        ),
-    };
-    let approval = match pr.review {
-        Review::Approved => step("done", "approved".into()),
-        Review::ChangesRequested => step("wrong", "changes requested".into()),
-        Review::Required | Review::None => step("pending", "approved".into()),
-    };
-    let merge = match pr.feedback.merge {
-        MergeState::Conflicting => step("wrong", "conflicts".into()),
-        MergeState::Behind => step("going", "behind".into()),
-        MergeState::Clean => step("done", "merge".into()),
-        MergeState::Unknown => step("pending", "merge".into()),
-    };
-    let ready = if pr.is_draft { step("pending", "draft".into()) } else { step("done", "ready".into()) };
-    let mut steps = vec![ready, ci, copilot, threads, approval];
-    if !pr.automerge_labels().is_empty() {
-        steps.push(if pr.automerge_on() { step("going", "automerge on".into()) } else { step("pending", "automerge".into()) });
-    }
-    steps.push(merge);
-    steps
-}
-
-fn pr_view(pr: &PullRequest, boards: &[Board]) -> Value {
-    let tag = boards.iter().find_map(|b| {
-        b.tasks.iter().find(|t| t.prs.iter().any(|p| same_url(&p.url, &pr.url))).map(|t| json!({ "story": b.story.key, "task": t.id }))
-    });
-    let c = pr.counts();
-    let waiting = match pr.waiting_for() {
-        Some(Waiting::Reviewer) => "reviewer",
-        Some(Waiting::Merge) => "merge",
-        Some(Waiting::Nothing) => "green",
-        None => "",
-    };
-    json!({
-        "repo": pr.repo,
-        "number": pr.number,
-        "title": pr.title,
-        "url": pr.url,
-        "branch": pr.feedback.branch,
-        "draft": pr.is_draft,
-        "mine": pr.feedback.mine,
-        "pasted": pr.feedback.pasted,
-        "labels": pr.labels,
-        "review": match pr.review { Review::Approved => "approved", Review::ChangesRequested => "changes", Review::Required => "required", Review::None => "none" },
-        "comments": pr.comments,
-        "createdAt": pr.created_at,
-        "updatedAt": pr.updated_at,
-        "tag": tag,
-        "urgency": pr.urgency(),
-        "red": pr.is_red(),
-        "waiting": waiting,
-        "blocker": pr.merge_blocker(),
-        "rail": rail(pr),
-        "counts": { "passed": c.passed, "failed": c.failed, "running": c.running, "queued": c.queued, "skipped": c.skipped, "cancelled": c.cancelled },
-        "checks": pr.ordered_checks().iter().map(|k| json!({
-            "label": k.label(),
-            "state": check_state(k.state),
-            "startedAt": k.started_at,
-            "completedAt": k.completed_at,
-            "url": k.url,
-            "external": k.external,
-        })).collect::<Vec<_>>(),
-    })
-}
-
-fn task_view(board: &Board, task: &Task) -> Value {
-    let done = |id: &str| board.task(id).is_some_and(|t| t.status == Status::Done);
-    let waiting_on: Vec<&String> = task.depends_on.iter().filter(|d| !done(d)).collect();
-    json!({
-        "id": task.id,
-        "title": task.title,
-        "type": task.kind.as_str(),
-        "status": task.status.as_str(),
-        "blocked": task.blocked.as_ref().map(|b| b.reason.clone()),
-        "dependsOn": task.depends_on,
-        "waitingOn": waiting_on,
-        "repos": task.repos,
-        "prs": task.prs.iter().map(|p| json!({ "repo": p.repo, "url": p.url, "state": p.state.as_str() })).collect::<Vec<_>>(),
-        "working": task.agent.is_some(),
-    })
-}
-
-/// Everything the page draws: the boards, and your open PRs, newest first.
-fn state(root: &std::path::Path, data: &PrData, live: &Live, now: DateTime<Utc>) -> Value {
-    let mut boards = Vec::new();
-    let mut broken = Vec::new();
-    for key in store::list_keys(root).unwrap_or_default() {
-        match store::load(root, &key) {
-            Ok(board) => boards.push(board),
-            Err(e) => broken.push(json!({ "key": key, "error": format!("{e:#}") })),
-        }
-    }
-    let stories: Vec<Value> = boards
-        .iter()
-        .map(|b| {
-            json!({
-                "key": b.story.key,
-                "title": b.story.title,
-                "status": b.story.status.as_str(),
-                "jiraUrl": b.story.jira_url,
-                "tasks": b.tasks.iter().map(|t| task_view(b, t)).collect::<Vec<_>>(),
-            })
-        })
-        .collect();
-    let mut order: Vec<&PullRequest> = data.items.iter().collect();
-    order.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    let red = data.items.iter().filter(|p| p.is_red()).count();
-    let waiting = data.items.iter().filter(|p| p.waiting_for() == Some(Waiting::Reviewer)).count();
-    json!({
-        "now": now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-        "stories": stories,
-        "broken": broken,
-        "prs": order.iter().map(|p| pr_view(p, &boards)).collect::<Vec<_>>(),
-        "prError": data.error,
-        "prUpdated": data.updated.map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
-        "loading": data.loading,
-        "red": red,
-        "awaitingReview": waiting,
-        "agents": agents_view(live, &boards, now),
-    })
-}
-
-fn agents_view(live: &Live, boards: &[Board], now: DateTime<Utc>) -> Value {
-    let stories: Vec<(String, String)> = boards.iter().map(|b| (b.story.key.clone(), agents::short_name(&b.story.title))).collect();
-    let parents = agents::parents(&live.agents, &[]);
-    let note_of = |a: &AgentInfo| a.session.as_deref().and_then(|s| live.notes.iter().position(|n| n.session == s));
-    let needs = |a: &AgentInfo| agents::needs_you(a.status, note_of(a).map(|i| &live.notes[i]));
-    let running: std::collections::HashSet<&str> = live.agents.iter().filter_map(|a| a.session.as_deref()).collect();
-    let earlier = notes::earlier(&live.notes, &running, now, EARLIER_DAYS, EARLIER_MAX);
-    let groups: Vec<Value> = agents::groups(&live.agents, &stories, &parents)
-        .iter()
-        .map(|g| {
-            json!({
-                "label": g.label,
-                "story": g.story,
-                "entries": g.entries.iter().map(|e| {
-                    let a = &live.agents[e.index];
-                    let needs_you = needs(a);
-                    json!({
-                        "pane": a.pane,
-                        "label": e.label,
-                        "depth": e.depth,
-                        "status": if needs_you { AgentStatus::Blocked.word() } else { a.status.word() },
-                        "icon": if needs_you { AgentStatus::Blocked.icon() } else { a.status.icon() },
-                        "state": if needs_you { "needs" } else { match a.status { AgentStatus::Working => "working", AgentStatus::Done => "done", _ => "idle" } },
-                        "topic": a.topic,
-                        "source": match crate::claude::entrypoint_of(&a.pane) { "claude-desktop" => "desktop", other => other },
-                        "deepLink": crate::claude::desktop_link(&a.pane),
-                        "note": note_of(a),
-                    })
-                }).collect::<Vec<_>>(),
-            })
-        })
-        .collect();
-    let needing = live.agents.iter().filter(|a| needs(a)).count() + earlier.iter().filter(|i| live.notes[**i].needs_you).count();
-    json!({
-        "error": live.error,
-        "groups": groups,
-        "earlier": earlier,
-        "notes": live.notes.iter().map(|n| json!({
-            "session": n.session, "task": n.task, "progress": n.progress, "waiting": n.waiting, "needsYou": n.needs_you, "next": n.next, "updatedAt": n.updated_at,
-        })).collect::<Vec<_>>(),
-        "count": live.agents.len(),
-        "working": live.agents.iter().filter(|a| a.status == AgentStatus::Working).count(),
-        "needsYou": needing,
-    })
 }
 
 struct Reply {
@@ -359,8 +145,10 @@ fn reply(status: &'static str, content_type: &'static str, body: impl Into<Vec<u
 
 impl Server {
     pub fn new(root: PathBuf, port: u16) -> Arc<Server> {
-        Arc::new(Server {
+        Arc::new_cyclic(|me| Server {
             root,
+            eng: Engine::default(),
+            me: me.clone(),
             prs: Mutex::new(PrData { loading: true, ..PrData::default() }),
             live: Mutex::new(Live::default()),
             opener: Mutex::new(None),
@@ -387,6 +175,9 @@ impl Server {
                         data.loading = false;
                         match result {
                             Ok(items) => {
+                                drop(data);
+                                me.on_prs(&items);
+                                data = me.prs.lock().unwrap_or_else(|e| e.into_inner());
                                 data.items = items;
                                 data.error = None;
                                 data.updated = Some(Utc::now());
@@ -426,10 +217,8 @@ impl Server {
             return plain("400 Bad Request", "need a url");
         };
         let shown = {
-            let data = self.prs.lock().unwrap_or_else(|e| e.into_inner());
-            let live = self.live.lock().unwrap_or_else(|e| e.into_inner());
             let mut urls = std::collections::HashSet::new();
-            shown_urls(&state(&self.root, &data, &live, Utc::now()), &mut urls);
+            shown_urls(&self.state_json(Utc::now()), &mut urls);
             urls
         };
         if url.len() > 2000 || url.chars().any(|c| c.is_whitespace() || c.is_control()) || !shown.contains(&url) {
@@ -504,7 +293,7 @@ impl Server {
         host == format!("127.0.0.1:{}", self.port) || host == format!("localhost:{}", self.port)
     }
 
-    fn route(&self, path: &str) -> Reply {
+    fn route(&self, path: &str, query: &str) -> Reply {
         match path {
             "/" | "/index.html" => reply("200 OK", "text/html; charset=utf-8", INDEX),
             "/app.js" => reply("200 OK", "text/javascript; charset=utf-8", SCRIPT),
@@ -512,15 +301,51 @@ impl Server {
             "/favicon.svg" | "/favicon.ico" => reply("200 OK", "image/svg+xml", FAVICON),
             "/api/state" => {
                 self.looked();
-                let value = {
-                    let data = self.prs.lock().unwrap_or_else(|e| e.into_inner());
-                    let live = self.live.lock().unwrap_or_else(|e| e.into_inner());
-                    state(&self.root, &data, &live, Utc::now())
-                };
+                let value = self.state_json(Utc::now());
                 reply("200 OK", "application/json", serde_json::to_vec(&value).unwrap_or_default())
             }
+            "/api/task" => self.task_detail(query),
             _ => reply("404 Not Found", "text/plain; charset=utf-8", "not found"),
         }
+    }
+
+    /// What a task's own file says, for its sheet: `/api/task?story=PROJ-1&id=T2`.
+    fn task_detail(&self, query: &str) -> Reply {
+        let param = |name: &str| query.split('&').find_map(|kv| kv.split_once('=').filter(|(k, _)| *k == name).map(|(_, v)| v.to_string())).unwrap_or_default();
+        let (key, id) = (param("story"), param("id"));
+        let safe = |t: &str| !t.is_empty() && t.len() <= 64 && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if !safe(&key) || !safe(&id) {
+            return reply("400 Bad Request", "text/plain; charset=utf-8", "need story and id");
+        }
+        let Ok(board) = store::load(&self.root, &key) else {
+            return reply("404 Not Found", "text/plain; charset=utf-8", "no such story");
+        };
+        let Some(task) = board.task(&id) else {
+            return reply("404 Not Found", "text/plain; charset=utf-8", "no such task");
+        };
+        let file = std::path::Path::new(&task.file);
+        let doc = if file.is_absolute() || file.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            None
+        } else {
+            std::fs::read_to_string(self.root.join(&key).join(file)).ok()
+        };
+        let summary = match &doc {
+            Some(doc) => crate::taskdoc::summary(doc, task.status),
+            None => crate::taskdoc::Summary { label: "Description", body: "The task file could not be read.".to_string() },
+        };
+        let worktrees = doc.as_deref().is_some_and(crate::finish::mentions_worktrees);
+        let body = json!({
+            "id": task.id,
+            "title": task.title,
+            "status": task.status.as_str(),
+            "label": summary.label,
+            "body": summary.body,
+            "file": task.file,
+            "agent": task.agent.as_ref().map(|a| json!({ "pane": a.pane, "skill": a.skill, "startedAt": a.started_at })),
+            "sessions": task.sessions.len(),
+            "worktrees": worktrees,
+        });
+        reply("200 OK", "application/json", serde_json::to_vec(&body).unwrap_or_default())
     }
 
     /// The answer to one request, as the bytes to send back.
@@ -533,14 +358,17 @@ impl Server {
         let headers: Vec<(String, String)> = lines.filter_map(|l| l.split_once(':')).map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string())).collect();
         let host = headers.iter().find(|(k, _)| k == "host").map(|(_, v)| v.as_str()).unwrap_or_default();
         let path = target.split(['?', '#']).next().unwrap_or("/");
+        let query = target.split('#').next().and_then(|t| t.split_once('?')).map_or("", |(_, q)| q);
         let result = if !self.host_ok(host) {
             reply("403 Forbidden", "text/plain; charset=utf-8", "wrong host")
         } else if method == "POST" && path == "/open" {
             self.open(&headers, body)
+        } else if method == "POST" && path == "/api/do" {
+            self.do_request(&headers, body)
         } else if method != "GET" && method != "HEAD" {
             reply("405 Method Not Allowed", "text/plain; charset=utf-8", "read-only")
         } else {
-            self.route(path)
+            self.route(path, query)
         };
         let mut out = format!(
             "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: {CSP}\r\nConnection: close\r\n\r\n",
@@ -815,7 +643,7 @@ mod tests {
         pr.feedback.mine = true;
         *s.prs.lock().unwrap() = PrData { items: vec![pr], ..PrData::default() };
         let mut urls = std::collections::HashSet::new();
-        shown_urls(&state(&s.root, &s.prs.lock().unwrap(), &s.live.lock().unwrap(), Utc::now()), &mut urls);
+        shown_urls(&s.state_json(Utc::now()), &mut urls);
         for want in ["https://github.com/acme/widgets/pull/12", "https://github.com/acme/widgets/pull/12/files", "https://github.com/acme/widgets/actions/runs/1/job/2", "https://jira.example/browse/PROJ-1"] {
             assert!(urls.contains(want), "{want} missing from {urls:?}");
         }
@@ -896,7 +724,7 @@ mod tests {
     fn it_answers_over_a_real_socket_and_refuses_a_slow_or_huge_request() {
         let (_root, s) = server();
         let (listener, port) = bind(0).unwrap();
-        let s = Arc::new(Server { root: s.root.clone(), prs: Mutex::new(PrData::default()), live: Mutex::new(Live::default()), opener: Mutex::new(None), last_open: Mutex::new(None), viewed: AtomicI64::new(0), attention: Attention::new(), wake: Mutex::new(None), connections: AtomicUsize::new(0), port });
+        let s = Server::new(s.root.clone(), port);
         let server = s.clone();
         std::thread::spawn(move || server.serve(listener));
         let mut conn = TcpStream::connect(("127.0.0.1", port)).unwrap();
