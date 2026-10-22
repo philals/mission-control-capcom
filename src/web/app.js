@@ -47,7 +47,7 @@ function toast(text) {
 
 // A link opens in your own browser: the server starts it. If that cannot be done, the browser
 // showing this page opens the link itself.
-async function openExternal(href) {
+async function openExternal(href, what) {
   try {
     const response = await fetch("/open", {
       method: "POST",
@@ -55,7 +55,7 @@ async function openExternal(href) {
       body: JSON.stringify({ url: href }),
     });
     if (response.status === 204) {
-      toast("opened in your browser");
+      toast(what || "opened in your browser");
       return;
     }
   } catch (_) {}
@@ -489,6 +489,13 @@ function renderAgents() {
       const row = el("div", "agent " + e.state);
       row.style.paddingLeft = `${e.depth * 14}px`;
       add(row, el("span", "icon", (e.depth ? "└ " : "") + e.icon), el("span", "label", e.label), e.source ? el("span", "src", e.source) : null, el("span", "word", e.status));
+      if (e.deepLink) {
+        row.classList.add("clickable");
+        row.title = "open this session in Claude Code desktop";
+        row.onclick = () => openExternal(e.deepLink, "opening in Claude Code desktop");
+      } else if (e.source === "cli") {
+        row.title = "a terminal session: it can only be reached in its terminal";
+      }
       panel.append(row);
       if (e.note !== null && a.notes[e.note]) panel.append(noteBlock(a.notes[e.note], e.state === "needs"));
       else if (e.topic && e.topic !== e.label) panel.append(el("div", "dim", e.topic));
