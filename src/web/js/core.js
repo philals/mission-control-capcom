@@ -15,9 +15,11 @@ const ui = {
   opening: new Set(),
   allPrs: false,
   showDone: false,
+  view: "board", // on a narrow screen, which console shows
 };
 try {
   ui.showDone = localStorage.getItem("capcom.showDone") === "1";
+  ui.view = localStorage.getItem("capcom.view") || "board";
 } catch (_) {}
 
 function el(tag, cls, text) {
@@ -173,6 +175,7 @@ function tick() {
     else if (n.dataset.kind === "short") n.textContent = shortAgo(iso);
     else if (n.dataset.kind === "run") n.textContent = runningText(iso, Number(n.dataset.usual) || 0);
   }
+  if (typeof tickClock === "function") tickClock();
 }
 
 // ---- clipboard ----------------------------------------------------------------------------

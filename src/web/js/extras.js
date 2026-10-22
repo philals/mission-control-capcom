@@ -58,7 +58,7 @@ function settingsDialog() {
     for (const [key, label, help, get] of SETTINGS) {
       const row = el("div", "setting");
       const on = get(data.settings);
-      add(row, btn(on ? "[x]" : "[ ]", () => act("settings", { key, value: !on }), on ? "tick on" : "tick"), add(el("div", "setting-text"), el("div", "bold", label), el("div", "dim", help)));
+      add(row, lampButton("", on, () => act("settings", { key, value: !on }), on ? "on: click to turn off" : "off: click to turn on"), add(el("div", "setting-text"), el("div", "bold", label), el("div", "dim", help)));
       body.append(row);
     }
     add(body, el("p", "dim", `New Claude Code sessions start in ${data.workdir}. These settings are shared with capcom-tui.`));
@@ -68,7 +68,7 @@ function settingsDialog() {
 
 function eventsDialog() {
   openModal("What capcom did", () => {
-    const body = el("div", "events");
+    const body = el("div", "events paper");
     if (data.events.length === 0) body.append(el("p", "dim", "Nothing yet. Updating a behind branch, asking Copilot, finishing runs and PRs that need you are listed here."));
     for (const e of data.events) add(body, add(el("div", "event"), stamp(el("span", "dim"), e.at, "short"), el("span", "", " " + e.text)));
     return { body, foot: [btn("Close", closeModal, "primary")] };
@@ -152,7 +152,7 @@ function paletteItems() {
   push("What capcom did by itself", "", eventsDialog);
   push("Keys and what things mean", "?", helpDialog);
   for (const s of data.stories) push(`Open story ${s.key}: ${s.title}`, "", () => (location.hash = `#/story/${encodeURIComponent(s.key)}`));
-  for (const p of data.prs) if (!pr || p.url !== pr.url) push(`Select ${prName(p)}: ${p.title}`, "", () => { ui.selPr = p.url; lastSig.prs = null; render(); scrollToSelected(); });
+  for (const p of data.prs) if (!pr || p.url !== pr.url) push(`Select ${prName(p)}: ${p.title}`, "", () => { ui.selPr = p.url; setView("prs"); scrollToSelected(); });
   for (const g of data.agents.groups) for (const e of g.entries) if (e.deepLink) push(`Go to agent ${e.label} (${e.status})`, "", () => openExternal(e.deepLink, "asked Claude Code desktop to open it"));
   for (const run of data.runs.items) push(`Details of run ${run.repo} ${run.name} (${run.state})`, "", () => runSheet(run.repo, run.id));
   return items;
@@ -318,6 +318,47 @@ function sig(value) {
   return JSON.stringify(value);
 }
 
+// On a narrow screen one console shows at a time; the switch bar at the bottom chooses.
+function setView(view) {
+  ui.view = view;
+  try {
+    localStorage.setItem("capcom.view", view);
+  } catch (_) {}
+  lastSig.tabs = null;
+  document.querySelector("main").dataset.view = view;
+  render();
+  window.scrollTo(0, 0);
+}
+
+function renderTabs() {
+  const bar = $("tabs");
+  bar.replaceChildren();
+  const have = { board: true, prs: true, runs: data.runs.on, agents: data.agents.count > 0 || data.agents.earlier.length > 0 };
+  if (!have[ui.view]) ui.view = "board";
+  document.querySelector("main").dataset.view = ui.view;
+  const one = (view, label, count, lamp) => {
+    const b = el("button", ui.view === view ? "sel" : "");
+    b.type = "button";
+    b.hidden = !have[view];
+    add(b, el("span", "lamp" + (lamp ? ` on ${lamp}` : "")), document.createTextNode(count === null ? label : `${label} ${count}`));
+    b.addEventListener("click", () => setView(view));
+    bar.append(b);
+  };
+  one("board", "Stories", data.stories.length, null);
+  one("prs", "PRs", data.prs.length, data.red ? "red" : data.awaitingReview ? "green" : null);
+  one("runs", "Runs", data.runs.items.length, data.runs.items.some((r) => r.active) ? "cyan pulse" : null);
+  one("agents", "Agents", data.agents.count, data.agents.needsYou ? "amber pulse" : null);
+}
+
+// What is scrolled in a console stays where it is when the console is drawn again.
+function keepScroll(id, draw) {
+  const old = $(id).querySelector(":scope > .scroll");
+  const top = old ? old.scrollTop : 0;
+  draw();
+  const now = $(id).querySelector(":scope > .scroll");
+  if (now) now.scrollTop = top;
+}
+
 function render() {
   if (!data) return;
   const header = sig([data.red, data.redWithAutofix, data.awaitingReview, data.prError, data.prUpdated, data.loading, data.agents.needsYou, data.events.length]);
@@ -328,22 +369,27 @@ function render() {
   const agents = sig([data.agents, [...ui.openNotes]]);
   if (agents !== lastSig.agents) {
     lastSig.agents = agents;
-    renderAgents();
+    keepScroll("agents", renderAgents);
   }
   const board = sig([data.stories, data.broken, location.hash, ui.showDone, data.prs.map((p) => [p.url, p.red, p.waiting, p.counts, p.review, p.copilotOpen])]);
   if (board !== lastSig.board) {
     lastSig.board = board;
-    renderBoard();
+    keepScroll("board", renderBoard);
   }
   const prs = sig([data.prs, data.prError, location.hash, ui.allPrs, [...ui.openChecks], ui.selPr]);
   if (prs !== lastSig.prs) {
     lastSig.prs = prs;
-    renderPrs();
+    keepScroll("prs", renderPrs);
   }
   const runs = sig([data.runs, location.hash, ui.allPrs]);
   if (runs !== lastSig.runs) {
     lastSig.runs = runs;
-    renderRuns();
+    keepScroll("runs", renderRuns);
+  }
+  const tabs = sig([ui.view, data.stories.length, data.prs.length, data.red, data.awaitingReview, data.runs.on, data.runs.items.map((r) => r.active), data.agents.count, data.agents.needsYou, data.agents.earlier.length]);
+  if (tabs !== lastSig.tabs) {
+    lastSig.tabs = tabs;
+    renderTabs();
   }
   refreshModal();
   tick();
@@ -375,6 +421,7 @@ window.addEventListener("hashchange", () => {
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) load();
 });
+document.querySelector("main").dataset.view = ui.view;
 setInterval(load, POLL_MS);
 setInterval(tick, 1000);
 load();

@@ -11,6 +11,12 @@ capcom web --no-prs --no-runs
 
 It needs the stories folder (`--root` or `CAPCOM_ROOT`) and the GitHub CLI (`gh`) signed in, like `capcom-tui` (it uses the token `gh auth token` prints). It shares with the TUI the settings file (`~/.config/capcom/tui.json`: the per-PR ticks, the defaults, the PRs and runs you follow), the cache of GitHub answers and the learned check durations, so you can run either, or both.
 
+## The look, and every size
+
+It keeps the TUI's 1960s mission control look, made for a browser: steel-framed consoles with bevels and screws, engraved enamel name plates, backlit lamps (the GO / NO-GO lights, the rail of each PR, the ticks, which are lamp switches), a segmented LED bar for progress, a clock in the top rail, the 1960s go/no-go poll while GitHub's first answer is awaited, and the log on green-bar teletype paper. Type is a condensed grotesque for labels (Eurostile, Bahnschrift or a narrow sans, whatever the machine has) and a monospace for data; no fonts are downloaded.
+
+It lays itself out for the window: at 1900 px and wider, four consoles side by side (agents, stories, pull requests, runs); from 1300 px, three; from 1000 px, two, with the agents under the stories; below that, one console at a time, chosen on the switch bar at the bottom (stories, PRs, runs, agents, each with a lamp that lights for what needs you), with larger touch targets and dialogs that rise from the bottom on a phone. On a screen that is wide and tall enough each console scrolls by itself and keeps its place when the data refreshes.
+
 ## What the page shows
 
 - **Header:** a `GO` or `NO-GO · n red` light (click it to jump to the first red PR), how many PRs wait for a reviewer, how many agents need you, when the PRs were last read, and the buttons `+ follow`, `+ new story`, `log`, `⚙`, `⌘` (the palette) and `?`.
