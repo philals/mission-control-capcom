@@ -5,11 +5,11 @@
 #   systemctl --user daemon-reload && systemctl --user enable --now capcom-web
 # Logs: journalctl --user -u capcom-web
 [Unit]
-Description=capcom web: story boards and open PRs on 127.0.0.1:7878
+Description=capcom web: story boards and open PRs on 127.0.0.1:1969
 After=network-online.target
 
 [Service]
-ExecStart=%h/.local/bin/capcom web --port 7878
+ExecStart=%h/.local/bin/capcom web --port 1969
 Environment=CAPCOM_ROOT=%h/stories
 # the folder new Claude Code sessions started from the page begin in
 Environment=CAPCOM_WORKDIR=%h/code

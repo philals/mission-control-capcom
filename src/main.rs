@@ -52,8 +52,8 @@ enum Cmd {
     },
     /// Serve the boards and your open PRs as a page on localhost (read-only; it polls GitHub itself while a browser is open)
     Web {
-        /// Port on 127.0.0.1 to listen on
-        #[arg(long, env = "CAPCOM_WEB_PORT", default_value_t = 7878)]
+        /// Port on 127.0.0.1 to listen on (1969, the year of the first landing)
+        #[arg(long, env = "CAPCOM_WEB_PORT", default_value_t = 1969)]
         port: u16,
         /// GitHub search for the pull request list (@me is resolved by GitHub)
         #[arg(long, env = "CAPCOM_PR_QUERY", default_value = capcom::prs::DEFAULT_QUERY)]
