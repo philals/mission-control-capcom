@@ -68,11 +68,19 @@ struct Live {
     agents: Vec<AgentInfo>,
     error: Option<String>,
     notes: Vec<Note>,
+    /// Each live session's subagents, by session id.
+    subagents: std::collections::HashMap<String, Vec<crate::claude::Subagent>>,
 }
 
 /// Where the page learns which agents are running.
 pub trait AgentSource: Send + Sync {
     fn agents(&self) -> Result<Vec<AgentInfo>, String>;
+    fn subagents(&self, _session: &str) -> Vec<crate::claude::Subagent> {
+        Vec::new()
+    }
+    fn subagent_transcript(&self, _session: &str, _agent: &str) -> Option<Vec<Value>> {
+        None
+    }
 }
 
 /// Opens a link in the browser you actually use.
@@ -117,6 +125,13 @@ impl AgentSource for ClaudeSessions {
     fn agents(&self) -> Result<Vec<AgentInfo>, String> {
         Ok(crate::claude::live(&self.config))
     }
+    fn subagents(&self, session: &str) -> Vec<crate::claude::Subagent> {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        crate::claude::subagents(&self.config, session, now)
+    }
+    fn subagent_transcript(&self, session: &str, agent: &str) -> Option<Vec<Value>> {
+        crate::claude::subagent_transcript(&self.config, session, agent)
+    }
 }
 
 pub struct Server {
@@ -125,6 +140,7 @@ pub struct Server {
     me: std::sync::Weak<Server>,
     prs: Mutex<PrData>,
     live: Mutex<Live>,
+    source: Mutex<Option<Arc<dyn AgentSource>>>,
     opener: Mutex<Option<Arc<dyn Opener>>>,
     /// The last link opened and when: the same link again within a few seconds is the same click, not a new launch.
     last_open: Mutex<Option<(String, std::time::Instant)>>,
@@ -153,6 +169,7 @@ impl Server {
             me: me.clone(),
             prs: Mutex::new(PrData { loading: true, ..PrData::default() }),
             live: Mutex::new(Live::default()),
+            source: Mutex::new(None),
             opener: Mutex::new(None),
             last_open: Mutex::new(None),
             viewed: AtomicI64::new(0),
@@ -248,6 +265,7 @@ impl Server {
 
     /// Keep the agents and their notes up to date, but only while a page is looking (and once at the start).
     pub fn watch_agents(self: &Arc<Self>, source: Arc<dyn AgentSource>, notes_dir: Option<PathBuf>, every: Duration, tick: Duration) {
+        *self.source.lock().unwrap_or_else(|e| e.into_inner()) = Some(source.clone());
         let me = self.clone();
         std::thread::spawn(move || {
             let mut asked: Option<std::time::Instant> = None;
@@ -256,14 +274,17 @@ impl Server {
                 if (asked.is_none() || me.looking()) && asked.is_none_or(|t| t.elapsed() >= every) {
                     asked = Some(std::time::Instant::now());
                     let result = source.agents();
+                    let subs = result.as_ref().map(|list| list.iter().filter_map(|a| a.session.clone()).map(|s| (source.subagents(&s), s)).filter(|(l, _)| !l.is_empty()).map(|(l, s)| (s, l)).collect()).unwrap_or_default();
                     let mut live = me.live.lock().unwrap_or_else(|e| e.into_inner());
                     match result {
                         Ok(list) => {
                             live.agents = list;
+                            live.subagents = subs;
                             live.error = None;
                         }
                         Err(e) => {
                             live.agents.clear();
+                            live.subagents.clear();
                             live.error = Some(e);
                         }
                     }
@@ -307,7 +328,21 @@ impl Server {
                 reply("200 OK", "application/json", serde_json::to_vec(&value).unwrap_or_default())
             }
             "/api/task" => self.task_detail(query),
+            "/api/subagent" => self.subagent_detail(query),
             _ => reply("404 Not Found", "text/plain; charset=utf-8", "not found"),
+        }
+    }
+
+    /// A subagent's conversation, for its sheet: `/api/subagent?session=…&agent=…`. Only for a session
+    /// that is running now.
+    fn subagent_detail(&self, query: &str) -> Reply {
+        let param = |name: &str| query.split('&').find_map(|kv| kv.split_once('=').filter(|(k, _)| *k == name).map(|(_, v)| v.to_string())).unwrap_or_default();
+        let (session, agent) = (param("session"), param("agent"));
+        let live = self.live.lock().unwrap_or_else(|e| e.into_inner()).agents.iter().any(|a| a.session.as_deref() == Some(session.as_str()));
+        let source = self.source.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        match source.filter(|_| live).and_then(|s| s.subagent_transcript(&session, &agent)) {
+            Some(entries) => reply("200 OK", "application/json", serde_json::to_vec(&json!({ "entries": entries })).unwrap_or_default()),
+            None => reply("404 Not Found", "text/plain; charset=utf-8", "no such subagent"),
         }
     }
 
@@ -537,6 +572,34 @@ mod tests {
         assert_eq!(agents["working"], 1);
         assert_eq!(agents["notes"][0]["next"], "do it");
         assert_eq!(agents["groups"][0]["entries"][0]["deepLink"], Value::Null, "no desktop id: nothing to open");
+    }
+
+    #[test]
+    fn a_sessions_subagents_sit_under_it_and_their_transcript_is_served_only_for_a_live_session() {
+        struct WithSubs;
+        impl AgentSource for WithSubs {
+            fn agents(&self) -> Result<Vec<AgentInfo>, String> {
+                Ok(vec![agent("cli:1", None, AgentStatus::Working, Some("s-1"))])
+            }
+            fn subagents(&self, session: &str) -> Vec<crate::claude::Subagent> {
+                (session == "s-1").then(|| crate::claude::Subagent { id: "a1".into(), kind: "Explore".into(), description: "Scan".into(), running: true, updated: 0, depth: 1 }).into_iter().collect()
+            }
+            fn subagent_transcript(&self, _session: &str, agent: &str) -> Option<Vec<Value>> {
+                (agent == "a1").then(|| vec![json!({ "kind": "prompt", "text": "go" })])
+            }
+        }
+        let (_root, s) = server();
+        s.watch_agents(Arc::new(WithSubs), None, Duration::from_millis(40), Duration::from_millis(10));
+        std::thread::sleep(Duration::from_millis(100));
+        let agents = agents_state(&s);
+        let entry = &agents["groups"][0]["entries"][0];
+        assert_eq!(entry["session"], "s-1");
+        assert_eq!(entry["subagents"][0]["id"], "a1");
+        assert_eq!(entry["subagents"][0]["running"], true);
+        let page = get(&s, "/api/subagent?session=s-1&agent=a1", "127.0.0.1:7878");
+        assert!(page.starts_with("HTTP/1.1 200") && page.contains("\"go\""), "{page}");
+        assert!(get(&s, "/api/subagent?session=s-9&agent=a1", "127.0.0.1:7878").starts_with("HTTP/1.1 404"), "not a running session");
+        assert!(get(&s, "/api/subagent?session=s-1&agent=a1", "evil.example").starts_with("HTTP/1.1 403"));
     }
 
     #[test]

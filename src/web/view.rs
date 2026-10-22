@@ -286,6 +286,11 @@ pub(super) fn agents_view(live: &Live, boards: &[Board], now: DateTime<Utc>) -> 
                         "source": match crate::claude::entrypoint_of(&a.pane) { "claude-desktop" => "desktop", other => other },
                         "deepLink": crate::claude::desktop_link(&a.pane),
                         "note": note_of(a),
+                        "session": a.session,
+                        "subagents": a.session.as_ref().and_then(|s| live.subagents.get(s)).map(|list| list.iter().map(|sa| json!({
+                            "id": sa.id, "kind": sa.kind, "description": sa.description, "running": sa.running, "depth": sa.depth,
+                            "updatedAt": DateTime::<Utc>::from_timestamp(sa.updated as i64, 0).map(|t| t.to_rfc3339()),
+                        })).collect::<Vec<_>>()).unwrap_or_default(),
                     })
                 }).collect::<Vec<_>>(),
             })
