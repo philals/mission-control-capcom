@@ -1,0 +1,5 @@
+{
+  "name": "mission-control-capcom",
+  "owner": { "name": "philals" },
+  "plugins": [{ "name": "capcom", "source": "./mod", "description": "A CAPCOM console beside every Claude Code session, from capcom web" }]
+}
