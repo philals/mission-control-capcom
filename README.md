@@ -102,6 +102,16 @@ A typical run, in order: break the story down and approve the table; plan each t
 
 Everything it does, every key and every setting is in [docs/tui.md](docs/tui.md). Everything the TUI does is also a page in a browser, for people who live in Claude Code (terminal and desktop app) rather than Herdr: `capcom web` ([docs/web.md](docs/web.md)) shows the boards, your PRs with their CI, your workflow runs and your running Claude Code sessions, can mark PRs ready, toggle automerge, finish tasks and sync stories after asking, and opens a Claude Code desktop session with a skill typed in to plan, implement, review or fix.
 
+## The console in every session
+
+`mod/` is a Claude Code mod that puts a small CAPCOM console in a pane beside every session (the desktop app, the terminal, VS Code): GO / NO-GO, the plan usage gauges, the PRs that need you and the agents waiting on you. Click a PR to open it, `fix ↗` to start a session that fixes it, or an agent to go to its session. It reads `capcom web` (it must be running, on port 1969) and changes nothing. Install it once, at the prompt of a terminal session:
+
+```
+/plugin install capcom --marketplace philals/mission-control-capcom
+```
+
+or from a shell, `claude plugin install capcom --marketplace philals/mission-control-capcom`. In the desktop app: + next to the prompt box, Plugins, Add marketplace `philals/mission-control-capcom`, then Add plugin. It opens by itself where there is room for a pane beside the chat; `/capcom` opens it anywhere. See [docs/web.md](docs/web.md#the-console-in-every-session).
+
 ## Configuration
 
 | Setting | Flag | What it is | Default |

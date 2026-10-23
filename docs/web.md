@@ -133,3 +133,10 @@ This repository has that file in `.claude/launch.json`. Put the same file in `.c
 - **Herdr:** no workspaces, tabs or panes: skills start in new desktop sessions (above), and "go to the agent" opens a session in the desktop app.
 - **Auto-fix's last step:** marked on the PR with a one-click session, not sent to the agent (above).
 - **Loading screens, the bell and the terminal clipboard:** not ported (the page has a toast, the `log` and 📋 buttons).
+
+## The console in every session
+
+The repo is also a Claude Code plugin marketplace with one mod, `capcom` (in `mod/`), so you do not have to switch to the page: a pane beside every Claude Code session shows the GO / NO-GO light, the 5H and 7D gauges, the PRs that need you (red, needing a fix, a merge conflict, Copilot's comments, waiting for a reviewer or ready to merge) and the agents waiting on you with what they ask. A click opens the PR, `fix ↗` starts the fixing session, an agent opens its session, and `Open CAPCOM ↗` opens this page. Links are opened by `capcom web` itself (`POST /open`), so they work in the desktop app too.
+
+Install it with `/plugin install capcom --marketplace philals/mission-control-capcom` (or, in the desktop app, + next to the prompt box, Plugins, Add marketplace, Add plugin). It asks `http://127.0.0.1:1969/api/state` every 5 seconds while a session is open, which also counts as a page looking, so GitHub is polled at the faster pace while any session is open. When `capcom web` does not answer the pane says so. It opens itself where a pane fits beside the chat (a wide terminal, the desktop app); `/capcom` opens it anywhere. It only reads: marking ready, automerge and the other changes stay on the page, where they ask first.
+
