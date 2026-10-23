@@ -1,98 +1,61 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { AgentLine, Gauge, PrLine, Snapshot, Tone } from '../types'
+import type { Agent, Check, Pending, Pr, Run, Step, Subagent, Tone, View } from '../types'
+import { EMPTY, ago, approx, clock, gauge, shorten, summarize, until, weekPct } from './model'
+
+export { summarize } from './model'
 
 const BASE = 'http://127.0.0.1:1969'
 const PANE = 'capcom'
-const EVERY_MS = 5000
-const EMPTY: Snapshot = { at: 0, red: 0, awaitingReview: 0, prCount: 0, prs: [], agentsWorking: 0, agents: [] }
+const EVERY_MS = 4000
 const snapshot = atom({ plugin: 'capcom', key: 'snapshot' } as const, EMPTY)
+const view = atom({ plugin: 'capcom', key: 'view' } as const, { expanded: [], showEarlier: false, showLog: true } as View)
 
-const COLOR: Record<Tone, string> = { red: 'error', orange: 'warning', green: 'success', cyan: 'suggestion', dim: 'inactive' }
-
-type Raw = Record<string, any>
-
-// What a PR needs, if anything: the PRs with nothing to do are left out.
-function prNeed(pr: Raw): { why: string; tone: Tone } | undefined {
-  if (pr.red) return { why: pr.fix?.why ?? 'checks failing', tone: 'red' }
-  if (pr.fix && !(pr.fix.onlyBehind && pr.autofix)) return { why: pr.fix.why, tone: 'orange' }
-  if (pr.merge === 'conflicting') return { why: 'merge conflict', tone: 'orange' }
-  if (pr.copilotOpen > 0) return { why: `${pr.copilotOpen} Copilot comment${pr.copilotOpen === 1 ? '' : 's'}`, tone: 'orange' }
-  if (pr.waiting === 'reviewer') return { why: 'awaiting review', tone: 'green' }
-  if (pr.waiting === 'merge') return { why: 'approved, ready to merge', tone: 'green' }
-  return undefined
+const C = { go: 'success', red: 'error', amber: 'warning', blue: 'suggestion', purple: 'merged', accent: 'claude', dim: 'inactive', faint: 'subtle', text: 'text' }
+const TONE: Record<Tone, string> = { red: C.red, amber: C.amber, green: C.go, blue: C.blue, dim: C.faint }
+const STEP: Record<Step['state'], string> = { done: C.go, going: C.blue, wrong: C.red, pending: C.dim }
+const RUN: Record<string, [string, string]> = {
+  running: ['◐', C.blue], queued: ['◌', C.amber], waiting: ['◌', C.purple], success: ['✓', C.go],
+  failed: ['✗', C.red], cancelled: ['⊘', C.dim], skipped: ['·', C.dim],
 }
 
-function gauge(g: Raw | undefined): Gauge | undefined {
-  return typeof g?.pct === 'number' ? { pct: g.pct, resetsAt: g.resetsAt } : undefined
-}
-
-// The page's state cut down to what the pane draws.
-export function summarize(state: Raw, at: number): Snapshot {
-  const prs: PrLine[] = []
-  for (const pr of state.prs ?? []) {
-    const need = prNeed(pr)
-    if (!need) continue
-    const repo = String(pr.repo ?? '').split('/').pop()
-    prs.push({ key: pr.url, name: `${repo}#${pr.number}`, title: pr.title ?? '', url: pr.url, fix: pr.fix?.link, ...need })
-  }
-  const a = state.agents ?? {}
-  const notes: Raw[] = a.notes ?? []
-  const agents: AgentLine[] = []
-  for (const g of a.groups ?? []) {
-    for (const e of g.entries ?? []) {
-      if (e.state !== 'needs') continue
-      const note = e.note === null || e.note === undefined ? undefined : notes[e.note]
-      agents.push({ key: e.pane, label: e.label, ask: note?.next || note?.waiting || note?.progress || 'needs you', link: e.deepLink ?? undefined })
-    }
-  }
-  for (const i of a.earlier ?? []) {
-    const note = notes[i]
-    if (note?.needsYou) agents.push({ key: `earlier-${note.session}`, label: note.task || 'ended session', ask: note.next || note.waiting || 'needs you' })
-  }
-  return {
-    at,
-    red: state.red ?? 0,
-    awaitingReview: state.awaitingReview ?? 0,
-    prCount: (state.prs ?? []).length,
-    prError: state.prError ?? undefined,
-    prs,
-    agentsWorking: a.working ?? 0,
-    agents,
-    fiveHour: gauge(state.usage?.fiveHour),
-    sevenDay: gauge(state.usage?.sevenDay),
+async function refresh($: EngineInterface) {
+  const now = await $.clock.now()
+  try {
+    const res = await $.http.fetch(`${BASE}/api/state`)
+    if (!res.ok) throw new Error(`capcom web answered ${res.status}`)
+    const value = summarize(JSON.parse(res.text), now)
+    await update($, snapshot, () => value)
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err)
+    await update($, snapshot, prev => (prev.error === error ? prev : { ...prev, error }))
   }
 }
 
-function usageTone(pct: number): string {
-  return pct >= 85 ? 'error' : pct >= 60 ? 'warning' : 'success'
+// capcom web opens links itself: GitHub in your browser, claude:// in the desktop app.
+async function open($: EngineInterface, url: string) {
+  await $.http.fetch(`${BASE}/open`, { method: 'POST', headers: { 'x-capcom': 'open', 'content-type': 'application/json' }, body: JSON.stringify({ url }) })
 }
 
-function until(iso: string | undefined, now: number): string {
-  const at = iso ? Date.parse(iso) : NaN
-  if (Number.isNaN(at)) return ''
-  const min = Math.max(0, Math.round((at - now) / 60000))
-  return min >= 60 ? ` ${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}` : ` ${min}m`
+// The same actions the page takes, through the same endpoint and rules.
+async function act($: EngineInterface, action: string, args: Record<string, unknown>) {
+  let message: string
+  try {
+    const res = await $.http.fetch(`${BASE}/api/do`, { method: 'POST', headers: { 'x-capcom': 'do', 'content-type': 'application/json' }, body: JSON.stringify({ action, ...args }) })
+    message = res.ok ? (JSON.parse(res.text).message ?? 'done') : `refused (${res.status})`
+  } catch (err) {
+    message = `could not reach capcom web: ${err instanceof Error ? err.message : String(err)}`
+  }
+  await update($, view, v => ({ ...v, message }))
+  await refresh($)
 }
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'capcom', description: 'Show the CAPCOM console beside this session' })
-    const refresh = async () => {
-      const now = await $.clock.now()
-      try {
-        const res = await $.http.fetch(`${BASE}/api/state`)
-        if (!res.ok) throw new Error(`capcom web answered ${res.status}`)
-        const value = summarize(JSON.parse(res.text), now)
-        await update($, snapshot, () => value)
-      } catch (err) {
-        const error = err instanceof Error ? err.message : String(err)
-        await update($, snapshot, prev => (prev.error === error ? prev : { ...prev, error }))
-      }
-    }
-    void refresh()
-    $.clock.every(EVERY_MS, () => void refresh())
+    void refresh($)
+    $.clock.every(EVERY_MS, () => void refresh($))
     void $.ui.open({ id: PANE, title: 'CAPCOM' })
     return next(e)
   })
@@ -103,63 +66,340 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
-    const s = await read($, snapshot)
-    const now = await $.clock.now()
-    // capcom web opens links itself (GitHub in your browser, claude:// in the desktop app).
-    const open = (url: string) => () => {
-      void $.http.fetch(`${BASE}/open`, { method: 'POST', headers: { 'x-capcom': 'open', 'content-type': 'application/json' }, body: JSON.stringify({ url }) })
-    }
-    const openPage = () => void $.process.run(['xdg-open', BASE])
+    const els = $.ui.resolve(e)
+    const { Box, Text, Button } = els
+    const [s, v, now] = await Promise.all([read($, snapshot), read($, view), $.clock.now()])
+    const W = Math.max(40, e.props.bodyColumns)
+    const inner = W - 4
 
-    if (s.at === 0 || (s.error && now - s.at > 3 * EVERY_MS)) {
-      return (
-        <Box flexDirection="column" gap={1}>
-          <Text color="warning">{s.at === 0 && !s.error ? 'Asking capcom web…' : `capcom web is not answering at ${BASE}`}</Text>
-          {s.error && <Text dimColor>{s.error}</Text>}
-          {s.error && <Text dimColor>Start it with: systemctl --user start capcom-web</Text>}
-        </Box>
+    const press = (fn: () => Promise<unknown>) => () => void fn()
+    const ask = (p: Pending) => press(() => update($, view, x => ({ ...x, pending: p })))
+    const toggleExpanded = (url: string) =>
+      press(() => update($, view, x => ({ ...x, expanded: x.expanded.includes(url) ? x.expanded.filter(u => u !== url) : [...x.expanded, url] })))
+
+    const timer = (key: string, since: string | undefined, color: string, usual?: number) => {
+      const at = since ? Date.parse(since) : NaN
+      if (Number.isNaN(at)) return null
+      return 'Client' in els ? (
+        <els.Client key={key} module="./elapsed.tsx" props={usual ? { since: at, now, usual, color } : { since: at, now, color }} />
+      ) : (
+        <Text color={color}>{clock(now - at) + (usual ? ` of ~${approx(usual)}` : '')}</Text>
       )
     }
 
+    const panel = (color: string, title: string, right: string | null, body: RenderChildren[], dim = false) => (
+      <Box flexDirection="column" borderStyle="round" borderColor={color} borderDimColor={dim} paddingX={1} width={W}>
+        <Box justifyContent="space-between">
+          <Text color={color} bold>{title}</Text>
+          {right ? <Text dimColor>{right}</Text> : null}
+        </Box>
+        {body}
+      </Box>
+    )
+
+    if (s.at === 0 || (s.error && now - s.at > 3 * EVERY_MS)) {
+      return panel(C.amber, 'CAPCOM · NO SIGNAL', null, [
+        <Text color={C.amber}>{s.at === 0 && !s.error ? 'Asking capcom web…' : `capcom web is not answering at ${BASE}`}</Text>,
+        s.error ? <Text dimColor wrap="truncate">{s.error}</Text> : null,
+        s.error ? <Text dimColor>Start it: systemctl --user start capcom-web</Text> : null,
+      ])
+    }
+
     const go = s.red === 0
-    return (
-      <Box flexDirection="column" gap={1}>
-        <Box flexDirection="row" gap={2} flexWrap="wrap">
-          <Text bold color={go ? 'success' : 'error'}>{go ? '● GO' : `● NO-GO · ${s.red} red`}</Text>
-          {s.fiveHour && <Text color={usageTone(s.fiveHour.pct)}>5H {Math.round(s.fiveHour.pct)}%<Text dimColor>{until(s.fiveHour.resetsAt, now)}</Text></Text>}
-          {s.sevenDay && <Text color={usageTone(s.sevenDay.pct)}>7D {Math.round(s.sevenDay.pct)}%<Text dimColor>{until(s.sevenDay.resetsAt, now)}</Text></Text>}
+    const pending = (key: string) =>
+      v.pending?.key === key ? (
+        <Box columnGap={1} flexWrap="wrap">
+          <Text color={C.amber} bold>{v.pending.question}</Text>
+          <Button key={`yes-${key}`} label="yes" variant="primary" onPress={press(async () => {
+            const p = v.pending!
+            await update($, view, x => ({ ...x, pending: undefined }))
+            await act($, p.action, { ...p.args, confirm: true })
+          })} />
+          <Button key={`no-${key}`} label="no" onPress={press(() => update($, view, x => ({ ...x, pending: undefined })))} />
         </Box>
+      ) : null
 
+    // ---- mission: the go/no-go poll, plan usage and the working week
+    const meter = (label: string, pct: number, reset?: string) => {
+      const g = gauge(pct, 5)
+      const color = pct >= 85 ? C.red : pct >= 60 ? C.amber : C.blue
+      const r = reset ? until(reset, now) : ''
+      return (
+        <Text>
+          <Text dimColor>{`${label} `}</Text>
+          <Text color={color}>{g.on}</Text>
+          <Text color={C.faint}>{g.off}</Text>
+          <Text bold>{` ${Math.round(pct)}%`}</Text>
+          {r ? <Text dimColor>{` ↻${r}`}</Text> : null}
+        </Text>
+      )
+    }
+    const mission = panel(go ? C.go : C.red, go ? '● GO' : `● NO-GO · ${s.red} red`, s.prLoading ? 'reading PRs…' : s.prUpdated ? `PRs read ${ago(s.prUpdated, now)} ago` : null, [
+      <Box columnGap={2} flexWrap="wrap">
+        {s.fiveHour ? meter('5h', s.fiveHour.pct, s.fiveHour.resetsAt) : null}
+        {s.sevenDay ? meter('7d', s.sevenDay.pct, s.sevenDay.resetsAt) : null}
+        {meter('week', weekPct(new Date(now)))}
+      </Box>,
+      s.prError ? <Text color={C.red} wrap="truncate">{s.prError}</Text> : null,
+      v.message ? <Text dimColor wrap="truncate">{`» ${v.message}`}</Text> : null,
+      <Box columnGap={1} flexWrap="wrap">
+        <Button key="refresh" label="↻ refresh" onPress={press(() => act($, 'refresh', {}))} />
+        <Button key="page" label="open CAPCOM ↗" onPress={press(() => $.process.run(['xdg-open', BASE]))} />
+      </Box>,
+    ])
+
+    // ---- pull requests
+    const tick = (key: string, label: string, isOn: boolean, fn: () => void) => (
+      <Button key={key} plain dimColor={!isOn} onPress={fn}>
+        <Text color={isOn ? C.go : C.dim}>{isOn ? "■" : "□"}</Text> {label}
+      </Button>
+    )
+    const railLine = (pr: Pr) => (
+      <Box columnGap={2} flexWrap="wrap">
+        {pr.rail.map(st => (
+          <Text color={STEP[st.state]}>{`● ${st.text === 'CI running' && pr.leftSeconds ? `CI ${approx(pr.leftSeconds)} left` : st.text}`}</Text>
+        ))}
+      </Box>
+    )
+    const checkLine = (pr: Pr, c: Check, i: number) => {
+      const [glyph, color] = c.state === 'failed' ? ['✗', C.red] : c.state === 'running' ? ['◐', C.blue] : ['◌', C.amber]
+      return (
+        <Box justifyContent="space-between">
+          <Button key={`check-${pr.url}-${i}`} plain onPress={press(async () => (c.url ? open($, c.url) : undefined))}>
+            <Text color={color}>{glyph}</Text> <Text dimColor={c.state !== 'failed'}>{shorten(c.label, Math.max(12, inner - 16))}</Text>
+          </Button>
+          {c.state === 'running' ? timer(`clock-${pr.url}-${i}`, c.startedAt, C.dim, c.usual) : <Text dimColor>{c.state}</Text>}
+        </Box>
+      )
+    }
+    const prCard = (pr: Pr) => {
+      const color = TONE[pr.tone]
+      const isOpen = v.expanded.includes(pr.url)
+      if (pr.quiet && !isOpen) {
+        return (
+          <Box justifyContent="space-between">
+            <Button key={`quiet-${pr.url}`} plain onPress={toggleExpanded(pr.url)}>
+              <Text color={pr.draft ? C.dim : C.go}>{pr.draft ? '○' : '●'}</Text> <Text bold>{pr.name}</Text> <Text dimColor>{shorten(pr.title, Math.max(10, W - pr.name.length - 14))}</Text>
+            </Button>
+            <Text color={C.faint}>{pr.draft ? 'draft' : 'green'}</Text>
+          </Box>
+        )
+      }
+      const badge = pr.draft ? 'DRAFT' : 'READY'
+      return (
+        <Box flexDirection="column" borderStyle="round" borderColor={color} borderDimColor={pr.tone === 'dim'} paddingX={1} width={W}>
+          <Box justifyContent="space-between">
+            <Text>
+              <Text bold color={color}>{pr.name}</Text>
+              {pr.tag ? <Text color={C.purple}>{`  ${pr.tag}`}</Text> : pr.followed ? <Text color={C.purple}>  followed</Text> : null}
+            </Text>
+            <Button key={`badge-${pr.url}`} plain dimColor={pr.draft} onPress={ask({
+              key: pr.url,
+              question: pr.draft ? 'Mark ready for review?' : 'Back to a draft?',
+              action: pr.draft ? 'pr.ready' : 'pr.draft',
+              args: { url: pr.url },
+            })}>
+              <Text color={pr.draft ? C.dim : C.go} bold>{`[${badge}]`}</Text>
+            </Button>
+          </Box>
+          <Button key={`title-${pr.url}`} plain onPress={press(() => open($, pr.url))}>
+            <Text>{shorten(pr.title, inner)}</Text>
+          </Button>
+          {pr.labels.length ? <Text color={C.faint} wrap="truncate">{pr.labels.map(l => `#${l}`).join(' ')}</Text> : null}
+          {pr.why ? <Text color={color} bold={pr.tone !== 'dim'} dimColor={pr.tone === 'dim'} wrap="truncate">{pr.why}</Text> : null}
+          {railLine(pr)}
+          {pr.checks.map((c, i) => checkLine(pr, c, i))}
+          {pending(pr.url)}
+          <Box columnGap={2} flexWrap="wrap">
+            {pr.managed ? tick(`fix-${pr.url}`, 'auto-fix', pr.autofix, press(() => act($, 'pr.autofix', { url: pr.url, on: !pr.autofix }))) : null}
+            {pr.managed ? tick(`review-${pr.url}`, 'auto-review', pr.autoreview, press(() => act($, 'pr.autoreview', { url: pr.url, on: !pr.autoreview }))) : null}
+            {pr.automerge !== undefined
+              ? tick(`merge-${pr.url}`, 'automerge', pr.automerge, ask({
+                  key: pr.url,
+                  question: pr.automerge ? 'Take automerge off?' : 'Turn automerge on?',
+                  action: 'pr.automerge',
+                  args: { url: pr.url, on: !pr.automerge },
+                }))
+              : null}
+          </Box>
+          <Box columnGap={1} flexWrap="wrap">
+            {pr.fixLink ? <Button key={`fixit-${pr.url}`} variant="primary" label="fix it ↗" onPress={press(() => open($, pr.fixLink!))} /> : null}
+            {pr.agentLink ? <Button key={`agent-${pr.url}`} label="its session ↗" onPress={press(() => open($, pr.agentLink!))} /> : null}
+            <Button key={`open-${pr.url}`} label="GitHub ↗" onPress={press(() => open($, pr.url))} />
+            {pr.followed ? <Button key={`unfollow-${pr.url}`} label="unfollow" onPress={press(() => act($, 'pr.unfollow', { url: pr.url }))} /> : null}
+            {pr.quiet ? <Button key={`less-${pr.url}`} label="less" onPress={toggleExpanded(pr.url)} /> : null}
+          </Box>
+        </Box>
+      )
+    }
+    const loud = s.prs.filter(p => !p.quiet || v.expanded.includes(p.url))
+    const quiet = s.prs.filter(p => p.quiet && !v.expanded.includes(p.url))
+    const prs = (
+      <Box flexDirection="column" width={W}>
+        <Box justifyContent="space-between">
+          <Text bold>{`pull requests · ${s.prs.length} open${s.awaitingReview ? ` · ${s.awaitingReview} awaiting review` : ''}`}</Text>
+          {s.red ? <Text color={C.red} bold>{`${s.red} red`}</Text> : null}
+        </Box>
+        {s.prs.length === 0 ? <Text color={C.faint}>{s.prLoading ? 'reading…' : 'no open PRs'}</Text> : null}
+        {loud.map(prCard)}
+        {quiet.map(prCard)}
+        {'Input' in els ? (
+          <els.Input key="follow" placeholder="paste a PR or run link to follow" submitLabel="follow" onSubmit={text => void act($, 'pr.follow', { text })} />
+        ) : null}
+      </Box>
+    )
+
+    // ---- agents
+    const agentGlyph = (a: Agent): [string, string] =>
+      a.state === 'needs' ? ['!', C.amber] : a.state === 'working' ? ['◐', C.blue] : a.state === 'done' ? ['✓', C.go] : ['○', C.dim]
+    const subLine = (a: Agent, sa: Subagent) => (
+      <Box justifyContent="space-between">
+        <Text wrap="truncate">
+          <Text color={C.faint}>{`${' '.repeat(a.depth * 2)}  └ `}</Text>
+          <Text color={sa.running ? C.blue : C.go}>{sa.running ? '◐ ' : '✓ '}</Text>
+          <Text dimColor={!sa.running}>{shorten(sa.description || sa.kind, Math.max(10, inner - 22))}</Text>
+          <Text color={C.faint}>{`  ${sa.kind}`}</Text>
+        </Text>
+        <Text color={sa.running ? C.blue : C.faint}>{sa.running ? 'working' : `${ago(sa.updatedAt, now)} ago`}</Text>
+      </Box>
+    )
+    const noteLine = (a: Agent) => {
+      const n = a.note
+      if (!n) return null
+      const pad = ' '.repeat(a.depth * 2 + 2)
+      if (a.state === 'needs') return <Text color={C.amber} wrap="truncate">{`${pad}you: ${n.next || n.waiting || n.progress}`}</Text>
+      if (n.waiting) return <Text color={C.blue} wrap="truncate">{`${pad}waiting: ${n.waiting}`}</Text>
+      return n.progress || n.task ? <Text dimColor wrap="truncate">{`${pad}${n.progress || n.task}`}</Text> : null
+    }
+    const agentRow = (a: Agent) => {
+      const [glyph, color] = agentGlyph(a)
+      const label = (
+        <Text>
+          <Text color={C.faint}>{' '.repeat(a.depth * 2)}</Text>
+          <Text color={color} bold>{`${glyph} `}</Text>
+          <Text bold={a.state === 'needs'}>{shorten(a.label, Math.max(10, inner - 18))}</Text>
+        </Text>
+      )
+      return (
         <Box flexDirection="column">
-          <Text bold>PULL REQUESTS <Text dimColor>· {s.prCount} open{s.awaitingReview ? ` · ${s.awaitingReview} awaiting review` : ''}</Text></Text>
-          {s.prError && <Text color="error">{s.prError}</Text>}
-          {s.prs.length === 0 && <Text dimColor>Nothing needs you.</Text>}
-          {s.prs.map(pr => (
-            <Box key={pr.key} flexDirection="row" gap={1}>
-              <Button key={pr.key} plain onPress={open(pr.url)}>
-                <Text color={COLOR[pr.tone]}>●</Text> <Text bold>{pr.name}</Text> <Text color={COLOR[pr.tone]}>{pr.why}</Text> <Text dimColor>{pr.title}</Text>
+          <Box justifyContent="space-between">
+            {a.link ? (
+              <Button key={`agent-${a.key}`} plain onPress={press(() => open($, a.link!))}>
+                <Text color={color} bold>{`${' '.repeat(a.depth * 2)}${glyph} `}</Text>
+                <Text bold={a.state === 'needs'}>{shorten(a.label, Math.max(10, inner - 18))}</Text>
               </Button>
-              {pr.fix && pr.tone !== 'green' && <Button key={`fix-${pr.key}`} label="fix ↗" onPress={open(pr.fix)} />}
+            ) : label}
+            <Text>
+              <Text color={C.faint}>{`${a.source} `}</Text>
+              <Text color={color}>{a.status}</Text>
+            </Text>
+          </Box>
+          {noteLine(a)}
+          {a.subagents.map(sa => subLine(a, sa))}
+        </Box>
+      )
+    }
+    const agents = panel(
+      s.needsYou ? C.amber : C.blue,
+      `AGENTS · ${s.agentCount} running`,
+      [s.working ? `${s.working} working` : '', s.needsYou ? `${s.needsYou} need you` : ''].filter(Boolean).join(' · ') || null,
+      [
+        s.groups.length === 0 ? <Text color={C.faint}>no Claude Code sessions running</Text> : null,
+        ...s.groups.map(g => (
+          <Box flexDirection="column" marginTop={1}>
+            <Text color={g.story ? C.purple : C.dim} bold>{g.label.toUpperCase()}</Text>
+            {g.agents.map(agentRow)}
+          </Box>
+        )),
+        s.earlier.length ? (
+          <Box flexDirection="column" marginTop={1}>
+            <Button key="earlier" plain dimColor onPress={press(() => update($, view, x => ({ ...x, showEarlier: !x.showEarlier })))}>
+              {`${v.showEarlier ? '▾' : '▸'} EARLIER · ${s.earlier.length}`}
+            </Button>
+            {v.showEarlier
+              ? s.earlier.map(n => (
+                  <Box justifyContent="space-between">
+                    <Text wrap="truncate" color={n.needsYou ? C.amber : undefined} dimColor={!n.needsYou}>{`${n.needsYou ? '!' : '○'} ${shorten(n.task || 'a session', inner - 8)}`}</Text>
+                    <Text color={C.faint}>{ago(n.updatedAt, now)}</Text>
+                  </Box>
+                ))
+              : null}
+          </Box>
+        ) : null,
+      ],
+      !s.needsYou && !s.working,
+    )
+
+    // ---- runs and watch
+    const runRow = (r: Run) => {
+      const [glyph, color] = RUN[r.state] ?? ['·', C.dim]
+      const done = r.jobs.filter(j => j.state === 'success' || j.state === 'skipped').length
+      return (
+        <Box flexDirection="column">
+          <Box justifyContent="space-between">
+            <Button key={`run-${r.key}`} plain onPress={press(() => open($, r.url))}>
+              <Text color={color} bold>{`${glyph} `}</Text>
+              <Text bold>{r.repo}</Text> <Text>{shorten(r.name, Math.max(8, inner - r.repo.length - 18))}</Text>
+            </Button>
+            {r.state === 'running' || r.state === 'queued' ? timer(`run-clock-${r.key}`, r.startedAt, C.dim) : <Text color={color}>{r.state}</Text>}
+          </Box>
+          <Box justifyContent="space-between">
+            <Text dimColor wrap="truncate">{`  ${shorten(r.title, inner - 16)}`}</Text>
+            <Text color={C.faint}>{r.jobs.length ? `${done}/${r.jobs.length} jobs` : ''}</Text>
+          </Box>
+          {r.watched ? (
+            <Box marginLeft={2}>
+              <Button key={`unwatch-${r.key}`} plain dimColor label="stop watching" onPress={press(() => act($, 'run.unwatch', { repo: r.fullRepo, id: r.id }))} />
             </Box>
-          ))}
+          ) : null}
         </Box>
+      )
+    }
+    const runs = s.runsOn && s.runs.length
+      ? panel(C.purple, `RUNS & WATCH · ${s.runs.length}`, null, s.runs.map(runRow), !s.runs.some(r => r.state === 'running' || r.state === 'queued'))
+      : null
 
-        <Box flexDirection="column">
-          <Text bold>AGENTS <Text dimColor>· {s.agentsWorking} working</Text></Text>
-          {s.agents.length === 0 && <Text dimColor>Nobody needs you.</Text>}
-          {s.agents.map(a =>
-            a.link ? (
-              <Button key={a.key} plain onPress={open(a.link)}>
-                <Text color="warning">!</Text> <Text bold>{a.label}</Text> <Text color="warning">{a.ask}</Text>
-              </Button>
-            ) : (
-              <Text><Text color="warning">!</Text> <Text bold>{a.label}</Text> <Text color="warning">{a.ask}</Text></Text>
-            ),
-          )}
+    // ---- log
+    const time = (iso: string) => {
+      const d = new Date(Date.parse(iso))
+      return Number.isNaN(d.getTime()) ? '' : d.toTimeString().slice(0, 8)
+    }
+    const log = s.events.length ? (
+      <Box flexDirection="column" borderStyle="round" borderColor={C.faint} paddingX={1} width={W}>
+        <Button key="log" plain dimColor onPress={press(() => update($, view, x => ({ ...x, showLog: !x.showLog })))}>
+          {`${v.showLog ? '▾' : '▸'} log`}
+        </Button>
+        {v.showLog
+          ? s.events.slice(0, 6).map(ev => (
+              <Box>
+                <Box width={9} flexShrink={0}>
+                  <Text color={C.faint}>{time(ev.at)}</Text>
+                </Box>
+                <Text wrap="truncate">{ev.text.replace(/^CAPCOM: /, '')}</Text>
+              </Box>
+            ))
+          : null}
+      </Box>
+    ) : null
+
+    const needs = s.prs.filter(p => p.tone === 'red' || p.tone === 'amber').length
+    return (
+      <Box flexDirection="column" rowGap={1}>
+        <Box justifyContent="center">
+          <Text bold>
+            <Text>CAPCOM · </Text>
+            <Text color={go ? C.go : C.red}>{go ? 'GO' : 'NO-GO'}</Text>
+            <Text>{' · '}</Text>
+            <Text color={needs ? C.amber : C.dim}>{`${needs} PR${needs === 1 ? '' : 'S'} TO FIX`}</Text>
+            <Text>{' · '}</Text>
+            <Text color={s.needsYou ? C.amber : C.dim}>{`${s.needsYou} NEED YOU`}</Text>
+          </Text>
         </Box>
-
-        <Button key="page" label="Open CAPCOM ↗" onPress={openPage} />
+        {mission}
+        {prs}
+        {agents}
+        {runs}
+        {log}
       </Box>
     )
   })

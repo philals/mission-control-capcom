@@ -1,8 +1,42 @@
-export type Tone = 'red' | 'orange' | 'green' | 'cyan' | 'dim'
+export type Tone = 'red' | 'amber' | 'green' | 'blue' | 'dim'
 
-export type PrLine = { key: string; name: string; title: string; why: string; tone: Tone; url: string; fix?: string }
+export type Step = { state: 'done' | 'going' | 'wrong' | 'pending'; text: string }
 
-export type AgentLine = { key: string; label: string; ask: string; link?: string }
+export type Check = { label: string; state: string; startedAt?: string; usual?: number; url?: string }
+
+export type Pr = {
+  url: string
+  name: string
+  title: string
+  draft: boolean
+  managed: boolean
+  followed: boolean
+  tag?: string
+  labels: string[]
+  tone: Tone
+  why?: string
+  quiet: boolean
+  rail: Step[]
+  leftSeconds?: number
+  checks: Check[]
+  failed: number
+  autofix: boolean
+  autoreview: boolean
+  automerge?: boolean
+  fixLink?: string
+  agentLink?: string
+  updatedAt?: string
+}
+
+export type Subagent = { id: string; kind: string; description: string; running: boolean; updatedAt?: string }
+
+export type Note = { task: string; progress: string; waiting: string; next: string; needsYou: boolean; updatedAt?: string }
+
+export type Agent = { key: string; label: string; source: string; state: string; status: string; depth: number; link?: string; note?: Note; subagents: Subagent[] }
+
+export type Group = { label: string; story: boolean; agents: Agent[] }
+
+export type Run = { key: string; id: number; fullRepo: string; repo: string; name: string; title: string; state: string; url: string; watched: boolean; startedAt?: string; updatedAt?: string; jobs: { name: string; state: string }[] }
 
 export type Gauge = { pct: number; resetsAt?: string }
 
@@ -13,17 +47,29 @@ export type Snapshot = {
   error?: string
   red: number
   awaitingReview: number
-  prCount: number
+  prLoading: boolean
+  prUpdated?: string
   prError?: string
-  prs: PrLine[]
-  agentsWorking: number
-  agents: AgentLine[]
+  prs: Pr[]
+  agentCount: number
+  working: number
+  needsYou: number
+  groups: Group[]
+  earlier: Note[]
+  runs: Run[]
+  runsOn: boolean
+  events: { at: string; text: string }[]
   fiveHour?: Gauge
   sevenDay?: Gauge
 }
 
+/** An action that asks first: what it does, and what to send once confirmed. */
+export type Pending = { key: string; question: string; action: string; args: Record<string, string | number | boolean> }
+
+export type View = { expanded: string[]; pending?: Pending; showEarlier: boolean; showLog: boolean; message?: string }
+
 declare module 'claude-code' {
   interface PluginState {
-    capcom: { snapshot: Snapshot }
+    capcom: { snapshot: Snapshot; view: View }
   }
 }
