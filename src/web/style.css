@@ -83,9 +83,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   z-index: 3;
 }
 .brand { display: inline-flex; align-items: center; gap: 10px; font-family: var(--label); font-weight: 800; font-size: 19px; letter-spacing: .3em; }
-.orbit { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--fg); position: relative; }
-.orbit::before { content: ""; position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2.5px; border-radius: 50%; background: var(--green); box-shadow: 0 0 7px var(--green); }
-.orbit::after { content: ""; position: absolute; left: -5px; top: 50%; width: 28px; height: 9px; margin-top: -4.5px; border: 2px solid var(--fg); border-radius: 50%; transform: rotate(-24deg); opacity: .85; }
+.logo { width: 28px; height: 28px; display: block; }
 .tile {
   display: inline-flex;
   align-items: center;
