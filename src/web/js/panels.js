@@ -208,7 +208,10 @@ function renderHeaderNow() {
   const top = $("top");
   top.replaceChildren();
   const brand = el("span", "brand");
-  add(brand, el("span", "orbit"), document.createTextNode("CAPCOM"));
+  const logo = el("img", "logo");
+  logo.src = "/favicon.svg";
+  logo.alt = "";
+  add(brand, logo, document.createTextNode("CAPCOM"));
   const gonogo = el("span", "gonogo");
   add(
     gonogo,
