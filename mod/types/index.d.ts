@@ -66,7 +66,14 @@ export type Snapshot = {
 /** An action that asks first: what it does, and what to send once confirmed. */
 export type Pending = { key: string; question: string; action: string; args: Record<string, string | number | boolean> }
 
-export type View = { expanded: string[]; pending?: Pending; showEarlier: boolean; showLog: boolean; message?: string }
+export type View = {
+  /** PRs shown the other way from their default: quiet ones start collapsed, the rest open. */
+  flipped: string[]
+  pending?: Pending
+  showEarlier: boolean
+  showLog: boolean
+  message?: string
+}
 
 declare module 'claude-code' {
   interface PluginState {

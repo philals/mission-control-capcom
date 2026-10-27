@@ -10,7 +10,7 @@ const BASE = 'http://127.0.0.1:1969'
 const PANE = 'capcom'
 const EVERY_MS = 4000
 const snapshot = atom({ plugin: 'capcom', key: 'snapshot' } as const, EMPTY)
-const view = atom({ plugin: 'capcom', key: 'view' } as const, { expanded: [], showEarlier: false, showLog: true } as View)
+const view = atom({ plugin: 'capcom', key: 'view' } as const, { flipped: [], showEarlier: false, showLog: true } as View)
 
 const C = { go: 'success', red: 'error', amber: 'warning', blue: 'suggestion', purple: 'merged', accent: 'claude', dim: 'inactive', faint: 'subtle', text: 'text' }
 const TONE: Record<Tone, string> = { red: C.red, amber: C.amber, green: C.go, blue: C.blue, dim: C.faint }
@@ -98,8 +98,13 @@ export const register: Register = on => {
 
     const press = (fn: () => Promise<unknown>) => () => void fn()
     const ask = (p: Pending) => press(() => update($, view, x => ({ ...x, pending: p })))
-    const toggleExpanded = (url: string) =>
-      press(() => update($, view, x => ({ ...x, expanded: x.expanded.includes(url) ? x.expanded.filter(u => u !== url) : [...x.expanded, url] })))
+    const flipped = v.flipped ?? []
+    const isOpen = (pr: Pr) => pr.quiet === flipped.includes(pr.url)
+    const toggle = (url: string) =>
+      press(() => update($, view, x => {
+        const f = x.flipped ?? []
+        return { ...x, flipped: f.includes(url) ? f.filter(u => u !== url) : [...f, url] }
+      }))
 
     const timer = (key: string, since: string | undefined, color: string, usual?: number) => {
       const at = since ? Date.parse(since) : NaN
@@ -196,16 +201,24 @@ export const register: Register = on => {
         </Box>
       )
     }
+    const prStatus = (pr: Pr) =>
+      pr.tone === 'blue' ? (pr.leftSeconds ? `CI ${approx(pr.leftSeconds)} left` : 'CI running') : pr.why ?? (pr.draft ? 'draft' : 'green')
     const prCard = (pr: Pr) => {
       const color = TONE[pr.tone]
-      const isOpen = v.expanded.includes(pr.url)
-      if (pr.quiet && !isOpen) {
+      if (!isOpen(pr)) {
+        const status = prStatus(pr)
         return (
-          <Box justifyContent="space-between">
-            <Button key={`quiet-${pr.url}`} plain onPress={toggleExpanded(pr.url)}>
-              <Text color={pr.draft ? C.dim : C.go}>{pr.draft ? '○' : '●'}</Text> <Text bold>{pr.name}</Text> <Text dimColor>{shorten(pr.title, Math.max(10, W - pr.name.length - 14))}</Text>
+          <Box flexDirection="column" width={W}>
+            <Box justifyContent="space-between">
+              <Button key={`pr-${pr.url}`} plain onPress={toggle(pr.url)}>
+                <Text color={C.faint}>▸ </Text>
+                <Text color={pr.tone === 'dim' ? C.dim : color}>{pr.tone === 'dim' ? '○' : '●'}</Text> <Text bold>{pr.name}</Text>
+              </Button>
+              <Text color={pr.tone === 'dim' ? C.faint : color}>{shorten(status, Math.max(8, W - pr.name.length - 8))}</Text>
+            </Box>
+            <Button key={`prtitle-${pr.url}`} plain dimColor={pr.tone === 'dim'} onPress={toggle(pr.url)}>
+              {`    ${shorten(pr.title, W - 4)}`}
             </Button>
-            <Text color={C.faint}>{pr.draft ? 'draft' : 'green'}</Text>
           </Box>
         )
       }
@@ -213,10 +226,11 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column" borderStyle="round" borderColor={color} borderDimColor={pr.tone === 'dim'} paddingX={1} width={W}>
           <Box justifyContent="space-between">
-            <Text>
+            <Button key={`pr-${pr.url}`} plain onPress={toggle(pr.url)}>
+              <Text color={C.faint}>▾ </Text>
               <Text bold color={color}>{pr.name}</Text>
               {pr.tag ? <Text color={C.purple}>{`  ${pr.tag}`}</Text> : pr.followed ? <Text color={C.purple}>  followed</Text> : null}
-            </Text>
+            </Button>
             <Button key={`badge-${pr.url}`} plain dimColor={pr.draft} onPress={ask({
               key: pr.url,
               question: pr.draft ? 'Mark ready for review?' : 'Back to a draft?',
@@ -251,22 +265,28 @@ export const register: Register = on => {
             {pr.agentLink ? <Button key={`agent-${pr.url}`} label="its session ↗" onPress={press(() => open($, pr.agentLink!))} /> : null}
             <Button key={`open-${pr.url}`} label="GitHub ↗" onPress={press(() => open($, pr.url))} />
             {pr.followed ? <Button key={`unfollow-${pr.url}`} label="unfollow" onPress={press(() => act($, 'pr.unfollow', { url: pr.url }))} /> : null}
-            {pr.quiet ? <Button key={`less-${pr.url}`} label="less" onPress={toggleExpanded(pr.url)} /> : null}
           </Box>
         </Box>
       )
     }
-    const loud = s.prs.filter(p => !p.quiet || v.expanded.includes(p.url))
-    const quiet = s.prs.filter(p => p.quiet && !v.expanded.includes(p.url))
+    const open_ = s.prs.filter(isOpen)
+    const shut = s.prs.filter(p => !isOpen(p))
+    // Everything one way: flip exactly the PRs whose default is the other way.
+    const setAll = (open: boolean) => press(() => update($, view, x => ({ ...x, flipped: s.prs.filter(p => p.quiet === open).map(p => p.url) })))
     const prs = (
       <Box flexDirection="column" width={W}>
         <Box justifyContent="space-between">
           <Text bold>{`pull requests · ${s.prs.length} open${s.awaitingReview ? ` · ${s.awaitingReview} awaiting review` : ''}`}</Text>
-          {s.red ? <Text color={C.red} bold>{`${s.red} red`}</Text> : null}
+          <Box columnGap={2}>
+            {s.red ? <Text color={C.red} bold>{`${s.red} red`}</Text> : null}
+            {s.prs.length ? (
+              <Button key="prs-all" plain dimColor label={open_.length === 0 ? '▾ open all' : '▸ collapse all'} onPress={setAll(open_.length === 0)} />
+            ) : null}
+          </Box>
         </Box>
         {s.prs.length === 0 ? <Text color={C.faint}>{s.prLoading ? 'reading…' : 'no open PRs'}</Text> : null}
-        {loud.map(prCard)}
-        {quiet.map(prCard)}
+        {open_.map(prCard)}
+        {shut.map(prCard)}
         {'Input' in els ? (
           <els.Input key="follow" placeholder="paste a PR or run link to follow" submitLabel="follow" onSubmit={text => void act($, 'pr.follow', { text })} />
         ) : null}
