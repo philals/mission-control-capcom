@@ -243,6 +243,10 @@ export const register: Register = on => {
             })()} /> : null}
             {pr.agentLink ? <Button key={`agent-${pr.url}`} label="its session ↗" onPress={press(() => open($, pr.agentLink!))} /> : null}
             <Button key={`open-${pr.url}`} label="GitHub ↗" onPress={press(() => open($, pr.url))} />
+            <Button key={`copy-${pr.url}`} label="copy link" onPress={e => void (async () => {
+              const copied = (await $.ui.copy({ text: pr.url, surface: e.surface }).catch(() => ({ isCopied: false }))).isCopied
+              await update($, view, x => ({ ...x, message: copied ? `copied ${pr.url}` : `could not copy; the link is ${pr.url}` }))
+            })()} />
             {pr.followed ? <Button key={`unfollow-${pr.url}`} label="unfollow" onPress={press(() => act($, 'pr.unfollow', { url: pr.url }))} /> : null}
           </Box>
         </Box>

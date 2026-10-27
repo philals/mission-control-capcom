@@ -189,3 +189,18 @@ test('fix it puts the prompt on the clipboard and opens the session', async ($, 
   expect(await ui.find({ type: 'Text', text: /on the clipboard/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('copy link puts the PR link on the clipboard', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  world(on, () => JSON.stringify(STATE))
+  const copied: string[] = []
+  on('ui.copy', (_, e) => (copied.push(e.text), { value: { isCopied: true } }))
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'copy-https://github.com/o/api/pull/1' })
+  await clock.settle()
+  expect(copied).toEqual(['https://github.com/o/api/pull/1'])
+  expect(await ui.find({ type: 'Text', text: /copied https/ })).toBeDefined()
+  await ui.unmount()
+})
