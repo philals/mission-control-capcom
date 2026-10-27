@@ -32,7 +32,7 @@ mkdir -p "$(dirname "$usage_file")" &&
     mv "$usage_file.tmp" "$usage_file"
 ```
 
-(Several sessions each write it; they all see the same account, so the last one wins and that is fine.) The figures are as old as the last time any session's status line ran, and the gauges say so. They exist for Pro and Max plans; with no usage in the file, only the WEEK gauge shows.
+(Several sessions each write it; they all see the same account, so the last one wins and that is fine.) The figures are as old as the last time any session's status line ran, and the gauges say so; a window whose reset time has passed is not shown, since its figure belongs to the last window. The status line only runs in the terminal, so the CAPCOM pane mod (below) writes the same file from every session it runs in, desktop ones included. They exist for Pro and Max plans; with no usage in the file, only the WEEK gauge shows.
 
 ## What the page shows
 

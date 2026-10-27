@@ -75,6 +75,29 @@ function world(on: Parameters<TestBody>[1], answer: () => string) {
   return posted
 }
 
+function disk(on: Parameters<TestBody>[1]) {
+  const files: Record<string, string> = {}
+  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }))
+  on('fs.write', (_, e) => ((files[e.path] = e.text), { value: undefined }))
+  on('process.run', (_, e) => {
+    const [, from, to] = e.argv
+    files[to!] = files[from!]!
+    delete files[from!]
+    return { value: { exitCode: 0, stdout: '', stderr: '' } }
+  })
+  return files
+}
+
+test('the live usage is shared with capcom web in the status line shape', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  world(on, () => JSON.stringify(STATE))
+  const files = disk(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  expect(Object.keys(files)).toEqual(['/home/me/.local/state/capcom/usage.json'])
+  expect(JSON.parse(files['/home/me/.local/state/capcom/usage.json']!)).toEqual({ at: NOW / 1000, rate_limits: { seven_day: { used_percentage: 9 } } })
+})
+
 test('the console draws on every surface, and links open through capcom web', async ($, on) => {
   const clock = mock.clock(on, { now: NOW })
   const posted = world(on, () => JSON.stringify(STATE))

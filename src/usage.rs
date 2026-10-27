@@ -56,6 +56,18 @@ pub fn parse(json: &str) -> Option<Usage> {
     Some(Usage { at: time_of(&v["at"]).unwrap_or_else(Utc::now), five_hour, seven_day })
 }
 
+impl Usage {
+    /// Without the windows that have started again since: their figure is the last window's.
+    pub fn current(self, now: DateTime<Utc>) -> Option<Usage> {
+        let live = |w: Option<Window>| w.filter(|w| w.resets_at.is_none_or(|t| t > now));
+        let (five_hour, seven_day) = (live(self.five_hour), live(self.seven_day));
+        if five_hour.is_none() && seven_day.is_none() {
+            return None;
+        }
+        Some(Usage { five_hour, seven_day, ..self })
+    }
+}
+
 pub fn read(path: &Path) -> Option<Usage> {
     parse(&std::fs::read_to_string(path).ok()?)
 }
@@ -82,6 +94,16 @@ mod tests {
         assert_eq!(u.at.timestamp(), 1_790_000_000);
         assert_eq!(u.five_hour.unwrap().resets_at.unwrap().timestamp(), 1_790_003_600);
         assert!(u.seven_day.is_none(), "one window is enough");
+    }
+
+    #[test]
+    fn a_window_that_has_started_again_is_dropped() {
+        let u = parse(r#"{"at": 1790000000, "rate_limits": {"five_hour": {"used_percentage": 29, "resets_at": 1790003600}, "seven_day": {"used_percentage": 66, "resets_at": 1790500000}}}"#).unwrap();
+        let later = Utc.timestamp_opt(1_790_100_000, 0).unwrap();
+        let now = u.clone().current(later).unwrap();
+        assert!(now.five_hour.is_none());
+        assert_eq!(now.seven_day.unwrap().used_percent, 66.0);
+        assert!(u.current(Utc.timestamp_opt(1_790_600_000, 0).unwrap()).is_none(), "both reset: nothing to show");
     }
 
     #[test]

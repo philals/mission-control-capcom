@@ -35,6 +35,19 @@ async function refresh($: EngineInterface) {
   }
 }
 
+// capcom web's own copy of the plan usage, in the status line's shape, so the page has it fresh too (docs/web.md).
+async function share($: EngineInterface) {
+  if (!limits.length) return
+  const windows = Object.fromEntries(limits.map(l => [l.kind, { used_percentage: l.percentUsed, resets_at: l.resetsAt }]))
+  try {
+    const state = (await $.env.get('XDG_STATE_HOME')) ?? `${await $.env.get('HOME')}/.local/state`
+    const file = (await $.env.get('CAPCOM_USAGE_FILE')) ?? `${state}/capcom/usage.json`
+    const at = Math.floor((await $.clock.now()) / 1000)
+    await $.fs.write(`${file}.tmp`, JSON.stringify({ at, rate_limits: windows }))
+    await $.process.run(['mv', `${file}.tmp`, file])
+  } catch {}
+}
+
 // capcom web opens links itself: GitHub in your browser, claude:// in the desktop app.
 async function open($: EngineInterface, url: string) {
   await $.http.fetch(`${BASE}/open`, { method: 'POST', headers: { 'x-capcom': 'open', 'content-type': 'application/json' }, body: JSON.stringify({ url }) })
@@ -57,6 +70,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'capcom', description: 'Show the CAPCOM console beside this session' })
     limits = await $.session.usage().then(u => u.rateLimits, () => [])
+    void share($)
     void refresh($)
     $.clock.every(EVERY_MS, () => void refresh($))
     void $.ui.open({ id: PANE, title: 'CAPCOM' })
@@ -66,6 +80,7 @@ export const register: Register = on => {
   on('session.measure', async ($, e, next) => {
     limits = e.rateLimits
     await update($, snapshot, s => withLive(s, limits))
+    if (e.changed.includes('rateLimits')) void share($)
     return next(e)
   })
 
