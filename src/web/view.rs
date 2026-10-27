@@ -148,9 +148,13 @@ pub(super) fn pr_view(pr: &PullRequest, cx: &Ctx) -> Value {
         None => "",
     };
     let need = crate::autopilot::fix_needed(pr);
+    let agent = agent_link(pr, cx);
     let fix = need.as_ref().map(|n| {
         let prompt = format!("/pr-address {}", pr.url);
-        json!({ "why": n.why, "onlyBehind": n.only_behind, "prompt": prompt, "link": new_session_link(&prompt, &fix_folder(pr, cx)) })
+        let link = new_session_link(&prompt, &fix_folder(pr, cx));
+        // The session that made the PR, when it is open in the desktop app; else a new one with the prompt typed in.
+        let open = agent["link"].as_str().filter(|l| agent["running"] == true && l.starts_with("claude://code/continue")).map_or(link.clone(), str::to_string);
+        json!({ "why": n.why, "onlyBehind": n.only_behind, "prompt": prompt, "link": link, "open": open })
     });
     let kodiak = pr.feedback.kodiak.as_ref();
     json!({
@@ -182,7 +186,7 @@ pub(super) fn pr_view(pr: &PullRequest, cx: &Ctx) -> Value {
         "autofix": autofix_on(cx.settings, pr),
         "autoreview": autoreview_on(cx.settings, pr),
         "fix": fix,
-        "agent": agent_link(pr, cx),
+        "agent": agent,
         "leftSeconds": time_left(pr, cx.now, cx.durations),
         "counts": { "passed": c.passed, "failed": c.failed, "running": c.running, "queued": c.queued, "skipped": c.skipped, "cancelled": c.cancelled },
         "checks": pr.ordered_checks().iter().map(|k| json!({

@@ -57,7 +57,8 @@ function pr(p: Raw): Pr {
     autofix: !!p.autofix,
     autoreview: !!p.autoreview,
     automerge: p.automerge?.available ? !!p.automerge.on : undefined,
-    fixLink: p.fix && !p.fix.onlyBehind ? p.fix.link : undefined,
+    fixLink: p.fix && !p.fix.onlyBehind ? (p.fix.open ?? p.fix.link) : undefined,
+    fixPrompt: p.fix?.prompt ?? undefined,
     agentLink: p.agent?.link ?? undefined,
     updatedAt: p.updatedAt ?? undefined,
   }

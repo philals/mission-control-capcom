@@ -60,7 +60,7 @@ Changes to the boards go through the same code as `capcom` and the TUI, so the s
 
 ## Starting skills
 
-The page cannot type into a running agent, but it can open a **new Claude Code desktop session with the command already typed in**, in the right folder (Claude Desktop's own `claude://code/new?prompt=…&folder=…` link). You press Enter. That is how a story is broken down (`+ new story`, or a story with no tasks), a task is planned or implemented (`plan ↗`, `implement ↗`), a finished story is reviewed, and a PR is fixed (`fix it in a new session ↗`, which types `/pr-address <url>`; the session starts in the folder the PR's own session began in, else the repo's folder under the work folder). Nothing starts without you.
+The page cannot type into a running agent, but it can open a **new Claude Code desktop session with the command already typed in**, in the right folder (Claude Desktop's own `claude://code/new?prompt=…&folder=…` link). You press Enter. That is how a story is broken down (`+ new story`, or a story with no tasks), a task is planned or implemented (`plan ↗`, `implement ↗`), a finished story is reviewed, and a PR is fixed (`fix it ↗`, which puts `/pr-address <url>` on the clipboard and opens the session that made the PR when it is open in the desktop app, so you paste it in; with no such session it opens a new one with the command typed in, in the folder the PR's own session began in, else the repo's folder under the work folder). Nothing starts without you.
 
 ## What the autopilot does by itself
 
@@ -68,7 +68,7 @@ For the PRs you ticked (and the defaults in `⚙`), whenever the PR list changes
 
 - **auto-review:** asks Copilot to review a new PR, once.
 - **auto-fix, a branch that is only behind its base:** brings it up to date through GitHub (what the "Update branch" button does), with no agent; not while Actions run, not on a PR whose merge bot keeps it up to date, at most once every 15 minutes, and a conflict is left for you.
-- **auto-fix, anything else** (failing checks, Copilot's comments, a merge conflict): marks the PR with a banner and `fix it in a new session ↗`, and lists it under `log`. The TUI messages the agent through Herdr; Claude Code has no supported way for another program to type into a running session, so here the last step is yours.
+- **auto-fix, anything else** (failing checks, Copilot's comments, a merge conflict): marks the PR with a banner and `fix it ↗`, and lists it under `log`. The TUI messages the agent through Herdr; Claude Code has no supported way for another program to type into a running session, so here the last step is yours.
 
 It also tells you (under `log`, and as a desktop notification when `⚙ Desktop notifications` is on) when a PR turns green and waits for a reviewer, when Copilot finishes a review, when a PR needs fixing, and when a run you follow finishes. What it did is kept in the `log`.
 
@@ -84,7 +84,7 @@ A `desktop` session is clickable: the click opens it in the Claude Code desktop 
 
 ## Keys
 
-`j`/`k` or `↓`/`↑` select a PR, `Enter` its details, `o` open its diff, `c` copy its link, `b` copy its branch, `m` ready or draft, `t` / `v` / `g` auto-fix / auto-review / automerge, `f` fix it in a new session, `a` go to the session that made it, `u` stop following it, `r` look at GitHub now, `n` new story, `F` follow, `d` show done stories, `Ctrl-K` or `/` the palette (every action that fits where you are, narrowed as you type), `?` help, `Esc` closes a dialog or goes back to the stories. Right-click a PR or a story for its actions. Paste a link to a PR or a run anywhere on the page to follow it.
+`j`/`k` or `↓`/`↑` select a PR, `Enter` its details, `o` open its diff, `c` copy its link, `b` copy its branch, `m` ready or draft, `t` / `v` / `g` auto-fix / auto-review / automerge, `f` fix it, `a` go to the session that made it, `u` stop following it, `r` look at GitHub now, `n` new story, `F` follow, `d` show done stories, `Ctrl-K` or `/` the palette (every action that fits where you are, narrowed as you type), `?` help, `Esc` closes a dialog or goes back to the stories. Right-click a PR or a story for its actions. Paste a link to a PR or a run anywhere on the page to follow it.
 
 ## Links open in your own browser
 
@@ -136,7 +136,7 @@ This repository has that file in `.claude/launch.json`. Put the same file in `.c
 
 ## The console in every session
 
-The repo is also a Claude Code plugin marketplace with one mod, `capcom` (in `mod/`), so you do not have to switch to the page: a pane beside every Claude Code session shows the GO / NO-GO light, the 5H and 7D gauges, the PRs that need you (red, needing a fix, a merge conflict, Copilot's comments, waiting for a reviewer or ready to merge) and the agents waiting on you with what they ask. A click opens the PR, `fix ↗` starts the fixing session, an agent opens its session, and `Open CAPCOM ↗` opens this page. Links are opened by `capcom web` itself (`POST /open`), so they work in the desktop app too.
+The repo is also a Claude Code plugin marketplace with one mod, `capcom` (in `mod/`), so you do not have to switch to the page: a pane beside every Claude Code session shows the GO / NO-GO light, the 5H and 7D gauges, the PRs that need you (red, needing a fix, a merge conflict, Copilot's comments, waiting for a reviewer or ready to merge) and the agents waiting on you with what they ask. A click opens the PR, `fix it ↗` copies `/pr-address <url>` and opens the PR's session to paste it into (or a new one), an agent opens its session, and `Open CAPCOM ↗` opens this page. Links are opened by `capcom web` itself (`POST /open`), so they work in the desktop app too.
 
 Install it with `/plugin install capcom --marketplace philals/mission-control-capcom` (or, in the desktop app, + next to the prompt box, Plugins, Add marketplace, Add plugin). It asks `http://127.0.0.1:1969/api/state` every 5 seconds while a session is open, which also counts as a page looking, so GitHub is polled at the faster pace while any session is open. When `capcom web` does not answer the pane says so. It opens itself where a pane fits beside the chat (a wide terminal, the desktop app); `/capcom` opens it anywhere. Its buttons take the page's actions through the same endpoint (`POST /api/do`); there, a click on `[DRAFT]`/`[READY]` or the automerge tick takes effect at once, with no question.
 

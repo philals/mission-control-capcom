@@ -94,8 +94,15 @@ function goToAgent(pr) {
   else toast("no Claude Code session is known to have made this PR");
 }
 
-function fixInSession(pr) {
-  if (pr.fix) openExternal(pr.fix.link, "opened a new session with /pr-address typed in: press Enter to send it");
+async function fixInSession(pr) {
+  if (!pr.fix) return;
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(pr.fix.prompt);
+    copied = true;
+  } catch {}
+  const where = pr.fix.open === pr.fix.link ? "a new session" : "the session that made it";
+  openExternal(pr.fix.open, copied ? `opening ${where}: ${pr.fix.prompt} is on the clipboard, paste it in` : `opening ${where}: could not copy, the prompt is ${pr.fix.prompt}`);
 }
 
 function unfollow(pr) {
@@ -529,7 +536,10 @@ function railStep(pr, s) {
 }
 
 function tickButton(label, on, onclick, title) {
-  return lampButton(label, on, onclick, title);
+  const b = btn("", onclick, on ? "tick on" : "tick", title);
+  b.setAttribute("aria-pressed", String(on));
+  add(b, el("span", "box" + (on ? " on" : ""), on ? "✓" : ""), document.createTextNode(label));
+  return b;
 }
 
 function prButtons(pr) {
@@ -606,7 +616,7 @@ function prCard(pr) {
     const fix = el("div", "fixbar");
     add(fix, el("span", "orange bold", `⚠ ${pr.fix.why}`));
     if (pr.fix.onlyBehind) add(fix, el("span", "dim", pr.autofix ? " · capcom updates it for you" : " · tick auto-fix and capcom updates it for you"));
-    else add(fix, btn("fix it in a new session ↗", () => fixInSession(pr), "small primary", "opens a new Claude Code desktop session with /pr-address typed in: press Enter to send it"));
+    else add(fix, btn("fix it ↗", () => fixInSession(pr), "small primary", "opens the session that made this PR (or a new one) and puts /pr-address on the clipboard to paste in"));
     card.append(fix);
   }
 

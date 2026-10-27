@@ -66,6 +66,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .lamp.on.amber { background: var(--orange); box-shadow: 0 0 7px 1px rgba(255, 154, 60, .7); }
 .lamp.on.cyan { background: var(--cyan); box-shadow: 0 0 7px 1px rgba(140, 194, 255, .65); }
 .lamp.on.pulse { animation: lamp 1.6s ease-in-out infinite; }
+.box { display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; flex: none; border: 1px solid var(--dim); border-radius: 2px; font-size: 11px; line-height: 1; font-weight: 700; vertical-align: middle; }
+.box.on { border-color: var(--green); background: var(--green); color: #0b0f0d; }
 @keyframes lamp { 50% { filter: brightness(.5); } }
 
 /* ---- the top rail ---- */

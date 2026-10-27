@@ -24,6 +24,7 @@ export type Pr = {
   autoreview: boolean
   automerge?: boolean
   fixLink?: string
+  fixPrompt?: string
   agentLink?: string
   updatedAt?: string
 }

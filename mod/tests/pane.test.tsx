@@ -12,7 +12,7 @@ const STATE = {
   prs: [
     {
       url: 'https://github.com/o/api/pull/1', repo: 'o/api', number: 1, title: 'Fix it', red: true, managed: true, autofix: true,
-      fix: { why: 'CI failed', link: 'claude://code/new?prompt=x' }, counts: { failed: 1, running: 1 },
+      fix: { why: 'CI failed', prompt: '/pr-address https://github.com/o/api/pull/1', link: 'claude://code/new?prompt=x', open: 'claude://code/continue?session=local_a' }, counts: { failed: 1, running: 1 },
       rail: [{ state: 'done', text: 'ready' }, { state: 'wrong', text: 'CI' }],
       checks: [
         { label: 'build', state: 'passed' },
@@ -171,5 +171,21 @@ test('a PR collapses to its name, status and title, and back', async ($, on) => 
   expect(await ui.find({ key: `badge-${url}` })).toBeUndefined()
   await ui.press({ key: 'prs-all' })
   expect(await ui.find({ key: 'badge-https://github.com/o/web/pull/4' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('fix it puts the prompt on the clipboard and opens the session', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const posted = world(on, () => JSON.stringify(STATE))
+  const copied: string[] = []
+  on('ui.copy', (_, e) => (copied.push(e.text), { value: { isCopied: true } }))
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'fixit-https://github.com/o/api/pull/1' })
+  await clock.settle()
+  expect(copied).toEqual(['/pr-address https://github.com/o/api/pull/1'])
+  expect(posted.filter(p => p.path === '/open').map(p => p.body.url)).toEqual(['claude://code/continue?session=local_a'])
+  expect(await ui.find({ type: 'Text', text: /on the clipboard/ })).toBeDefined()
   await ui.unmount()
 })

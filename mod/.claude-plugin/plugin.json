@@ -1,6 +1,6 @@
 {
   "name": "capcom",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "author": { "name": "philals" },
   "description": "A CAPCOM console beside every session: GO/NO-GO, the PRs and agents that need you, and plan usage, from capcom web",
   "types": "./types/index.d.ts"

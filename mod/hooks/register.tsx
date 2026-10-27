@@ -166,7 +166,7 @@ export const register: Register = on => {
     // ---- pull requests
     const tick = (key: string, label: string, isOn: boolean, fn: () => void) => (
       <Button key={key} plain dimColor={!isOn} onPress={fn}>
-        <Text color={isOn ? C.go : C.dim}>{isOn ? "■" : "□"}</Text> {label}
+        <Text color={isOn ? C.go : C.dim} bold={isOn}>{isOn ? "[✓]" : "[ ]"}</Text> {label}
       </Button>
     )
     const railLine = (pr: Pr) => (
@@ -236,7 +236,11 @@ export const register: Register = on => {
               : null}
           </Box>
           <Box columnGap={1} flexWrap="wrap">
-            {pr.fixLink ? <Button key={`fixit-${pr.url}`} variant="primary" label="fix it ↗" onPress={press(() => open($, pr.fixLink!))} /> : null}
+            {pr.fixLink ? <Button key={`fixit-${pr.url}`} variant="primary" label="fix it ↗" onPress={e => void (async () => {
+              const copied = pr.fixPrompt ? (await $.ui.copy({ text: pr.fixPrompt, surface: e.surface }).catch(() => ({ isCopied: false }))).isCopied : false
+              await update($, view, x => ({ ...x, message: copied ? `${pr.fixPrompt} is on the clipboard: paste it into the session` : `could not copy; the prompt is ${pr.fixPrompt}` }))
+              await open($, pr.fixLink!)
+            })()} /> : null}
             {pr.agentLink ? <Button key={`agent-${pr.url}`} label="its session ↗" onPress={press(() => open($, pr.agentLink!))} /> : null}
             <Button key={`open-${pr.url}`} label="GitHub ↗" onPress={press(() => open($, pr.url))} />
             {pr.followed ? <Button key={`unfollow-${pr.url}`} label="unfollow" onPress={press(() => act($, 'pr.unfollow', { url: pr.url }))} /> : null}

@@ -132,6 +132,7 @@ fn ticks_are_kept_in_the_settings_file_the_tui_reads_and_start_afresh_when_ticke
     let r = rig();
     with_prs(&r, vec![pr(1)]);
     let url = "https://github.com/acme/widgets/pull/1";
+    act(&r, json!({ "action": "settings", "key": "autofix", "value": false }));
     assert_eq!(state(&r)["prs"][0]["autofix"], false);
     assert_eq!(act(&r, json!({ "action": "pr.autofix", "url": url, "on": true })).1["ok"], true);
     assert_eq!(state(&r)["prs"][0]["autofix"], true);
@@ -317,7 +318,7 @@ fn a_pr_that_needs_fixing_carries_a_link_to_a_session_with_the_fix_typed_in() {
     let fix = state(&r)["prs"][0]["fix"].clone();
     assert_eq!(fix["why"], "1 failing check");
     assert_eq!(fix["prompt"], "/pr-address https://github.com/acme/widgets/pull/1");
-    assert!(fix["link"].as_str().unwrap().starts_with("claude://code/new?prompt=%2Fpr-address%20https%3A%2F%2Fgithub.com"), "{fix}");
+    assert!(fix["link"].as_str().unwrap().starts_with("claude://code/new?prompt=%2Fpr-address%20https%3A%2F%2Fgithub.com"), "{fix}");    assert_eq!(fix["open"], fix["link"], "no session made it: a new one");
 }
 
 fn behind() -> PullRequest {
@@ -338,6 +339,7 @@ fn settle(_r: &Rig) {
 fn a_branch_that_is_only_behind_is_updated_through_github_once_with_no_agent() {
     let r = rig();
     act(&r, json!({ "action": "settings", "key": "autofix", "value": true }));
+    act(&r, json!({ "action": "settings", "key": "autoreview", "value": false }));
     let items = vec![behind()];
     with_prs(&r, items.clone());
     r.server.on_prs(&items);
@@ -354,6 +356,7 @@ fn a_pr_the_autopilot_cannot_fix_alone_is_noted_and_notified_but_nothing_is_sent
     let r = rig();
     act(&r, json!({ "action": "settings", "key": "autofix", "value": true }));
     act(&r, json!({ "action": "settings", "key": "notify", "value": true }));
+    act(&r, json!({ "action": "settings", "key": "autoreview", "value": false }));
     let mut p = pr(1);
     p.is_draft = false;
     p.checks = serde_json::from_value(json!([{ "name": "build", "workflow": null, "state": "Failed", "started_at": null, "completed_at": "2026-10-01T00:00:00Z", "url": null }])).unwrap();
