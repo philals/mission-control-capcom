@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderChildren } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren, SessionRateLimit } from 'claude-code'
 
 import type { Agent, Check, Pending, Pr, Run, Step, Subagent, Tone, View } from '../types'
-import { EMPTY, ago, approx, clock, gauge, shorten, summarize, until, weekPct } from './model'
+import { EMPTY, ago, approx, clock, gauge, shorten, summarize, until, weekPct, withLive } from './model'
 
 export { summarize } from './model'
 
@@ -20,12 +20,14 @@ const RUN: Record<string, [string, string]> = {
   failed: ['✗', C.red], cancelled: ['⊘', C.dim], skipped: ['·', C.dim],
 }
 
+let limits: SessionRateLimit[] = []
+
 async function refresh($: EngineInterface) {
   const now = await $.clock.now()
   try {
     const res = await $.http.fetch(`${BASE}/api/state`)
     if (!res.ok) throw new Error(`capcom web answered ${res.status}`)
-    const value = summarize(JSON.parse(res.text), now)
+    const value = withLive(summarize(JSON.parse(res.text), now), limits)
     await update($, snapshot, () => value)
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
@@ -54,9 +56,16 @@ async function act($: EngineInterface, action: string, args: Record<string, unkn
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'capcom', description: 'Show the CAPCOM console beside this session' })
+    limits = await $.session.usage().then(u => u.rateLimits, () => [])
     void refresh($)
     $.clock.every(EVERY_MS, () => void refresh($))
     void $.ui.open({ id: PANE, title: 'CAPCOM' })
+    return next(e)
+  })
+
+  on('session.measure', async ($, e, next) => {
+    limits = e.rateLimits
+    await update($, snapshot, s => withLive(s, limits))
     return next(e)
   })
 

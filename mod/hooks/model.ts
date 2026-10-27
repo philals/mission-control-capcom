@@ -125,6 +125,15 @@ export function summarize(state: Raw, at: number): Snapshot {
   }
 }
 
+/** This session's own plan usage, live, over capcom web's copy, which is only as fresh as the last CLI status line. */
+export function withLive(s: Snapshot, limits: { kind: string; percentUsed: number; resetsAt?: string }[]): Snapshot {
+  const of = (kind: string) => {
+    const l = limits.find(x => x.kind === kind)
+    return l ? { pct: l.percentUsed, resetsAt: l.resetsAt } : undefined
+  }
+  return { ...s, fiveHour: of('five_hour') ?? s.fiveHour, sevenDay: of('seven_day') ?? s.sevenDay }
+}
+
 /** A segmented gauge, `▮▮▮▯▯`, split so each half takes its own colour. */
 export function gauge(pct: number, cells: number): { on: string; off: string } {
   const n = Math.max(0, Math.min(cells, Math.round((pct / 100) * cells)))

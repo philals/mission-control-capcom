@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
-import { gauge, summarize, weekPct } from '../hooks/model'
+import { gauge, summarize, weekPct, withLive } from '../hooks/model'
 
 const NOW = Date.parse('2026-10-23T01:00:00Z')
 
@@ -56,6 +56,8 @@ test('the state is cut down to what the pane draws', () => {
   expect(s.runs[0]?.fullRepo).toBe('o/api')
   expect(gauge(72, 5)).toEqual({ on: '▮▮▮▮', off: '▯' })
   expect(weekPct(new Date(2026, 9, 24, 12))).toBe(100)
+  const live = withLive(s, [{ kind: 'seven_day', percentUsed: 9, resetsAt: '2026-10-30T13:00:00Z' }])
+  expect([live.sevenDay?.pct, live.fiveHour?.pct]).toEqual([9, 72])
 })
 
 function world(on: Parameters<TestBody>[1], answer: () => string) {
@@ -63,6 +65,7 @@ function world(on: Parameters<TestBody>[1], answer: () => string) {
   on('command.register', () => ({ value: { command: 'capcom' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: {}, rateLimits: [{ kind: 'seven_day', percentUsed: 9 }] } }))
   on('http.fetch', (_, e) => {
     const path = new URL(e.url).pathname
     if (path === '/api/state') return { value: { status: 200, ok: true, headers: {}, text: answer() } }
@@ -80,7 +83,7 @@ test('the console draws on every surface, and links open through capcom web', as
 
   for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    for (const words of [/NO-GO · 1 red/, /72%/, /pick A or B/, /Scan things/, /Deploy/, /needs a reviewer/, /CI failed/]) {
+    for (const words of [/NO-GO · 1 red/, /72%/, /9%/, /pick A or B/, /Scan things/, /Deploy/, /needs a reviewer/, /CI failed/]) {
       expect(await ui.find({ type: 'Text', text: words })).toBeDefined()
     }
     await ui.press({ key: 'title-https://github.com/o/api/pull/1' })
