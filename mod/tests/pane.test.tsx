@@ -121,20 +121,22 @@ test('the console draws on every surface, and links open through capcom web', as
   ])
 })
 
-test('marking ready asks first, then sends the confirmed action', async ($, on) => {
+test('marking ready and automerge go at once, with no question', async ($, on) => {
   const clock = mock.clock(on, { now: NOW })
   const draft = { ...STATE, prs: [{ ...STATE.prs[0], draft: true }] }
   const posted = world(on, () => JSON.stringify(draft))
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await clock.settle()
 
+  const url = 'https://github.com/o/api/pull/1'
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await ui.press({ key: 'badge-https://github.com/o/api/pull/1' })
-  expect(posted.filter(p => p.path === '/api/do')).toEqual([])
-  expect(await ui.find({ type: 'Text', text: /Mark ready for review\?/ })).toBeDefined()
-  await ui.press({ key: 'yes-https://github.com/o/api/pull/1' })
+  await ui.press({ key: `badge-${url}` })
+  await ui.press({ key: `merge-${url}` })
   await clock.settle()
-  expect(posted.filter(p => p.path === '/api/do').map(p => p.body)).toEqual([{ action: 'pr.ready', url: 'https://github.com/o/api/pull/1', confirm: true }])
+  expect(posted.filter(p => p.path === '/api/do').map(p => p.body)).toEqual([
+    { action: 'pr.ready', url, confirm: true },
+    { action: 'pr.automerge', url, on: true, confirm: true },
+  ])
   expect(await ui.find({ type: 'Text', text: /done it/ })).toBeDefined()
   await ui.unmount()
 })

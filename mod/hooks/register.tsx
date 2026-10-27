@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren, SessionRateLimit } from 'claude-code'
 
-import type { Agent, Check, Pending, Pr, Run, Step, Subagent, Tone, View } from '../types'
+import type { Agent, Check, Pr, Run, Step, Subagent, Tone, View } from '../types'
 import { EMPTY, ago, approx, clock, gauge, shorten, summarize, until, weekPct, withLive } from './model'
 
 export { summarize } from './model'
@@ -97,7 +97,6 @@ export const register: Register = on => {
     const inner = W - 4
 
     const press = (fn: () => Promise<unknown>) => () => void fn()
-    const ask = (p: Pending) => press(() => update($, view, x => ({ ...x, pending: p })))
     const flipped = v.flipped ?? []
     const isOpen = (pr: Pr) => pr.quiet === flipped.includes(pr.url)
     const toggle = (url: string) =>
@@ -135,19 +134,6 @@ export const register: Register = on => {
     }
 
     const go = s.red === 0
-    const pending = (key: string) =>
-      v.pending?.key === key ? (
-        <Box columnGap={1} flexWrap="wrap">
-          <Text color={C.amber} bold>{v.pending.question}</Text>
-          <Button key={`yes-${key}`} label="yes" variant="primary" onPress={press(async () => {
-            const p = v.pending!
-            await update($, view, x => ({ ...x, pending: undefined }))
-            await act($, p.action, { ...p.args, confirm: true })
-          })} />
-          <Button key={`no-${key}`} label="no" onPress={press(() => update($, view, x => ({ ...x, pending: undefined })))} />
-        </Box>
-      ) : null
-
     // ---- mission: the go/no-go poll, plan usage and the working week
     const meter = (label: string, pct: number, reset?: string) => {
       const g = gauge(pct, 5)
@@ -231,12 +217,7 @@ export const register: Register = on => {
               <Text bold color={color}>{pr.name}</Text>
               {pr.tag ? <Text color={C.purple}>{`  ${pr.tag}`}</Text> : pr.followed ? <Text color={C.purple}>  followed</Text> : null}
             </Button>
-            <Button key={`badge-${pr.url}`} plain dimColor={pr.draft} onPress={ask({
-              key: pr.url,
-              question: pr.draft ? 'Mark ready for review?' : 'Back to a draft?',
-              action: pr.draft ? 'pr.ready' : 'pr.draft',
-              args: { url: pr.url },
-            })}>
+            <Button key={`badge-${pr.url}`} plain dimColor={pr.draft} onPress={press(() => act($, pr.draft ? 'pr.ready' : 'pr.draft', { url: pr.url, confirm: true }))}>
               <Text color={pr.draft ? C.dim : C.go} bold>{`[${badge}]`}</Text>
             </Button>
           </Box>
@@ -247,17 +228,11 @@ export const register: Register = on => {
           {pr.why ? <Text color={color} bold={pr.tone !== 'dim'} dimColor={pr.tone === 'dim'} wrap="truncate">{pr.why}</Text> : null}
           {railLine(pr)}
           {pr.checks.map((c, i) => checkLine(pr, c, i))}
-          {pending(pr.url)}
           <Box columnGap={2} flexWrap="wrap">
             {pr.managed ? tick(`fix-${pr.url}`, 'auto-fix', pr.autofix, press(() => act($, 'pr.autofix', { url: pr.url, on: !pr.autofix }))) : null}
             {pr.managed ? tick(`review-${pr.url}`, 'auto-review', pr.autoreview, press(() => act($, 'pr.autoreview', { url: pr.url, on: !pr.autoreview }))) : null}
             {pr.automerge !== undefined
-              ? tick(`merge-${pr.url}`, 'automerge', pr.automerge, ask({
-                  key: pr.url,
-                  question: pr.automerge ? 'Take automerge off?' : 'Turn automerge on?',
-                  action: 'pr.automerge',
-                  args: { url: pr.url, on: !pr.automerge },
-                }))
+              ? tick(`merge-${pr.url}`, 'automerge', pr.automerge, press(() => act($, 'pr.automerge', { url: pr.url, on: !pr.automerge, confirm: true })))
               : null}
           </Box>
           <Box columnGap={1} flexWrap="wrap">
