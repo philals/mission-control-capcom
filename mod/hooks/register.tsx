@@ -327,7 +327,7 @@ export const register: Register = on => {
     const agents = panel(
       s.needsYou ? C.amber : C.blue,
       `AGENTS · ${s.agentCount} running`,
-      [s.working ? `${s.working} working` : '', s.needsYou ? `${s.needsYou} need you` : '', unread ? `${unread} unread` : ''].filter(Boolean).join(' · ') || null,
+      [s.working ? `${s.working} working` : '', s.needsYou ? `${s.needsYou} need you` : '', unread ? `${unread} ●` : ''].filter(Boolean).join(' · ') || null,
       [
         s.groups.length === 0 ? <Text color={C.faint}>no Claude Code sessions running</Text> : null,
         ...s.groups.map(g => (

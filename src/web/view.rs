@@ -288,8 +288,8 @@ pub(super) fn agents_view(live: &Live, boards: &[Board], now: DateTime<Utc>) -> 
                         match (a.status, read_state(live, a)) {
                             (AgentStatus::Working, _) => ("working", a.status.word(), a.status.icon()),
                             (AgentStatus::Done, _) => ("done", a.status.word(), a.status.icon()),
-                            (_, Some(false)) => ("unread", "unread", "●"),
-                            (_, Some(true)) => ("read", "read", a.status.icon()),
+                            (_, Some(false)) => ("unread", "●", "●"),
+                            (_, Some(true)) => ("read", "○", "○"),
                             _ => ("idle", a.status.word(), a.status.icon()),
                         }
                     };
