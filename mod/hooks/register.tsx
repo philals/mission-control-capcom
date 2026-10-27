@@ -275,7 +275,7 @@ export const register: Register = on => {
 
     // ---- agents
     const agentGlyph = (a: Agent): [string, string] =>
-      a.state === 'needs' ? ['!', C.amber] : a.state === 'working' ? ['◐', C.blue] : a.state === 'done' ? ['✓', C.go] : ['○', C.dim]
+      a.state === 'needs' ? ['!', C.amber] : a.state === 'working' ? ['◐', C.blue] : a.state === 'done' ? ['✓', C.go] : a.state === 'unread' ? ['●', C.text] : ['○', C.dim]
     const subLine = (a: Agent, sa: Subagent) => (
       <Box justifyContent="space-between">
         <Text wrap="truncate">
@@ -301,7 +301,7 @@ export const register: Register = on => {
         <Text>
           <Text color={C.faint}>{' '.repeat(a.depth * 2)}</Text>
           <Text color={color} bold>{`${glyph} `}</Text>
-          <Text bold={a.state === 'needs'}>{shorten(a.label, Math.max(10, inner - 18))}</Text>
+          <Text bold={a.state === 'needs' || a.state === 'unread'}>{shorten(a.label, Math.max(10, inner - 18))}</Text>
         </Text>
       )
       return (
@@ -310,7 +310,7 @@ export const register: Register = on => {
             {a.link ? (
               <Button key={`agent-${a.key}`} plain onPress={press(() => open($, a.link!))}>
                 <Text color={color} bold>{`${' '.repeat(a.depth * 2)}${glyph} `}</Text>
-                <Text bold={a.state === 'needs'}>{shorten(a.label, Math.max(10, inner - 18))}</Text>
+                <Text bold={a.state === 'needs' || a.state === 'unread'}>{shorten(a.label, Math.max(10, inner - 18))}</Text>
               </Button>
             ) : label}
             <Text>
@@ -323,10 +323,11 @@ export const register: Register = on => {
         </Box>
       )
     }
+    const unread = s.groups.flatMap(g => g.agents).filter(a => a.state === 'unread').length
     const agents = panel(
       s.needsYou ? C.amber : C.blue,
       `AGENTS · ${s.agentCount} running`,
-      [s.working ? `${s.working} working` : '', s.needsYou ? `${s.needsYou} need you` : ''].filter(Boolean).join(' · ') || null,
+      [s.working ? `${s.working} working` : '', s.needsYou ? `${s.needsYou} need you` : '', unread ? `${unread} unread` : ''].filter(Boolean).join(' · ') || null,
       [
         s.groups.length === 0 ? <Text color={C.faint}>no Claude Code sessions running</Text> : null,
         ...s.groups.map(g => (

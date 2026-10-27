@@ -299,6 +299,8 @@ button.step.toggle:hover { color: var(--fg); text-decoration: underline; }
 .agent.needs { background: rgba(255, 154, 60, .07); }
 .agent.done .icon, .agent.done .word { color: var(--green); }
 .agent.idle .icon, .agent.idle .word { color: var(--dim); }
+.agent.unread .icon, .agent.unread .word, .agent.unread .label { color: var(--fg); font-weight: 700; }
+.agent.read .icon, .agent.read .word { color: var(--dim); }
 .agent .src { color: var(--dim); font-family: var(--label); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
 .agent .when { color: var(--dim); white-space: nowrap; font-size: 11px; }
 .agent.clickable { cursor: pointer; }

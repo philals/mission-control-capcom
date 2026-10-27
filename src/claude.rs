@@ -205,7 +205,7 @@ pub fn subagent_transcript(config: &Path, session: &str, agent: &str) -> Option<
     let file = subagent_dirs(config, session).into_iter().map(|d| d.join(format!("agent-{agent}.jsonl"))).find(|f| f.is_file())?;
     let raw = std::fs::read_to_string(file).ok()?;
     let mut out: Vec<Value> = Vec::new();
-    let mut said = |out: &mut Vec<Value>, kind: &str, text: &str| {
+    let said = |out: &mut Vec<Value>, kind: &str, text: &str| {
         let text = without_reminders(text);
         if !text.is_empty() {
             let kind = if kind == "text" && out.is_empty() { "prompt" } else { kind };

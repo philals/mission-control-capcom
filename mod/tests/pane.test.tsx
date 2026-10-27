@@ -30,6 +30,7 @@ const STATE = {
     needsYou: 1,
     groups: [{ label: 'capcom', entries: [
       { pane: 'p1', label: 'T1 impl', state: 'needs', status: 'needs you', source: 'desktop', note: 0, deepLink: 'claude://code/continue?session=local_a', subagents: [] },
+      { pane: 'p3', label: 'said something', state: 'unread', status: 'unread', source: 'desktop', note: null, subagents: [] },
       { pane: 'p2', label: 'busy', state: 'working', status: 'working', source: 'cli', note: null, subagents: [{ id: 'a1', kind: 'Explore', description: 'Scan things', running: true }] },
     ] }],
     notes: [{ session: 's1', task: 'do T1', next: 'pick A or B', needsYou: true }],
@@ -52,7 +53,7 @@ test('the state is cut down to what the pane draws', () => {
   expect(s.prs[0]?.checks.map(c => c.label)).toEqual(['test', 'lint'])
   expect(s.prs[0]?.automerge).toBe(false)
   expect(s.groups[0]?.agents[0]?.note?.next).toBe('pick A or B')
-  expect(s.groups[0]?.agents[1]?.subagents[0]?.kind).toBe('Explore')
+  expect(s.groups[0]?.agents[2]?.subagents[0]?.kind).toBe('Explore')
   expect(s.runs[0]?.fullRepo).toBe('o/api')
   expect(gauge(72, 5)).toEqual({ on: '▮▮▮▮', off: '▯' })
   expect(weekPct(new Date(2026, 9, 24, 12))).toBe(100)
@@ -106,7 +107,7 @@ test('the console draws on every surface, and links open through capcom web', as
 
   for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    for (const words of [/NO-GO · 1 red/, /72%/, /9%/, /pick A or B/, /Scan things/, /Deploy/, /needs a reviewer/, /CI failed/]) {
+    for (const words of [/NO-GO · 1 red/, /72%/, /9%/, /1 unread/, /pick A or B/, /Scan things/, /Deploy/, /needs a reviewer/, /CI failed/]) {
       expect(await ui.find({ type: 'Text', text: words })).toBeDefined()
     }
     await ui.press({ key: 'title-https://github.com/o/api/pull/1' })

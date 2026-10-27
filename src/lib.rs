@@ -4,6 +4,7 @@ pub mod attention;
 pub mod autopilot;
 pub mod cache;
 pub mod claude;
+pub mod desktop;
 pub mod durations;
 pub mod finish;
 pub mod fixstate;

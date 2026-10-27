@@ -70,6 +70,8 @@ struct Live {
     notes: Vec<Note>,
     /// Each live session's subagents, by session id.
     subagents: std::collections::HashMap<String, Vec<crate::claude::Subagent>>,
+    /// The desktop sessions the app shows as unread (`local_…`), when its list can be read.
+    unread: Option<std::collections::HashSet<String>>,
 }
 
 /// Where the page learns which agents are running.
@@ -79,6 +81,9 @@ pub trait AgentSource: Send + Sync {
         Vec::new()
     }
     fn subagent_transcript(&self, _session: &str, _agent: &str) -> Option<Vec<Value>> {
+        None
+    }
+    fn unread(&self) -> Option<std::collections::HashSet<String>> {
         None
     }
 }
@@ -131,6 +136,9 @@ impl AgentSource for ClaudeSessions {
     }
     fn subagent_transcript(&self, session: &str, agent: &str) -> Option<Vec<Value>> {
         crate::claude::subagent_transcript(&self.config, session, agent)
+    }
+    fn unread(&self) -> Option<std::collections::HashSet<String>> {
+        crate::desktop::unread(&crate::desktop::storage()?)
     }
 }
 
@@ -275,7 +283,9 @@ impl Server {
                     asked = Some(std::time::Instant::now());
                     let result = source.agents();
                     let subs = result.as_ref().map(|list| list.iter().filter_map(|a| a.session.clone()).map(|s| (source.subagents(&s), s)).filter(|(l, _)| !l.is_empty()).map(|(l, s)| (s, l)).collect()).unwrap_or_default();
+                    let unread = source.unread();
                     let mut live = me.live.lock().unwrap_or_else(|e| e.into_inner());
+                    live.unread = unread;
                     match result {
                         Ok(list) => {
                             live.agents = list;
@@ -688,6 +698,23 @@ mod tests {
         assert!(post(&s, PAGE, r#"{"url":"claude://code/continue?session=local_other"}"#).starts_with("HTTP/1.1 403"), "not a session on the list");
         assert!(post(&s, PAGE, r#"{"url":"claude://code/new"}"#).starts_with("HTTP/1.1 403"));
         assert_eq!(*opened.0.lock().unwrap(), vec!["claude://code/continue?session=local_abc-123".to_string()]);
+    }
+
+    #[test]
+    fn an_idle_desktop_session_is_read_or_unread_as_the_app_sidebar_has_it() {
+        let (_root, s) = server();
+        let desk = |n: u32| agent(&format!("claude-desktop:{n}:local_{n}"), None, AgentStatus::Idle, Some(&format!("s-{n}")));
+        s.live.lock().unwrap().agents = vec![desk(1), desk(2), agent("cli:8", None, AgentStatus::Idle, Some("s-8"))];
+        let states = |s: &Arc<Server>| {
+            let state = agents_state(s);
+            state["groups"].as_array().unwrap().iter().flat_map(|g| g["entries"].as_array().unwrap().clone()).map(|e| (e["pane"].as_str().unwrap().to_string(), e["state"].as_str().unwrap().to_string())).collect::<std::collections::BTreeMap<_, _>>()
+        };
+        assert!(states(&s).values().all(|v| v == "idle"), "no list: idle, as before");
+        s.live.lock().unwrap().unread = Some(["local_2".to_string()].into());
+        let got = states(&s);
+        assert_eq!(got["claude-desktop:1:local_1"], "read");
+        assert_eq!(got["claude-desktop:2:local_2"], "unread");
+        assert_eq!(got["cli:8"], "idle", "the app knows nothing of a terminal session");
     }
 
     #[test]

@@ -990,6 +990,8 @@ function renderAgents() {
   const parts = [document.createTextNode("AGENTS · "), el("span", "count", String(a.count))];
   if (a.working) parts.push(el("span", "cyan", ` · ${a.working} working`));
   if (a.needsYou) parts.push(el("span", "orange bold", ` · ${a.needsYou} need you`));
+  const unread = a.groups.flatMap((g) => g.entries).filter((e) => e.state === "unread").length;
+  if (unread) parts.push(el("span", "bold", ` · ${unread} unread`));
   const body = shell(panel, parts);
   // Desktop sessions first, then terminal ones; each keeps its folder groups. The two headings only
   // appear when both kinds are running.

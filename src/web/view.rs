@@ -259,6 +259,13 @@ pub(super) fn run_view(run: &Run) -> Value {
     })
 }
 
+/// Whether you have read what a desktop session last said, as the app's sidebar has it; None for a terminal
+/// session, or when the app's list could not be read.
+fn read_state(live: &Live, a: &AgentInfo) -> Option<bool> {
+    let id = a.pane.splitn(3, ':').nth(2)?;
+    Some(!live.unread.as_ref()?.contains(id))
+}
+
 pub(super) fn agents_view(live: &Live, boards: &[Board], now: DateTime<Utc>) -> Value {
     let stories: Vec<(String, String)> = boards.iter().map(|b| (b.story.key.clone(), agents::short_name(&b.story.title))).collect();
     let parents = agents::parents(&live.agents, &[]);
@@ -275,13 +282,24 @@ pub(super) fn agents_view(live: &Live, boards: &[Board], now: DateTime<Utc>) -> 
                 "entries": g.entries.iter().map(|e| {
                     let a = &live.agents[e.index];
                     let needs_you = needs(a);
+                    let (state, status, icon) = if needs_you {
+                        ("needs", AgentStatus::Blocked.word(), AgentStatus::Blocked.icon())
+                    } else {
+                        match (a.status, read_state(live, a)) {
+                            (AgentStatus::Working, _) => ("working", a.status.word(), a.status.icon()),
+                            (AgentStatus::Done, _) => ("done", a.status.word(), a.status.icon()),
+                            (_, Some(false)) => ("unread", "unread", "●"),
+                            (_, Some(true)) => ("read", "read", a.status.icon()),
+                            _ => ("idle", a.status.word(), a.status.icon()),
+                        }
+                    };
                     json!({
                         "pane": a.pane,
                         "label": e.label,
                         "depth": e.depth,
-                        "status": if needs_you { AgentStatus::Blocked.word() } else { a.status.word() },
-                        "icon": if needs_you { AgentStatus::Blocked.icon() } else { a.status.icon() },
-                        "state": if needs_you { "needs" } else { match a.status { AgentStatus::Working => "working", AgentStatus::Done => "done", _ => "idle" } },
+                        "status": status,
+                        "icon": icon,
+                        "state": state,
                         "topic": a.topic,
                         "source": match crate::claude::entrypoint_of(&a.pane) { "claude-desktop" => "desktop", other => other },
                         "deepLink": crate::claude::desktop_link(&a.pane),
