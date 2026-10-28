@@ -104,13 +104,13 @@ Everything it does, every key and every setting is in [docs/tui.md](docs/tui.md)
 
 ## The console in every session
 
-`mod/` is a Claude Code mod that puts a small CAPCOM console in a pane beside every session (the desktop app, the terminal, VS Code): GO / NO-GO, the plan usage gauges, the PRs that need you and the agents waiting on you. Click a PR to open it, `fix it ↗` to copy the fixing prompt and open the PR's session to paste it into, or an agent to go to its session. It reads `capcom web` (it must be running, on port 1969) and takes the page's actions through it. Install it once, at the prompt of a terminal session:
+`mod/` is a Claude Code mod that puts a small CAPCOM console in a pane beside any session, opened with `/capcom` (the desktop app, the terminal, VS Code): GO / NO-GO, the plan usage gauges, the PRs that need you and the agents waiting on you. Click a PR to open it, `fix it ↗` to copy the fixing prompt and open the PR's session to paste it into, or an agent to go to its session. It reads `capcom web` (it must be running, on port 1969) and takes the page's actions through it. Install it once, at the prompt of a terminal session:
 
 ```
 /plugin install capcom --marketplace philals/mission-control-capcom
 ```
 
-or from a shell, `claude plugin install capcom --marketplace philals/mission-control-capcom`. In the desktop app: + next to the prompt box, Plugins, Add marketplace `philals/mission-control-capcom`, then Add plugin. It opens by itself where there is room for a pane beside the chat; `/capcom` opens it anywhere. See [docs/web.md](docs/web.md#the-console-in-every-session).
+or from a shell, `claude plugin install capcom --marketplace philals/mission-control-capcom`. In the desktop app: + next to the prompt box, Plugins, Add marketplace `philals/mission-control-capcom`, then Add plugin. It stays closed until you type `/capcom`, which opens it beside the chat. See [docs/web.md](docs/web.md#the-console-in-every-session).
 
 ## Configuration
 

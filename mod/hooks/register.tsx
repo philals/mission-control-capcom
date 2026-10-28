@@ -73,7 +73,6 @@ export const register: Register = on => {
     void share($)
     void refresh($)
     $.clock.every(EVERY_MS, () => void refresh($))
-    void $.ui.open({ id: PANE, title: 'CAPCOM' })
     return next(e)
   })
 
