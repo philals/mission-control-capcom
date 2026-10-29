@@ -23,6 +23,7 @@ const AGENT_BUTTON: &str = AGENT_ICON;
 const CONFIRM_YES: &str = "[ y Mark ready ]";
 const CONFIRM_YES_DRAFT: &str = "[ y Turn into a draft ]";
 const CONFIRM_NO: &str = "[ n Cancel ]";
+const CONFIRM_YES_DELETE: &str = "[ y Delete ]";
 pub const SHEET_STAGE_OPEN: &str = "[ open ]";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -832,7 +833,9 @@ pub fn draw_confirm(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         lines.push(Line::from(Span::styled(format!(" {t}"), Style::new().add_modifier(Modifier::BOLD))));
     }
     lines.push(Line::raw(""));
-    let (note, heading, yes_text) = if confirm.to_draft {
+    let (note, heading, yes_text) = if confirm.delete {
+        (" Its board, story file and task files are deleted. PRs and Jira are not touched.", " Delete this story? ", CONFIRM_YES_DELETE)
+    } else if confirm.to_draft {
         (" A draft cannot be merged: auto-merge stops until it is ready again.", " Turn back into a draft? ", CONFIRM_YES_DRAFT)
     } else {
         (" Reviewers are notified when it leaves draft.", " Mark ready for review? ", CONFIRM_YES)
@@ -840,14 +843,15 @@ pub fn draw_confirm(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     lines.push(Line::from(Span::styled(note, dim())));
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(ORANGE))
+        .border_style(Style::new().fg(if confirm.delete { theme::RED } else { ORANGE }))
         .title(Span::styled(heading, Style::new().add_modifier(Modifier::BOLD)));
     theme::clear(f, rect);
     f.render_widget(Paragraph::new(lines).block(block), rect);
     let y = rect.y + rect.height.saturating_sub(2);
     let yes = Rect::new(rect.x + 2, y, yes_text.chars().count() as u16, 1);
     let no = Rect::new(yes.x + yes.width + 2, y, CONFIRM_NO.chars().count() as u16, 1);
-    f.render_widget(Paragraph::new(Span::styled(yes_text, Style::new().fg(theme::GREEN).add_modifier(Modifier::BOLD))), yes);
+    let yes_color = if confirm.delete { theme::RED } else { theme::GREEN };
+    f.render_widget(Paragraph::new(Span::styled(yes_text, Style::new().fg(yes_color).add_modifier(Modifier::BOLD))), yes);
     f.render_widget(Paragraph::new(Span::styled(CONFIRM_NO, Style::new().fg(theme::CYAN))), no);
     hits.push((rect, Target::Sheet));
     hits.push((yes, Target::ConfirmYes));

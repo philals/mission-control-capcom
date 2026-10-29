@@ -132,6 +132,18 @@ pub fn update<T>(root: &Path, key: &str, f: impl FnOnce(&mut Board) -> Result<T>
     Ok(out)
 }
 
+/// Delete a story and everything kept for it: its board, its story and task files, the whole folder.
+pub fn delete(root: &Path, key: &str) -> Result<()> {
+    let dir = story_dir(root, key)?;
+    if !dir.join("board.json").is_file() {
+        bail!("no story {key} in {}", root.display());
+    }
+    if std::fs::symlink_metadata(&dir)?.file_type().is_symlink() {
+        bail!("{} is a link: not deleting through it", dir.display());
+    }
+    std::fs::remove_dir_all(&dir).with_context(|| format!("deleting {}", dir.display()))
+}
+
 pub fn list_keys(root: &Path) -> Result<Vec<String>> {
     let mut keys = Vec::new();
     if !root.exists() {
@@ -151,6 +163,21 @@ pub fn list_keys(root: &Path) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delete_takes_the_whole_story_folder_and_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        for key in ["PROJ-1", "PROJ-2"] {
+            crate::ops::init_story(dir.path(), key, "t", None).unwrap();
+        }
+        std::fs::write(dir.path().join("PROJ-1/tasks/T1.md"), "plan").unwrap();
+        delete(dir.path(), "PROJ-1").unwrap();
+        assert!(!dir.path().join("PROJ-1").exists());
+        assert_eq!(list_keys(dir.path()).unwrap(), vec!["PROJ-2".to_string()]);
+        assert!(delete(dir.path(), "PROJ-1").is_err(), "already gone");
+        assert!(delete(dir.path(), "../PROJ-2").is_err(), "not a key");
+        assert!(dir.path().join("PROJ-2/board.json").exists());
+    }
 
     fn sample_board() -> serde_json::Value {
         serde_json::json!({

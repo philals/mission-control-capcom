@@ -9,7 +9,7 @@ use crate::finish::Msg;
 use crate::model::StoryStatus;
 
 /// Actions that need an explicit confirmation from the page.
-const CONFIRMED: [&str; 7] = ["pr.ready", "pr.draft", "pr.automerge", "story.done", "story.reopen", "task.finish", "story.sync"];
+const CONFIRMED: [&str; 8] = ["pr.ready", "pr.draft", "pr.automerge", "story.done", "story.reopen", "task.finish", "story.sync", "story.delete"];
 
 fn answer(ok: bool, message: impl Into<String>) -> Value {
     json!({ "ok": ok, "message": message.into() })
@@ -70,6 +70,7 @@ impl Server {
             "settings" => self.set_setting(&text("key"), r["value"].as_bool()),
             "story.done" => self.finish_story(&text("key")),
             "story.reopen" => self.reopen_story(&text("key")),
+            "story.delete" => self.delete_story(&text("key")),
             "story.sync" => self.sync_story(&text("key")),
             "task.finish" => self.finish_task(&text("key"), &text("id")),
             "story.new" => self.new_story(&text("key")),
@@ -242,6 +243,13 @@ impl Server {
         match store::update(&self.root, key, |b| crate::rules::story_transition(b, StoryStatus::InProgress)) {
             Ok(()) => answer(true, format!("{key} is back in DOING")),
             Err(e) => answer(false, format!("could not reopen {key}: {e:#}")),
+        }
+    }
+
+    fn delete_story(&self, key: &str) -> Value {
+        match store::delete(&self.root, key) {
+            Ok(()) => answer(true, format!("{key} is deleted, with its board and task files")),
+            Err(e) => answer(false, format!("could not delete {key}: {e:#}")),
         }
     }
 

@@ -275,7 +275,7 @@ function refreshModal() {
 }
 
 // "Are you sure": what will happen, and a button that does it.
-function ask(title, lines, yes, action, args, then) {
+function ask(title, lines, yes, action, args, then, kind = "primary") {
   openModal(title, () => ({
     body: lines.map((l) => el("p", "", l)),
     foot: [
@@ -284,7 +284,7 @@ function ask(title, lines, yes, action, args, then) {
         closeModal();
         const out = await act(action, { ...args, confirm: true });
         if (then) then(out);
-      }, "primary"),
+      }, kind),
     ],
   }), { kind: "ask" });
 }

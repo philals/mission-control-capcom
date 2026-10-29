@@ -27,6 +27,7 @@ Drag a card to another column:
 - **DOING → IN REVIEW** (or `v`): if every task is `done` or `dropped`, opens a new tab named `review` in the story's Herdr workspace and starts `/story-review KEY`. The skill moves the story to `in_review` itself. Otherwise it says which tasks are unfinished. `v` on a story already in review runs the review again.
 - **TO DO → DOING** on a story with no tasks starts `/story-break-down KEY`; on one with tasks it explains that the story moves by itself once its first task leaves TODO.
 - **DOING → DONE** (or `D`, on the list or inside a story, or the palette entry "Mark … done"): puts a finished story straight into DONE, skipping the review. Every task must be `done` or `dropped`; otherwise it says which is not. `D` on a story already IN REVIEW accepts it the same way.
+- **Delete** (`X`, on the list or inside a story, or the palette entry "Delete … and all its files"): asks first, then deletes the story's whole folder (its board, `story.md` and every task file). PRs and Jira are not touched; if the stories folder is a git repo, a committed story can be got back from git.
 - **IN REVIEW → DOING** reopens the story; **IN REVIEW → DONE** (with DONE shown) accepts it. Both change the board directly.
 
 ## Board

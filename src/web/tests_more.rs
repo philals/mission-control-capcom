@@ -218,6 +218,20 @@ fn a_followed_pr_or_run_is_added_once_remembered_and_can_be_let_go() {
 }
 
 #[test]
+fn a_story_is_deleted_only_when_confirmed_and_then_gone_from_disk_and_the_page() {
+    let r = rig();
+    let key = "PROJ-1";
+    let (status, _) = act(&r, json!({ "action": "story.delete", "key": key }));
+    assert!(!status.contains(" 200"), "no confirm, no delete: {status}");
+    assert!(r.server.root.join(key).exists());
+    let (_, answer) = act(&r, json!({ "action": "story.delete", "key": key, "confirm": true }));
+    assert_eq!(answer["ok"], true, "{answer}");
+    assert!(!r.server.root.join(key).exists());
+    assert!(state(&r)["stories"].as_array().unwrap().iter().all(|s| s["key"] != key));
+    assert_eq!(act(&r, json!({ "action": "story.delete", "key": key, "confirm": true })).1["ok"], false, "already gone");
+}
+
+#[test]
 fn a_story_is_marked_done_or_reopened_through_the_same_rules_as_the_tui() {
     let r = rig();
     let key = "PROJ-1";

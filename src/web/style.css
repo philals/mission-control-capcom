@@ -281,6 +281,8 @@ button.step.toggle:hover { color: var(--fg); text-decoration: underline; }
 .btn.head:hover { border-color: var(--steel); background: rgba(255, 255, 255, .06); }
 .btn.primary { background: var(--blue); border-color: var(--cyan); }
 .btn.primary:hover { background: var(--blue-hi); }
+.btn.danger { background: #5a1d17; border-color: var(--red); color: var(--red); font-weight: 700; }
+.btn.danger:hover { background: #7a261d; color: #fff; }
 .btn.small { font-size: 10px; padding: 0 7px; }
 .btn.icon, .btn.x { background: none; border-color: transparent; padding: 0 5px; font-size: 13px; }
 .btn.icon:hover, .btn.x:hover { border-color: var(--steel); background: var(--select); }

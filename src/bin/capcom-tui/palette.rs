@@ -52,6 +52,7 @@ pub enum Action {
     PrAutoMerge(String),
     PrUnpaste(String),
     FinishStory,
+    DeleteStory,
 }
 
 #[derive(Clone, Debug)]
@@ -212,6 +213,9 @@ pub fn entries_for(app: &App) -> Vec<Entry> {
     };
     if let Some(story) = open_story.filter(|s| s.status != capcom::model::StoryStatus::Done) {
         list.push(entry(format!("Mark {} done (skips the review)", story.key), "D", Action::FinishStory));
+    }
+    if let Some(story) = open_story {
+        list.push(entry(format!("Delete {} and all its files…", story.key), "X", Action::DeleteStory));
     }
     list.push(entry("Jump to the first red PR", "", Action::JumpToRed));
     list.push(entry("Refresh GitHub now", "r", Action::RefreshGithub));

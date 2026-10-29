@@ -326,6 +326,12 @@ function reopenStory(story) {
   ask(`Reopen ${story.key}?`, ["It goes back to DOING."], "Reopen", "story.reopen", { key: story.key });
 }
 
+function deleteStory(story) {
+  ask(`Delete ${story.key}?`, [`${story.key} — ${story.title}`, `${story.tasks.length ? `Its board, story file and ${story.tasks.length} task file${story.tasks.length === 1 ? "" : "s"}` : "Its board and story file"} are deleted from disk. This cannot be undone here.`, "PRs and Jira are not touched."], "Delete", "story.delete", { key: story.key }, (out) => {
+    if (out && out.ok && location.hash.includes(encodeURIComponent(story.key))) location.hash = "#/";
+  }, "danger");
+}
+
 function syncStory(story) {
   ask(`Sync ${story.key} with GitHub?`, ["Every recorded PR's state is written to the board, and a task whose PRs are all merged is finished."], "Sync", "story.sync", { key: story.key });
 }
@@ -352,6 +358,7 @@ function storyMenu(story, x, y) {
     story.status === "in_review" || story.status === "done" ? ["Reopen…", () => reopenStory(story)] : null,
     story.jiraUrl ? ["Open in Jira", () => openExternal(story.jiraUrl)] : null,
     ["Sync PR states with GitHub…", () => syncStory(story)],
+    ["Delete story…", () => deleteStory(story)],
   ]);
 }
 

@@ -384,7 +384,7 @@ pub struct CardDrag {
     pub over: Option<usize>,
 }
 
-/// A pull request waiting for "mark ready for review" to be confirmed.
+/// A pull request waiting for "mark ready for review" to be confirmed, or a story waiting to be deleted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Confirm {
     pub url: String,
@@ -392,6 +392,8 @@ pub struct Confirm {
     pub title: String,
     /// Back to draft, rather than ready for review.
     pub to_draft: bool,
+    /// Delete the story `id` and all its files, rather than change a PR.
+    pub delete: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1015,6 +1017,33 @@ impl App {
                 self.set_notice(format!("{key} is done{}", if skipped.get() { " (the review was skipped)" } else { "" }));
             }
             Err(e) => self.set_notice(format!("could not mark {key} done: {e:#}")),
+        }
+    }
+
+    /// Ask before deleting the selected (or open) story: `y` deletes its whole folder.
+    pub fn ask_delete_story(&mut self) {
+        let key = match self.screen {
+            Screen::List => self.selected_story_key(),
+            Screen::Board => self.keys.get(self.story).cloned(),
+        };
+        let Some(key) = key else {
+            return;
+        };
+        let title = self.stories.iter().find(|s| s.key == key).map(|s| s.title.clone()).unwrap_or_default();
+        self.confirm = Some(Confirm { url: String::new(), id: key, title, to_draft: false, delete: true });
+    }
+
+    /// Delete a story and everything kept for it (its board, story file and task files).
+    pub fn delete_story(&mut self, key: &str) {
+        match store::delete(&self.root, key) {
+            Ok(()) => {
+                if self.screen == Screen::Board && self.keys.get(self.story).is_some_and(|k| k == key) {
+                    self.back();
+                }
+                self.reload();
+                self.set_notice(format!("{key} is deleted, with its board and task files"));
+            }
+            Err(e) => self.set_notice(format!("could not delete {key}: {e:#}")),
         }
     }
 
@@ -2493,7 +2522,7 @@ impl App {
     /// Ask whether to mark a draft ready for review.
     pub fn ask_mark_ready(&mut self, index: usize) {
         let confirm = self.pr_rows().get(index).and_then(|r| {
-            r.live.filter(|p| p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone(), to_draft: false })
+            r.live.filter(|p| p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone(), to_draft: false, delete: false })
         });
         if confirm.is_some() {
             self.confirm = confirm;
@@ -2503,7 +2532,7 @@ impl App {
     /// Ask whether to turn a ready PR back into a draft.
     pub fn ask_mark_draft(&mut self, index: usize) {
         let confirm = self.pr_rows().get(index).and_then(|r| {
-            r.live.filter(|p| !p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone(), to_draft: true })
+            r.live.filter(|p| !p.is_draft).map(|p| Confirm { url: r.url.clone(), id: pr_id(r), title: p.title.clone(), to_draft: true, delete: false })
         });
         if confirm.is_some() {
             self.confirm = confirm;
@@ -2554,6 +2583,10 @@ impl App {
         let Some(confirm) = self.confirm.take() else {
             return;
         };
+        if confirm.delete {
+            self.delete_story(&confirm.id);
+            return;
+        }
         self.set_notice(format!("{} {}…", if confirm.to_draft { "turning" } else { "marking" }, if confirm.to_draft { format!("{} back into a draft", confirm.id) } else { format!("{} ready", confirm.id) }));
         let change = if confirm.to_draft { self.drafter.clone() } else { self.readier.clone() };
         let done = self.ready_done.0.clone();
@@ -3199,6 +3232,7 @@ impl App {
             KeyCode::Enter | KeyCode::Char(' ') => self.open_selected(),
             KeyCode::Char('v') => self.review_selected(),
             KeyCode::Char('D') => self.finish_selected_story(),
+            KeyCode::Char('X') => self.ask_delete_story(),
             KeyCode::Char('d') => self.toggle_hide_done(),
             KeyCode::Char('n') => self.open_new_story(),
             KeyCode::Char('r') => self.reload_now(),
@@ -3224,6 +3258,7 @@ impl App {
             KeyCode::Char('x') => self.finish_selected(),
             KeyCode::Char('R') => self.sync_story_now(),
             KeyCode::Char('D') => self.finish_selected_story(),
+            KeyCode::Char('X') => self.ask_delete_story(),
             KeyCode::Char('S') => self.toggle_auto_sync(),
             KeyCode::Char('r') => self.reload_now(),
             _ => {}
@@ -3305,6 +3340,7 @@ impl App {
             Action::BackToList => self.back(),
             Action::SyncStory => self.sync_story_now(),
             Action::FinishStory => self.finish_selected_story(),
+            Action::DeleteStory => self.ask_delete_story(),
             Action::Help => self.help = true,
             Action::Quit => return true,
             Action::PlanTask => self.start_selected(Status::Planning),

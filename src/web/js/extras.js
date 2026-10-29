@@ -144,6 +144,7 @@ function paletteItems() {
     if (story.allFinished && story.status === "in_progress") push(`Review ${story.key} in a new session`, "", () => startSession(story.review, "/story-review"));
     if (story.allFinished && story.status !== "done") push(`Mark ${story.key} done`, "", () => markStoryDone(story));
     if (story.status !== "in_progress") push(`Reopen ${story.key}`, "", () => reopenStory(story));
+    push(`Delete ${story.key}`, "", () => deleteStory(story));
   }
   push("Look at GitHub now", "r", () => act("refresh"));
   push("Follow a PR or a run by its link", "F", followDialog);

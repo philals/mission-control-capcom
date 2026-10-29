@@ -53,6 +53,7 @@ Every change shows what it will do and waits for your click, except the cheap, r
 | `[ ] auto-fix`, `[ ] auto-review` | per-PR ticks, kept in the shared settings file | no |
 | `+ follow`, or paste a link | follow someone else's PR (it joins the list marked *followed*; auto-fix and auto-review start off), or watch a run (you are told when it finishes) | no |
 | a story's `⋯` or right-click | mark done (or accept a review), reopen, sync PR states with GitHub | yes |
+| a story's `⋯`, right-click or the palette: `Delete story…` | deletes the story's folder (its board, `story.md` and every task file); PRs and Jira are not touched | yes, a red Delete |
 | a task | finish it (its PRs are looked up first; it only finishes when they are all merged) | yes |
 | `⚙` | the defaults, auto-sync, notifications, slow polling | no |
 

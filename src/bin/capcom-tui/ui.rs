@@ -1214,6 +1214,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("x", "finish the selected IMPLEMENTING task: checks its PRs on GitHub, done only if all merged (or drag to DONE)".into()),
         row("D", "mark the selected (or open) story DONE, skipping the review; every task must be done or dropped (or drag it from DOING to DONE)".into()),
         row("R", "sync the open story's PR states from GitHub (like capcom refresh); merged tasks finish".into()),
+        row("X", "delete the selected (or open) story: its board, story file and task files, after a y to confirm (PRs and Jira are not touched)".into()),
         row("S", "auto-sync on/off: write PR states found on GitHub to the board by itself (saved)".into()),
         row("c", "copy the selected pull request's link".into()),
         row("W", "slow polling while this pane is not in focus: on or off (saved)".into()),
@@ -4410,6 +4411,28 @@ mod tests {
         app.open_story("PROJ-2");
         open_palette_with(&mut app, "done");
         assert!(render(&app, 170, 44).contains("Mark PROJ-2 done"), "also from inside the open story");
+    }
+
+    #[test]
+    fn a_story_is_deleted_with_all_its_files_only_after_a_yes() {
+        let (root, mut app) = story_columns();
+        app.hide_done = false;
+        let dir = root.path().join("PROJ-3");
+        app.list_sel = app.visible_stories().iter().position(|s| s.key == "PROJ-3").unwrap();
+        app.on_key(KeyCode::Char('X'), false);
+        assert!(app.confirm.as_ref().is_some_and(|c| c.delete && c.id == "PROJ-3"));
+        assert!(render(&app, 170, 44).contains("Delete this story?"));
+        app.on_key(KeyCode::Char('n'), false);
+        assert!(app.confirm.is_none() && dir.exists(), "no without a yes");
+        app.open_story("PROJ-3");
+        open_palette_with(&mut app, "delete");
+        assert!(render(&app, 170, 44).contains("Delete PROJ-3 and all its files"));
+        app.on_key(KeyCode::Enter, false);
+        app.on_key(KeyCode::Char('y'), false);
+        assert!(!dir.exists());
+        assert_eq!(app.screen, Screen::List, "the open story is gone, so back to the list");
+        assert!(app.stories.iter().all(|s| s.key != "PROJ-3"));
+        assert!(app.current_notice().unwrap().contains("PROJ-3 is deleted"), "{:?}", app.current_notice());
     }
 
     #[test]
