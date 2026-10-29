@@ -64,7 +64,7 @@ enum Cmd {
         /// Command that opens a link when you click one on the page (default: xdg-open, so your default browser)
         #[arg(long, env = "CAPCOM_BROWSER")]
         browser: Option<String>,
-        /// Folder new Claude Code sessions started from the page begin in (default: the current folder)
+        /// Folder new Claude Code sessions started from the page begin in (default: the current folder, or ~/code when that is ~)
         #[arg(long, env = "CAPCOM_WORKDIR")]
         workdir: Option<PathBuf>,
         /// Extra repos (owner/name, comma separated) to look for your manual workflow runs in
@@ -303,7 +303,7 @@ fn main() -> Result<()> {
             let server = web::Server::new(root.to_path_buf(), port);
             server.set_opener(Arc::new(web::SystemBrowser { command: browser }));
             server.set_tools(web::Tools::real());
-            server.set_workdir(workdir.or_else(|| std::env::current_dir().ok()).unwrap_or_default());
+            server.set_workdir(workdir.unwrap_or_else(capcom::session::default_workdir));
             server.set_extra_repos(deploy_repos);
             server.set_usage_file(capcom::usage::path());
             server.load_settings(settings::default_path());

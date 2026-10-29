@@ -119,7 +119,7 @@ or from a shell, `claude plugin install capcom --marketplace philals/mission-con
 | `CAPCOM_ROOT` | `--root` | Folder holding one folder per story | required (not with `--demo`) |
 | `CAPCOM_PR_QUERY` | `--pr-query` | GitHub search for the PR panel (`@me` is resolved by GitHub) | `is:pr author:@me state:open archived:false sort:updated-desc -label:icebox` |
 | `CAPCOM_DEPLOY_REPOS` | `--deploy-repos` | Extra `owner/name` repos (comma separated) to look for your manual runs in | repos of your PRs and stories |
-| `CAPCOM_WORKDIR` | `--workdir` | Where new Herdr workspaces start | the current folder |
+| `CAPCOM_WORKDIR` | `--workdir` | Where new Herdr workspaces start | the current folder, or `~/code` when that is `~` |
 | `CAPCOM_TUI_SETTINGS` | | File for the saved panel sizes | `~/.config/capcom/tui.json` |
 | `CAPCOM_CACHE_DIR` | | Shared GitHub cache | `~/.cache/capcom` |
 | | `--no-prs`, `--no-runs` | Turn the PR or runs panel off | |

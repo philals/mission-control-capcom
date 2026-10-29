@@ -11,6 +11,18 @@ pub fn config_dir() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".claude")))
 }
 
+/// Where new sessions begin when no folder is given: the current folder, or `~/code` when that is the home
+/// folder (or unknown), since Claude Code asks whether to trust a folder like `~`.
+pub fn default_workdir() -> PathBuf {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    workdir_from(std::env::current_dir().ok(), home)
+}
+
+fn workdir_from(cwd: Option<PathBuf>, home: Option<PathBuf>) -> PathBuf {
+    let cwd = cwd.filter(|c| Some(c) != home.as_ref());
+    cwd.or_else(|| home.map(|h| h.join("code")).filter(|c| c.is_dir())).unwrap_or_default()
+}
+
 pub fn start_dir(session_id: &str) -> Option<String> {
     start_dir_in(&config_dir()?, session_id)
 }
@@ -243,6 +255,16 @@ impl Index {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_home_folder_workdir_falls_back_to_the_code_folder() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir(home.path().join("code")).unwrap();
+        let h = Some(home.path().to_path_buf());
+        assert_eq!(workdir_from(h.clone(), h.clone()), home.path().join("code"));
+        assert_eq!(workdir_from(Some("/w/api".into()), h.clone()), PathBuf::from("/w/api"));
+        assert_eq!(workdir_from(None, h), home.path().join("code"));
+    }
 
     #[test]
     fn the_start_dir_is_the_first_cwd_in_the_transcript() {

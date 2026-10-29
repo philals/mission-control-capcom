@@ -46,7 +46,7 @@ struct Cli {
     /// Print the pane (from `herdr pane list` JSON on stdin) already running capcom-tui; used by the plugin
     #[arg(long, hide = true)]
     find_pane: bool,
-    /// Folder new Herdr workspaces and tabs start in (default: the current folder)
+    /// Folder new Herdr workspaces and tabs start in (default: the current folder, or ~/code when that is ~)
     #[arg(long, env = "CAPCOM_WORKDIR")]
     workdir: Option<PathBuf>,
     /// Try it with invented stories, PRs and runs: needs no stories folder, GitHub or Herdr
@@ -181,7 +181,7 @@ fn main() -> Result<()> {
         app.attach_feed(rx, wake);
     }
     if herdr::inside_herdr() {
-        let cwd = cli.workdir.or_else(|| std::env::current_dir().ok()).unwrap_or_default();
+        let cwd = cli.workdir.unwrap_or_else(capcom::session::default_workdir);
         app.herdr = Some(Arc::new(herdr::Cli::new(cwd)));
         app.start_agents();
     }

@@ -101,7 +101,7 @@ Panel sizes (PR/runs split, bottom height, kanban column widths) are saved when 
 ### Herdr launches
 
 Only when `HERDR_ENV=1` (the TUI is running in a Herdr pane). `--workdir` / `CAPCOM_WORKDIR` (default: the current
-folder) is where new workspaces and tabs start. A launch looks for a workspace labelled with the story key (creating it,
+folder, or `~/code` when that is `~`) is where new workspaces and tabs start. A launch looks for a workspace labelled with the story key (creating it,
 `--no-focus`, if missing), puts the agent in a new tab of it (the root tab of a new workspace), then runs
 `herdr agent start NAME --kind claude --pane P` and `herdr agent prompt NAME "/skill KEY [ID]"`. A live agent with the
 same name is focused instead. Names: `<key>-<id>-plan`, `<key>-<id>-impl`, `<key>-breakdown`, lowercased, at most 32 characters.
