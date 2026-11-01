@@ -18,10 +18,10 @@ function saveLayout() {
   } catch (_) {}
 }
 
-// Which grid the window has room for (the same limits as the style sheet), or null when the page scrolls.
+// Whether the consoles fill the window (the same limits as the style sheet), or null when the page scrolls.
 function layoutVariant() {
   if (innerHeight < 580 || innerWidth < 1000) return null;
-  return innerWidth >= 1900 ? "w4" : innerWidth >= 1300 ? "w3" : "w2";
+  return innerWidth >= 1900 ? "tui-xl" : "tui";
 }
 
 function showing(id) {
@@ -29,30 +29,22 @@ function showing(id) {
   return p && !p.hidden ? p : null;
 }
 
-// The columns and rows that can be resized, as groups of consoles whose joint box is one track.
+// What can be resized, as in capcom-tui: the agents | stories edge, the top | bottom edge, and the
+// pull requests | runs edge in the bottom strip. Each is a list of groups of consoles, one track each.
 function layoutGeometry() {
   const v = layoutVariant();
   if (!v) return null;
   const agents = showing("agents");
   const runs = showing("runs");
   const board = $("board");
-  const prs = $("prs");
   const side = $("side");
-  const some = (...xs) => xs.filter(Boolean);
-  let cols;
-  let rows = null;
-  let sideRows = null;
-  if (v === "w4") {
-    cols = some(agents, board, prs, runs).map((p) => [p]);
-  } else if (v === "w3") {
-    cols = some(agents, board, side).map((p) => [p]);
-    if (runs) sideRows = [prs, runs];
-  } else {
-    cols = [some(board, agents), [side]];
-    if (agents) rows = [board, agents];
-    if (runs) sideRows = [prs, runs];
-  }
-  return { v, key: `${v}:${agents ? 1 : 0}${runs ? 1 : 0}`, cols, rows, sideRows };
+  return {
+    v,
+    key: `${v}:${agents ? 1 : 0}${runs ? 1 : 0}`,
+    cols: agents ? [[agents], [board]] : null,
+    rows: [agents ? [agents, board] : [board], [side]],
+    sideCols: runs ? [[$("prs")], [runs]] : null,
+  };
 }
 
 function union(group) {
@@ -73,10 +65,11 @@ function track(weights) {
 function applyLayout() {
   const main = document.querySelector("main");
   const g = layoutGeometry();
-  const saved = g && layoutState[g.key];
-  main.style.gridTemplateColumns = g && saved && saved.cols && saved.cols.length === g.cols.length ? track(saved.cols) : "";
-  main.style.gridTemplateRows = g && saved && saved.rows && g.rows ? track(saved.rows) : "";
-  $("side").style.gridTemplateRows = g && saved && saved.side && g.sideRows ? track(saved.side) : "";
+  const saved = (g && layoutState[g.key]) || {};
+  const fits = (w, groups) => g && groups && w && w.length === groups.length;
+  main.style.gridTemplateColumns = fits(saved.cols, g && g.cols) ? track(saved.cols) : "";
+  main.style.gridTemplateRows = fits(saved.rows, g && g.rows) ? track(saved.rows) : "";
+  $("side").style.gridTemplateColumns = fits(saved.side, g && g.sideCols) ? track(saved.side) : "";
 }
 
 function resetLayout() {
@@ -88,23 +81,26 @@ function resetLayout() {
   toast("layout reset");
 }
 
+const vertical = (handle) => handle.axis !== "row";
+const groupsOf = (handle, g) => (handle.axis === "col" ? g.cols : handle.axis === "row" ? g.rows : g.sideCols);
+
 // The sizes now, in pixels, of what a handle moves.
 function sizesOf(handle, g) {
-  if (handle.axis === "col") return g.cols.map((group) => { const u = union(group); return u.right - u.left; });
-  if (handle.axis === "row") return g.rows.map((p) => p.getBoundingClientRect().height);
-  return g.sideRows.map((p) => p.getBoundingClientRect().height);
+  return groupsOf(handle, g).map((group) => {
+    const u = union(group);
+    return vertical(handle) ? u.right - u.left : u.bottom - u.top;
+  });
 }
 
 function setSizes(handle, g, sizes) {
   const entry = (layoutState[g.key] = layoutState[g.key] || {});
-  const weights = sizes.map((x) => +(x / 100).toFixed(3));
-  entry[handle.axis === "col" ? "cols" : handle.axis === "row" ? "rows" : "side"] = weights;
+  entry[handle.axis === "col" ? "cols" : handle.axis === "row" ? "rows" : "side"] = sizes.map((x) => +(x / 100).toFixed(3));
   applyLayout();
 }
 
 // Move the edge `handle.i` by `delta` pixels from `start` sizes.
 function nudge(handle, g, start, delta) {
-  const min = handle.axis === "col" ? MIN_COL : MIN_ROW;
+  const min = vertical(handle) ? MIN_COL : MIN_ROW;
   const total = start[handle.i] + start[handle.i + 1];
   const a = Math.max(min, Math.min(total - min, start[handle.i] + delta));
   const sizes = start.slice();
@@ -115,41 +111,29 @@ function nudge(handle, g, start, delta) {
 
 function describeHandles(g) {
   const out = [];
-  g.cols.forEach((group, i) => {
-    if (i < g.cols.length - 1) out.push({ axis: "col", i, label: "Resize the consoles either side of this edge" });
-  });
-  if (g.rows) out.push({ axis: "row", i: 0, label: "Resize the stories and agents consoles" });
-  if (g.sideRows) out.push({ axis: "side", i: 0, label: "Resize the pull requests and runs consoles" });
+  if (g.cols) out.push({ axis: "col", i: 0, label: "Resize the agents and stories consoles" });
+  out.push({ axis: "row", i: 0, label: "Resize the top consoles and the bottom strip" });
+  if (g.sideCols) out.push({ axis: "side", i: 0, label: "Resize the pull requests and runs consoles" });
   return out;
 }
 
 // Where a handle sits, relative to <main>.
 function placeHandle(el, handle, g, mainRect) {
-  let x;
-  let y;
-  let w;
-  let h;
-  if (handle.axis === "col") {
-    const a = union(g.cols[handle.i]);
-    const b = union(g.cols[handle.i + 1]);
-    x = (a.right + b.left) / 2;
-    y = Math.min(a.top, b.top);
-    h = Math.max(a.bottom, b.bottom) - y;
-    el.style.left = `${x - mainRect.left}px`;
-    el.style.top = `${y - mainRect.top}px`;
-    el.style.height = `${h}px`;
+  const groups = groupsOf(handle, g);
+  const a = union(groups[handle.i]);
+  const b = union(groups[handle.i + 1]);
+  if (vertical(handle)) {
+    const top = Math.min(a.top, b.top);
+    el.style.left = `${(a.right + b.left) / 2 - mainRect.left}px`;
+    el.style.top = `${top - mainRect.top}px`;
+    el.style.height = `${Math.max(a.bottom, b.bottom) - top}px`;
     el.style.width = "";
     el.style.marginLeft = "";
   } else {
-    const [top, bottom] = handle.axis === "row" ? g.rows : g.sideRows;
-    const a = top.getBoundingClientRect();
-    const b = bottom.getBoundingClientRect();
-    y = (a.bottom + b.top) / 2;
-    x = a.left;
-    w = a.width;
-    el.style.left = `${x - mainRect.left}px`;
-    el.style.top = `${y - mainRect.top}px`;
-    el.style.width = `${w}px`;
+    const left = Math.min(a.left, b.left);
+    el.style.left = `${left - mainRect.left}px`;
+    el.style.top = `${(a.bottom + b.top) / 2 - mainRect.top}px`;
+    el.style.width = `${Math.max(a.right, b.right) - left}px`;
     el.style.height = "";
     el.style.marginLeft = "0";
   }
@@ -174,12 +158,12 @@ function layoutHandles() {
 }
 
 function makeHandle(handle) {
-  const node = el("div", "split " + (handle.axis === "col" ? "v" : "h"));
+  const node = el("div", "split " + (vertical(handle) ? "v" : "h"));
   node.dataset.axis = handle.axis;
   node.dataset.i = String(handle.i);
   node.tabIndex = 0;
   node.setAttribute("role", "separator");
-  node.setAttribute("aria-orientation", handle.axis === "col" ? "vertical" : "horizontal");
+  node.setAttribute("aria-orientation", vertical(handle) ? "vertical" : "horizontal");
   node.title = "drag to resize · arrow keys · double-click to reset";
   node.setAttribute("aria-label", handle.label);
   node.addEventListener("dblclick", resetLayout);
@@ -189,9 +173,9 @@ function makeHandle(handle) {
     ev.preventDefault();
     node.setPointerCapture(ev.pointerId);
     const start = sizesOf(handle, g);
-    const from = handle.axis === "col" ? ev.clientX : ev.clientY;
+    const from = vertical(handle) ? ev.clientX : ev.clientY;
     node.classList.add("drag");
-    document.body.classList.add("dragging", handle.axis === "col" ? "v" : "h");
+    document.body.classList.add("dragging", vertical(handle) ? "v" : "h");
     const up = () => {
       node.removeEventListener("pointermove", move);
       node.removeEventListener("pointerup", up);
@@ -207,7 +191,7 @@ function makeHandle(handle) {
       if (e.buttons !== 1) return up();
       const now = layoutGeometry();
       if (!now) return;
-      nudge(handle, now, start, (handle.axis === "col" ? e.clientX : e.clientY) - from);
+      nudge(handle, now, start, (vertical(handle) ? e.clientX : e.clientY) - from);
       layoutHandles();
     };
     node.addEventListener("pointermove", move);
@@ -218,7 +202,7 @@ function makeHandle(handle) {
   node.addEventListener("keydown", (ev) => {
     const g = layoutGeometry();
     if (!g) return;
-    const keys = handle.axis === "col" ? { ArrowLeft: -1, ArrowRight: 1 } : { ArrowUp: -1, ArrowDown: 1 };
+    const keys = vertical(handle) ? { ArrowLeft: -1, ArrowRight: 1 } : { ArrowUp: -1, ArrowDown: 1 };
     if (ev.key === "Home" || ev.key === "Escape") {
       if (ev.key === "Home") {
         ev.preventDefault();

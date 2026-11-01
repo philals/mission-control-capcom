@@ -15,9 +15,9 @@ It needs the stories folder (`--root` or `CAPCOM_ROOT`) and the GitHub CLI (`gh`
 
 It keeps the TUI's 1960s mission control look, made light for a browser: hairline steel frames with corner brackets, a blue rule under a small-caps heading for each console, backlit lamps (the GO / NO-GO lights, the rail of each PR, the ticks, which are lamp switches), segmented gauges, a clock in the top rail, the 1960s go/no-go poll while GitHub's first answer is awaited, and the log on green-bar teletype paper. Frames take as little room as they can, so the content gets the window. Type is a condensed grotesque for labels (Eurostile, Bahnschrift or a narrow sans, whatever the machine has) and a monospace for data; no fonts are downloaded.
 
-It lays itself out for the window: at 1900 px and wider, four consoles side by side (agents, stories, pull requests, runs); from 1300 px, three; from 1000 px, two, with the agents under the stories; below that, one console at a time, chosen on the switch bar at the bottom (stories, PRs, runs, agents, each with a lamp that lights for what needs you), with larger touch targets and dialogs that rise from the bottom on a phone. On a screen that is wide and tall enough each console scrolls by itself and keeps its place when the data refreshes.
+It is laid out as `capcom-tui` is: from 1000 px wide (and 580 px tall), the agents down the left beside the stories, and a strip along the bottom with the pull requests on the left and the runs on the right; below that, one console at a time, chosen on the switch bar at the bottom (stories, PRs, runs, agents, each with a lamp that lights for what needs you), with larger touch targets and dialogs that rise from the bottom on a phone. On a screen that is wide and tall enough each console scrolls by itself and keeps its place when the data refreshes.
 
-**Resizing:** on those wide layouts a thin handle sits in each gap between consoles (it lights up when you point at it). Drag it to move the edge between the two consoles beside it, or focus it with the keyboard and use the arrow keys (`Shift` for bigger steps). Double-click a handle, press `Home` on it, or use "Reset the layout" in the palette to go back to the default. Each layout (how many columns there is room for, and which consoles are showing) remembers its own sizes in this browser.
+**Resizing:** on those wide layouts a thin handle sits in each gap between consoles (it lights up when you point at it). Drag it to move the edge between the two consoles beside it, or focus it with the keyboard and use the arrow keys (`Shift` for bigger steps). Double-click a handle, press `Home` on it, or use "Reset the layout" in the palette to go back to the default. There are three edges: agents | stories, the top | the bottom strip, and pull requests | runs. Each arrangement (which consoles are showing) remembers its own sizes in this browser.
 
 ## Plan usage and the working week
 
@@ -130,7 +130,7 @@ This repository has that file in `.claude/launch.json`. Put the same file in `.c
 
 ## What is not the same as the TUI
 
-- **Layout:** the page has a responsive layout of its own, with draggable edges between consoles (above) instead of the TUI's divider keys.
+- **Layout:** the same arrangement as the TUI, with draggable edges between consoles (above) instead of the TUI's divider keys; below 1000 px it shows one console at a time.
 - **Herdr:** no workspaces, tabs or panes: skills start in new desktop sessions (above), and "go to the agent" opens a session in the desktop app.
 - **Auto-fix's last step:** marked on the PR with a one-click session, not sent to the agent (above).
 - **Loading screens, the bell and the terminal clipboard:** not ported (the page has a toast, the `log` and 📋 buttons).

@@ -404,42 +404,26 @@ body.dragging.h { cursor: row-resize; }
 
 .tabs { display: none; }
 
-/* a console that fills the window: every panel scrolls by itself */
+/* a console that fills the window, laid out as capcom-tui is: the agents down the left beside the
+   stories, and a strip along the bottom with the pull requests on the left and the runs on the right */
 @media (min-width: 1000px) and (min-height: 580px) {
   html, body { height: 100%; }
   body { overflow: hidden; }
   main {
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1.5fr) minmax(0, 1fr);
-    grid-template-areas: "board side" "agents side";
+    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1.4fr) minmax(0, 1fr);
+    grid-template-areas: "agents board" "side side";
   }
-  main.no-agents { grid-template-rows: minmax(0, 1fr); grid-template-areas: "board side"; }
+  main.no-agents { grid-template-columns: minmax(0, 1fr); grid-template-areas: "board" "side"; }
   #agents { grid-area: agents; }
   #board { grid-area: board; }
-  #side { grid-area: side; display: grid; grid-template-rows: minmax(0, 1.5fr) minmax(0, 1fr); gap: 10px; min-height: 0; min-width: 0; }
-  main.no-runs #side { grid-template-rows: minmax(0, 1fr); }
-}
-@media (min-width: 1300px) and (min-height: 580px) {
-  main {
-    grid-template-columns: minmax(250px, 300px) minmax(0, 1.15fr) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
-    grid-template-areas: "agents board side";
-  }
-  main.no-agents { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); grid-template-areas: "board side"; }
+  #side { grid-area: side; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 10px; min-height: 0; min-width: 0; }
+  main.no-runs #side { grid-template-columns: minmax(0, 1fr); }
 }
 @media (min-width: 1900px) and (min-height: 580px) {
-  main {
-    grid-template-columns: minmax(280px, 340px) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, .8fr);
-    grid-template-areas: "agents board prs runs";
-    gap: 12px;
-    padding: 12px;
-  }
-  main.no-agents { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, .8fr); grid-template-areas: "board prs runs"; }
-  #side { display: contents; }
-  #prs { grid-area: prs; }
-  #runs { grid-area: runs; }
-  main.no-runs { grid-template-columns: minmax(280px, 340px) minmax(0, 1.2fr) minmax(0, 1fr); grid-template-areas: "agents board prs"; }
-  main.no-runs.no-agents { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); grid-template-areas: "board prs"; }
+  main { grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 12px; padding: 12px; }
+  main.no-agents { grid-template-columns: minmax(0, 1fr); }
+  #side { gap: 12px; }
   body { font-size: 14px; }
 }
 @media (min-width: 2500px) { body { font-size: 16px; } }
