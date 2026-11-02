@@ -19,6 +19,8 @@ pub enum RunState {
     Failed,
     Cancelled,
     Skipped,
+    /// A pull request of yours that was merged, shown for a while after.
+    Merged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -163,6 +165,39 @@ fn parse_one(repo: &str, r: &Value) -> Option<Run> {
     })
 }
 
+/// Your PRs merged since `since`, from a `search/issues` answer, each as a merged row.
+pub fn parse_merged(json: &str, since: DateTime<Utc>) -> Result<Vec<Run>> {
+    let value: Value = serde_json::from_str(json).context("parsing gh output")?;
+    let Some(items) = value.get("items").and_then(Value::as_array) else {
+        return Err(error_message(&value));
+    };
+    Ok(items
+        .iter()
+        .filter_map(|pr| {
+            let merged_at = pr.pointer("/pull_request/merged_at").and_then(Value::as_str)?.to_string();
+            parse_time(&merged_at).filter(|t| *t >= since)?;
+            let url = text(pr, "html_url")?;
+            let (owner, name, number) = crate::prs::pr_ref(&url)?;
+            let repo = format!("{owner}/{name}");
+            valid_repo(&repo).then_some(())?;
+            Some(Run {
+                repo,
+                id: number,
+                name: format!("#{number}"),
+                title: text(pr, "title").unwrap_or_default(),
+                branch: String::new(),
+                url,
+                state: RunState::Merged,
+                created_at: merged_at.clone(),
+                started_at: None,
+                updated_at: merged_at,
+                jobs: Vec::new(),
+                watched: false,
+            })
+        })
+        .collect())
+}
+
 pub fn parse_jobs(json: &str) -> Result<Vec<Job>> {
     let value: Value = serde_json::from_str(json).context("parsing gh output")?;
     let Some(items) = value.get("jobs").and_then(Value::as_array) else {
@@ -209,7 +244,16 @@ pub trait RunSource: Send + Sync {
     fn fetch_forced(&self, repos: &[String]) -> Result<Batch> {
         self.fetch(repos)
     }
+
+    /// Your PRs merged in the last `MERGED_KEEP_MINUTES`.
+    fn fetch_merged(&self, _force: bool) -> Result<Batch> {
+        Ok(Batch::default())
+    }
 }
+
+pub const MERGED_KEEP_MINUTES: i64 = 30;
+/// GitHub allows 30 searches a minute, so merged PRs are looked up at most once a minute.
+const MERGED_EVERY: Duration = Duration::from_secs(60);
 
 /// Shares one fetch between every open copy that watches the same repos, through the on-disk cache.
 pub struct SharedSource {
@@ -252,12 +296,21 @@ impl RunSource for SharedSource {
     fn fetch_forced(&self, repos: &[String]) -> Result<Batch> {
         self.get(repos, true)
     }
+
+    fn fetch_merged(&self, force: bool) -> Result<Batch> {
+        self.cache.shared("merged", Utc::now, |_: &Batch| MERGED_EVERY, force, || self.inner.fetch_merged(force))
+    }
 }
 
 pub trait RunApi: Send + Sync {
     fn runs(&self, repo: &str) -> Result<String>;
     fn run(&self, repo: &str, run_id: u64) -> Result<String>;
     fn jobs(&self, repo: &str, run_id: u64) -> Result<String>;
+
+    /// A `search/issues` answer listing your PRs merged since `since` (RFC 3339).
+    fn merged(&self, _since: &str) -> Result<String> {
+        Ok(r#"{"items":[]}"#.to_string())
+    }
 }
 
 pub struct Fetcher<A: RunApi> {
@@ -384,6 +437,12 @@ impl<A: RunApi> RunSource for Fetcher<A> {
     fn fetch_watched(&self, watched: &[(String, u64)], _force: bool) -> Result<Batch> {
         self.fetch_watched_runs(watched)
     }
+
+    fn fetch_merged(&self, _force: bool) -> Result<Batch> {
+        let since = Utc::now() - chrono::Duration::minutes(MERGED_KEEP_MINUTES);
+        let json = self.api.merged(&since.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))?;
+        Ok(Batch { runs: parse_merged(&json, since)?, warnings: Vec::new() })
+    }
 }
 
 /// Talks to GitHub from inside capcom (see `crate::github`). Your login is looked up once, at run
@@ -426,6 +485,13 @@ impl RunApi for GhApi {
 
     fn jobs(&self, repo: &str, run_id: u64) -> Result<String> {
         crate::github::rest(&format!("repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"))
+    }
+
+    fn merged(&self, since: &str) -> Result<String> {
+        let login = self.login()?;
+        crate::github::rest(&format!(
+            "search/issues?q=is:pr+author:{login}+is:merged+merged:%3E%3D{since}&sort=updated&per_page=30"
+        ))
     }
 }
 
@@ -529,7 +595,8 @@ pub fn spawn_with(
             } else {
                 source.fetch_watched(&followed, forced).map_err(|e| format!("{e:#}"))
             };
-            let result = merge(manual, watching);
+            let merged = source.fetch_merged(forced).map_err(|e| format!("{e:#}"));
+            let result = merge(merge(manual, watching), merged);
             let wait = attention.wait(cadence.next(&result));
             if tx.send(RunMsg::Result(result)).is_err() {
                 break;
@@ -650,6 +717,18 @@ mod tests {
         for bad in ["", "PROJ-123", "https://github.com/acme/web/pull/12", "https://github.com/acme/web/actions/runs/", "https://github.com/acme/web/actions/runs/abc", "https://example.com/acme/web/actions/runs/1", "https://github.com/../web/actions/runs/1"] {
             assert_eq!(parse_run_url(bad), None, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn merged_prs_since_the_cutoff_become_merged_rows() {
+        let json = r#"{"items":[
+          {"number":42,"title":"Add widgets","html_url":"https://github.com/acme/web/pull/42","pull_request":{"merged_at":"2026-10-08T03:20:00Z"}},
+          {"number":41,"title":"Old","html_url":"https://github.com/acme/web/pull/41","pull_request":{"merged_at":"2026-10-08T02:00:00Z"}},
+          {"number":40,"title":"Open","html_url":"https://github.com/acme/web/pull/40","pull_request":{"merged_at":null}}]}"#;
+        let since = Utc.with_ymd_and_hms(2026, 10, 8, 3, 0, 0).unwrap();
+        let rows = parse_merged(json, since).unwrap();
+        assert_eq!(rows.iter().map(|r| (r.repo.as_str(), r.id, r.name.as_str(), r.state)).collect::<Vec<_>>(), vec![("acme/web", 42, "#42", RunState::Merged)]);
+        assert!(!rows[0].is_active() && !rows[0].watched);
     }
 
     #[test]

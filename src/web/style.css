@@ -23,6 +23,7 @@
   --yellow: #ffd24a;
   --magenta: #d4b8f4;
   --orange: #ff9a3c;
+  --purple: #a371f7;
   --label: "Eurostile", "Microgramma D Extended", "Bank Gothic", "Bahnschrift", "DIN Condensed", "Arial Narrow", "Liberation Sans Narrow", "Nimbus Sans Narrow", "DejaVu Sans Condensed", sans-serif;
   --mono: ui-monospace, "DejaVu Sans Mono", "Cascadia Mono", Menlo, Consolas, monospace;
 }
@@ -51,6 +52,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .orange { color: var(--orange); }
 .magenta { color: var(--magenta); }
 .yellow { color: var(--yellow); }
+.purple { color: var(--purple); }
 .bold { font-weight: 700; }
 .spacer { flex: 1; }
 

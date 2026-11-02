@@ -240,6 +240,7 @@ fn run_state(state: RunState) -> &'static str {
         RunState::Failed => "failed",
         RunState::Cancelled => "cancelled",
         RunState::Skipped => "skipped",
+        RunState::Merged => "merged",
     }
 }
 

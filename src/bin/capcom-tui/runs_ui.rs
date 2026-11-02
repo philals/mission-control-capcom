@@ -26,6 +26,7 @@ fn style_of(state: RunState) -> (&'static str, Color, &'static str) {
         RunState::Success => ("✓", theme::GREEN, "success"),
         RunState::Cancelled => ("⊘", theme::MUTED, "cancelled"),
         RunState::Skipped => ("⊘", theme::DIM, "skipped"),
+        RunState::Merged => ("⬤", theme::PURPLE, "merged"),
     }
 }
 
@@ -39,6 +40,7 @@ fn badge(state: RunState) -> Span<'static> {
         RunState::Success => "[SUCCESS]  ",
         RunState::Cancelled => "[CANCELLED]",
         RunState::Skipped => "[SKIPPED]  ",
+        RunState::Merged => "[MERGED]   ",
     };
     Span::styled(text, Style::new().fg(color).add_modifier(Modifier::BOLD))
 }
@@ -48,6 +50,9 @@ fn parse_time(s: &str) -> Option<DateTime<Utc>> {
 }
 
 fn run_seconds(run: &Run, now: DateTime<Utc>) -> Option<i64> {
+    if run.state == RunState::Merged {
+        return None;
+    }
     let start = parse_time(run.started_at.as_deref().unwrap_or(&run.created_at))?;
     let end = if run.is_active() { now } else { parse_time(&run.updated_at)? };
     Some((end - start).num_seconds().max(0))

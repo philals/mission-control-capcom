@@ -694,8 +694,8 @@ function scrollToSelected() {
 
 // ---- runs ---------------------------------------------------------------------------------
 
-const RUN_WORD = { running: "RUNNING", queued: "QUEUED", waiting: "WAITING", success: "SUCCESS", failed: "FAILED", cancelled: "CANCELLED", skipped: "SKIPPED" };
-const RUN_TONE = { running: "orange", queued: "yellow", waiting: "magenta", success: "green", failed: "red", cancelled: "dim", skipped: "dim" };
+const RUN_WORD = { running: "RUNNING", queued: "QUEUED", waiting: "WAITING", success: "SUCCESS", failed: "FAILED", cancelled: "CANCELLED", skipped: "SKIPPED", merged: "MERGED" };
+const RUN_TONE = { running: "orange", queued: "yellow", waiting: "magenta", success: "green", failed: "red", cancelled: "dim", skipped: "dim", merged: "purple" };
 
 function runRow(run) {
   const row = el("article", "run");
@@ -718,7 +718,7 @@ function runRow(run) {
   const buttons = el("div", "pr-buttons");
   add(buttons, el("span", "spacer"));
   if (run.watched) add(buttons, btn("stop watching", () => act("run.unwatch", { repo: run.repo, id: run.id }), "small"));
-  add(buttons, btn("details", () => runSheet(run.repo, run.id), "small"));
+  if (run.state !== "merged") add(buttons, btn("details", () => runSheet(run.repo, run.id), "small"));
   row.append(buttons);
   return row;
 }

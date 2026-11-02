@@ -17,7 +17,7 @@ const TONE: Record<Tone, string> = { red: C.red, amber: C.amber, green: C.go, bl
 const STEP: Record<Step['state'], string> = { done: C.go, going: C.blue, wrong: C.red, pending: C.dim }
 const RUN: Record<string, [string, string]> = {
   running: ['◐', C.blue], queued: ['◌', C.amber], waiting: ['◌', C.purple], success: ['✓', C.go],
-  failed: ['✗', C.red], cancelled: ['⊘', C.dim], skipped: ['·', C.dim],
+  failed: ['✗', C.red], cancelled: ['⊘', C.dim], skipped: ['·', C.dim], merged: ['●', C.purple],
 }
 
 let limits: SessionRateLimit[] = []

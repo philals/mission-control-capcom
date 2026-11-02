@@ -31,6 +31,8 @@ pub const RED: Color = Color::Rgb(0xff, 0x80, 0x6c);
 pub const YELLOW: Color = Color::Rgb(0xff, 0xd2, 0x4a);
 pub const MAGENTA: Color = Color::Rgb(0xd4, 0xb8, 0xf4);
 pub const ORANGE: Color = Color::Rgb(0xff, 0x9a, 0x3c);
+/// GitHub's merged purple.
+pub const PURPLE: Color = Color::Rgb(0xa3, 0x71, 0xf7);
 
 pub fn base() -> Style {
     Style::new().fg(FG).bg(BG)
