@@ -251,7 +251,7 @@ pub trait RunSource: Send + Sync {
     }
 }
 
-pub const MERGED_KEEP_MINUTES: i64 = 30;
+pub const MERGED_KEEP_MINUTES: i64 = 12 * 60;
 /// GitHub allows 30 searches a minute, so merged PRs are looked up at most once a minute.
 const MERGED_EVERY: Duration = Duration::from_secs(60);
 
@@ -490,7 +490,7 @@ impl RunApi for GhApi {
     fn merged(&self, since: &str) -> Result<String> {
         let login = self.login()?;
         crate::github::rest(&format!(
-            "search/issues?q=is:pr+author:{login}+is:merged+merged:%3E%3D{since}&sort=updated&per_page=30"
+            "search/issues?q=is:pr+author:{login}+is:merged+merged:%3E%3D{since}&sort=updated&per_page=100"
         ))
     }
 }
