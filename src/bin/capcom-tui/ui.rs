@@ -3664,6 +3664,7 @@ mod tests {
                 tab: "T3 plan".into(),
                 agent: "proj-1-t3-plan".into(),
                 prompt: "/story-plan-task PROJ-1 T3".into(),
+                folder: None,
             }]
         );
         assert_eq!(app.selected_task().unwrap().status, Status::Todo, "the skill moves the card, not the drag");
@@ -3862,6 +3863,7 @@ mod tests {
                 tab: "break down".into(),
                 agent: "new-5-breakdown".into(),
                 prompt: "/story-break-down NEW-5".into(),
+                folder: None,
             }]
         );
     }
@@ -4327,6 +4329,7 @@ mod tests {
                 tab: "review".into(),
                 agent: "proj-4-review".into(),
                 prompt: "/story-review PROJ-4".into(),
+                folder: None,
             }]
         );
         assert_eq!(story_status_of(&app, "PROJ-4"), StoryStatus::InProgress, "the skill moves the story, not the drag");

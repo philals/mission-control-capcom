@@ -142,6 +142,17 @@ fn set_repos_sets_and_clears() {
 }
 
 #[test]
+fn set_folder_sets_and_clears() {
+    let root = TempDir::new().unwrap();
+    story_with_tasks(&root, 1);
+    let t = ok(&root, &["set-folder", "PROJ-1", "T1", "/work/api"]);
+    assert_eq!(t["folder"], "/work/api");
+    assert!(fails(&root, &["set-folder", "PROJ-1", "T1", "api"]).contains("absolute"));
+    let t = ok(&root, &["set-folder", "PROJ-1", "T1"]);
+    assert!(t.get("folder").is_none());
+}
+
+#[test]
 fn set_subtask_validates_the_key() {
     let root = TempDir::new().unwrap();
     story_with_tasks(&root, 1);

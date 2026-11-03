@@ -130,6 +130,15 @@ enum Cmd {
         #[arg(long, value_delimiter = ',')]
         repos: Vec<String>,
     },
+    /// Set the folder new Claude Code sessions for a task start in (omit the folder to clear it)
+    SetFolder {
+        /// Jira story key
+        key: String,
+        /// Task id, for example T2
+        id: String,
+        /// Absolute path, usually the checkout of the repo the task changes
+        folder: Option<String>,
+    },
     /// Move a task to a status: todo, planning, planned, implementing, done or dropped
     Status {
         /// Jira story key
@@ -378,6 +387,10 @@ fn main() -> Result<()> {
         }),
         Cmd::SetRepos { key, id, repos } => mutate(root, &key, |b, _| {
             ops::set_repos(b, &id, repos)?;
+            task_json(b, &id)
+        }),
+        Cmd::SetFolder { key, id, folder } => mutate(root, &key, |b, _| {
+            ops::set_folder(b, &id, folder.as_deref())?;
             task_json(b, &id)
         }),
         Cmd::Status { key, id, status } => {

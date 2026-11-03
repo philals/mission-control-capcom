@@ -205,7 +205,8 @@ pub(super) fn task_view(board: &Board, task: &Task, cx: &Ctx) -> Value {
     let done = |id: &str| board.task(id).is_some_and(|t| t.status == Status::Done);
     let waiting_on: Vec<&String> = task.depends_on.iter().filter(|d| !done(d)).collect();
     let key = &board.story.key;
-    let launch = |skill: &str| new_session_link(&format!("/{skill} {key} {}", task.id), cx.workdir);
+    let folder = task.folder.as_deref().map(std::path::Path::new).filter(|f| f.is_dir()).unwrap_or(cx.workdir);
+    let launch = |skill: &str| new_session_link(&format!("/{skill} {key} {}", task.id), folder);
     // an open PR says whether it is a draft; otherwise what GitHub last said; otherwise what the board recorded
     let state_of = |p: &crate::model::Pr| {
         cx.open.iter().find(|o| same_url(&o.url, &p.url)).map(|o| if o.is_draft { crate::model::PrState::Draft } else { crate::model::PrState::Ready })

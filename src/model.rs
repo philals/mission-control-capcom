@@ -153,6 +153,9 @@ pub struct Task {
     pub prs: Vec<Pr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jira_subtask: Option<String>,
+    /// The folder new Claude Code sessions for this task start in (usually the repo's checkout).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<Agent>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -231,6 +234,7 @@ impl Task {
             repos,
             prs: Vec::new(),
             jira_subtask: None,
+            folder: None,
             agent: None,
             sessions: Vec::new(),
         }

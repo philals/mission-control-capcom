@@ -14,6 +14,8 @@ pub struct Launch {
     pub tab: String,
     pub agent: String,
     pub prompt: String,
+    /// Folder to start in when it exists, else the TUI's work folder.
+    pub folder: Option<String>,
 }
 
 /// Bring back the agent that made a pull request: focus it if it is running, else resume its
@@ -197,7 +199,8 @@ impl Herdr for Cli {
             self.call(&["agent", "focus", &l.agent])?;
             return Ok(Outcome::Focused);
         }
-        let pane = self.new_pane(l, None)?;
+        let folder = l.folder.as_deref().filter(|f| std::path::Path::new(f).is_dir());
+        let pane = self.new_pane(l, folder)?;
         self.call(&["agent", "start", &l.agent, "--kind", "claude", "--pane", &pane])?;
         self.call(&["agent", "prompt", &l.agent, &l.prompt])?;
         Ok(Outcome::Started)
@@ -261,7 +264,7 @@ impl Cli {
             self.call(&["agent", "focus", &pane])?;
             return Ok(Outcome::Focused);
         }
-        let launch = Launch { workspace: r.workspace.clone(), label: r.label.clone(), tab: r.tab.clone(), agent: r.agent.clone(), prompt: String::new() };
+        let launch = Launch { workspace: r.workspace.clone(), label: r.label.clone(), tab: r.tab.clone(), agent: r.agent.clone(), prompt: String::new(), folder: None };
         let pane = match (&r.session, &r.fresh_repo, &r.prompt) {
             (Some((_, cwd)), _, _) => {
                 if !std::path::Path::new(cwd).is_dir() {
@@ -439,6 +442,7 @@ mod tests {
             tab: "T2 plan".into(),
             agent: "proj-123-t2-plan".into(),
             prompt: "/story-plan-task PROJ-123 T2".into(),
+            folder: None,
         }
     }
 

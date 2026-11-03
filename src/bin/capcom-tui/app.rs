@@ -981,6 +981,7 @@ impl App {
             tab: "review".into(),
             agent: herdr::agent_name(&[key, "review"]),
             prompt: format!("/story-review {key}"),
+            folder: None,
         });
     }
 
@@ -1090,6 +1091,7 @@ impl App {
                 tab: "break down".into(),
                 agent: herdr::agent_name(&[&key, "breakdown"]),
                 prompt: format!("/story-break-down {key}"),
+                folder: None,
             }),
             (ListCol::Todo, ListCol::Doing) => self.set_notice(format!(
                 "{key} moves to DOING by itself when its first task leaves TODO: open it and drag a card to PLANNING or IMPLEMENTING"
@@ -2702,6 +2704,7 @@ impl App {
             tab: format!("{task_id} {tab}"),
             agent: herdr::agent_name(&[&key, task_id, phase]),
             prompt: format!("/{skill} {key} {task_id}"),
+            folder: self.board.as_ref().and_then(|b| b.task(task_id)).and_then(|t| t.folder.clone()),
         });
     }
 
@@ -2881,6 +2884,7 @@ impl App {
             tab: "break down".into(),
             agent: herdr::agent_name(&[&key, "breakdown"]),
             prompt: format!("/story-break-down {key}"),
+            folder: None,
         });
     }
 

@@ -125,6 +125,18 @@ pub fn set_repos(board: &mut Board, id: &str, repos: Vec<String>) -> Result<()> 
     Ok(())
 }
 
+/// Set the folder sessions for this task start in; `None` clears it.
+pub fn set_folder(board: &mut Board, id: &str, folder: Option<&str>) -> Result<()> {
+    let folder = folder.map(str::trim).filter(|f| !f.is_empty());
+    if let Some(f) = folder {
+        if !std::path::Path::new(f).is_absolute() {
+            bail!("the folder must be an absolute path");
+        }
+    }
+    editable(board, id)?.folder = folder.map(str::to_string);
+    Ok(())
+}
+
 pub fn block(board: &mut Board, id: &str, reason: &str) -> Result<()> {
     if reason.trim().is_empty() {
         bail!("a blocked reason is required");
@@ -316,6 +328,17 @@ mod tests {
         let err = add_task(&dir(&root), &mut board, "One", TaskType::Pr, vec![], vec![]).unwrap_err();
         assert!(!err.to_string().is_empty());
         assert!(board.tasks.is_empty());
+    }
+
+    #[test]
+    fn set_folder_wants_an_absolute_path_and_clears_with_none() {
+        let (root, mut board) = fresh();
+        add_task(&dir(&root), &mut board, "One", TaskType::Pr, vec![], vec![]).unwrap();
+        assert!(set_folder(&mut board, "T1", Some("api")).is_err());
+        set_folder(&mut board, "T1", Some(" /w/api ")).unwrap();
+        assert_eq!(board.tasks[0].folder.as_deref(), Some("/w/api"));
+        set_folder(&mut board, "T1", None).unwrap();
+        assert!(board.tasks[0].folder.is_none());
     }
 
     #[test]

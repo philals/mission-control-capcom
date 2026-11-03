@@ -34,6 +34,7 @@ Valid task statuses: `todo`, `planning`, `planned`, `implementing`, `done`, `dro
     capcom add-task <KEY> --title T [--type pr|spike|decision] [--depends T1,T2] [--repos a,b]
     capcom set-deps <KEY> <ID> [--depends T1,T2]
     capcom set-repos <KEY> <ID> [--repos a,b]
+    capcom set-folder <KEY> <ID> [/abs/path]  # where new Claude sessions for the task start
     capcom status <KEY> <ID> <STATUS>
     capcom story-status <KEY> <in_progress|in_review|done>
     capcom block <KEY> <ID> --reason R
