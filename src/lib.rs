@@ -13,6 +13,7 @@ pub mod host;
 pub mod kodiak;
 pub mod model;
 pub mod notes;
+pub mod orca;
 pub mod ops;
 pub mod pr_state;
 pub mod prs;
