@@ -142,8 +142,13 @@ impl Orca {
         made["result"]["outcome"]["handle"].as_str().map(str::to_string).ok_or_else(|| "Orca: no agent handle in its answer".to_string())
     }
 
-    pub fn resume(&self, checkout: &str, session_cwd: &str, session: &str, focus: bool) -> Result<String, String> {
-        self.create(checkout, &format!("cd {} && claude --resume {}", quote(session_cwd), quote(session)), focus)
+    /// Resume `session` from the folder it started in, sending `prompt` with it when given.
+    pub fn resume(&self, checkout: &str, session_cwd: &str, session: &str, prompt: Option<&str>, focus: bool) -> Result<String, String> {
+        let mut command = format!("cd {} && claude --resume {}", quote(session_cwd), quote(session));
+        if let Some(p) = prompt {
+            command = format!("{command} {}", quote(p));
+        }
+        self.create(checkout, &command, focus)
     }
 
     /// The Claude agents in Orca terminals, with the session each runs when `sessions` knows it.
@@ -299,10 +304,20 @@ mod tests {
     fn a_session_in_a_claude_worktree_resumes_from_the_enclosing_checkout() {
         let (o, calls) = orca(None);
         assert_eq!(o.checkout_of("/w/app/.claude/worktrees/x"), Ok("/w/app".to_string()));
-        assert_eq!(o.resume("/w/app", "/w/app/.claude/worktrees/x", "s-1", false), Ok("term_7".to_string()));
+        assert_eq!(o.resume("/w/app", "/w/app/.claude/worktrees/x", "s-1", None, false), Ok("term_7".to_string()));
         assert_eq!(
             last(&calls),
             ["terminal", "create", "--worktree", "path:/w/app", "--command", "cd '/w/app/.claude/worktrees/x' && claude --resume 's-1'", "--json"]
+        );
+    }
+
+    #[test]
+    fn a_resume_can_carry_a_prompt() {
+        let (o, calls) = orca(None);
+        o.resume("/w/app", "/w/app", "s-1", Some("/pr-address x"), true).unwrap();
+        assert_eq!(
+            last(&calls),
+            ["terminal", "create", "--worktree", "path:/w/app", "--command", "cd '/w/app' && claude --resume 's-1' '/pr-address x'", "--focus", "--json"]
         );
     }
 

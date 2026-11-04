@@ -356,6 +356,9 @@ fn url_parts(url: &str) -> Option<(String, u64)> {
     }
 }
 
+/// What a TUI in a plain terminal says when asked to start or reach an agent.
+const NO_APP: &str = "not running inside Herdr, Orca or Claude Desktop, so no agent can be started or brought back";
+
 fn open_in_browser(url: &str) {
     if !url.starts_with("https://") {
         return;
@@ -625,6 +628,8 @@ pub struct App {
     /// (PR url, session that made it) for PRs that are on no task.
     pub pr_links: Vec<(String, PrSession)>,
     pub herdr: Option<Arc<dyn Herdr>>,
+    /// The app capcom-tui runs in: where new sessions start.
+    pub home: capcom::host::Host,
     pub agents: Vec<crate::agents::AgentInfo>,
     /// What each agent says about itself (`capcom note`), newest first.
     pub notes: Vec<capcom::notes::Note>,
@@ -742,6 +747,7 @@ impl App {
             copilot_tried: std::collections::HashSet::new(),
             pr_links: Vec::new(),
             herdr: None,
+            home: capcom::host::Host::Plain,
             agents: Vec::new(),
             spawns: Vec::new(),
             agents_on: true,
@@ -982,6 +988,8 @@ impl App {
             agent: herdr::agent_name(&[key, "review"]),
             prompt: format!("/story-review {key}"),
             folder: None,
+            task: None,
+            sessions: Vec::new(),
         });
     }
 
@@ -1092,6 +1100,8 @@ impl App {
                 agent: herdr::agent_name(&[&key, "breakdown"]),
                 prompt: format!("/story-break-down {key}"),
                 folder: None,
+                task: None,
+                sessions: Vec::new(),
             }),
             (ListCol::Todo, ListCol::Doing) => self.set_notice(format!(
                 "{key} moves to DOING by itself when its first task leaves TODO: open it and drag a card to PLANNING or IMPLEMENTING"
@@ -2124,7 +2134,7 @@ impl App {
         });
     }
 
-    /// Ask Herdr which agents are running now and then, off the UI thread, and say when that changes.
+    /// Ask the apps which agents are running now and then, off the UI thread, and say when that changes.
     pub fn start_agents(&self) {
         let (Some(herdr), done) = (self.herdr.clone(), self.launch_done.0.clone()) else {
             return;
@@ -2163,7 +2173,7 @@ impl App {
         });
     }
 
-    /// Whether the agents panel is on the main page: inside Herdr, switched on, and room for it.
+    /// Whether the agents panel is on the main page: in an app capcom can start agents in, switched on, and room for it.
     pub fn agents_panel(&self, width: u16) -> bool {
         self.screen == Screen::List && self.herdr.is_some() && self.agents_on && width >= AGENTS_MIN_WIDTH
     }
@@ -2263,7 +2273,7 @@ impl App {
         });
     }
 
-    /// A row of the agents panel was clicked: bring that agent to the front in Herdr.
+    /// A row of the agents panel was clicked: bring that agent to the front in the app it runs in.
     pub fn open_agent(&mut self, index: usize) {
         let (Some(agent), Some(herdr)) = (self.agents.get(index), self.herdr.clone()) else {
             return;
@@ -2335,7 +2345,7 @@ impl App {
             return;
         }
         let Some(herdr) = self.herdr.clone() else {
-            self.set_notice("not running inside Herdr, so the agent cannot be brought back".into());
+            self.set_notice(NO_APP.into());
             return;
         };
         let mut resume = self.resume_request(&url, &repo, &name, owner.as_ref());
@@ -2350,7 +2360,7 @@ impl App {
             return;
         };
         let Some(herdr) = self.herdr.clone() else {
-            self.set_notice("not running inside Herdr, so the agent cannot be brought back".into());
+            self.set_notice(NO_APP.into());
             return;
         };
         let mut resume = self.resume_request("", "", &task, Some(&(key, task.clone())));
@@ -2360,12 +2370,13 @@ impl App {
 
     fn go_to_agent(&mut self, herdr: std::sync::Arc<dyn Herdr>, resume: Resume, task: String) {
         self.set_notice(format!("looking for the agent that made {task}…"));
-        let done = self.launch_done.0.clone();
+        let (done, home) = (self.launch_done.0.clone(), self.home);
         std::thread::spawn(move || {
             let text = match herdr.resume(&resume) {
-                Ok(Outcome::Started) => format!("resumed the session for {task} in Herdr workspace {}", resume.workspace),
+                Ok(Outcome::Started) => format!("resumed the session for {task} in {}", home.name()),
                 Ok(Outcome::Focused) => format!("the agent for {task} is running: brought to the front"),
                 Ok(Outcome::Prompted | Outcome::Busy) => format!("the agent for {task} is running"),
+                Ok(Outcome::AlreadyStarting(h)) => format!("the agent for {task} is already starting in {}", h.name()),
                 Err(e) => format!("{task}: {e}"),
             };
             let _ = done.send(AppMsg::Notice(text));
@@ -2628,19 +2639,21 @@ impl App {
         });
     }
 
-    /// Start an agent in Herdr in the background and report how it went.
+    /// Start an agent in the app capcom-tui runs in, in the background, and report how it went.
     pub fn run_launch(&mut self, launch: Launch) {
         let Some(herdr) = self.herdr.clone() else {
-            self.set_notice("not running inside Herdr, so no agent can be started".into());
+            self.set_notice(NO_APP.into());
             return;
         };
         self.set_notice(format!("starting {}…", launch.agent));
-        let done = self.launch_done.0.clone();
+        let (done, home) = (self.launch_done.0.clone(), self.home);
         std::thread::spawn(move || {
             let text = match herdr.launch(&launch) {
-                Ok(Outcome::Started) => format!("started {} in Herdr workspace {}", launch.agent, launch.workspace),
+                Ok(Outcome::Started) if home == capcom::host::Host::Herdr => format!("started {} in Herdr workspace {}", launch.agent, launch.workspace),
+                Ok(Outcome::Started) => format!("started {} in {}", launch.agent, home.name()),
                 Ok(Outcome::Focused) => format!("{} is already running: brought to the front", launch.agent),
                 Ok(Outcome::Prompted | Outcome::Busy) => format!("{} is already running", launch.agent),
+                Ok(Outcome::AlreadyStarting(h)) => format!("{} is already starting in {}: give it a moment", launch.agent, h.name()),
                 Err(e) => format!("could not start {}: {e}", launch.agent),
             };
             let _ = done.send(AppMsg::Notice(text));
@@ -2705,6 +2718,8 @@ impl App {
             agent: herdr::agent_name(&[&key, task_id, phase]),
             prompt: format!("/{skill} {key} {task_id}"),
             folder: self.board.as_ref().and_then(|b| b.task(task_id)).and_then(|t| t.folder.clone()),
+            task: Some(task_id.to_string()),
+            sessions: self.stories.iter().find(|s| s.key == key).map(|s| s.sessions.iter().filter(|(t, _)| t == task_id).map(|(_, x)| x.id.clone()).collect()).unwrap_or_default(),
         });
     }
 
@@ -2885,6 +2900,8 @@ impl App {
             agent: herdr::agent_name(&[&key, "breakdown"]),
             prompt: format!("/story-break-down {key}"),
             folder: None,
+            task: None,
+            sessions: Vec::new(),
         });
     }
 
@@ -3436,7 +3453,7 @@ impl App {
             Target::PrReview(_) => "auto-review: ask Copilot to review this PR, once (v)",
             Target::PrMerge(_) => "automerge: the merge bot merges this PR by itself once it is approved and green; this adds or removes its label (g)",
             Target::PrAgent(_) => "go to the agent that made this PR (a)",
-            Target::AgentRow(_) => "bring this agent to the front in Herdr (right-click for more)",
+            Target::AgentRow(_) => "bring this agent to the front in its app (right-click for more)",
             Target::NoteToggle(_) => "what this agent says about itself: click to show all of it or just a line",
             Target::NoteResume(_) => "this agent has ended: click to resume its session in a new tab (right-click for more)",
             Target::NoteDismiss(_) => "drop this note: the session itself stays on disk",

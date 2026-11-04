@@ -16,6 +16,10 @@ pub struct Launch {
     pub prompt: String,
     /// Folder to start in when it exists, else the TUI's work folder.
     pub folder: Option<String>,
+    /// The task this starts work on, for the "starting" mark (None for story-wide work).
+    pub task: Option<String>,
+    /// Claude Code sessions recorded on that task: one running in any app means it is not started again.
+    pub sessions: Vec<String>,
 }
 
 /// Bring back the agent that made a pull request: focus it if it is running, else resume its
@@ -49,6 +53,8 @@ pub enum Outcome {
     Prompted,
     /// The agent is in the middle of a turn: nothing was sent, try again later.
     Busy,
+    /// A session for this task was asked for moments ago in this app and has not recorded itself yet.
+    AlreadyStarting(capcom::host::Host),
 }
 
 pub trait Herdr: Send + Sync {
@@ -264,7 +270,7 @@ impl Cli {
             self.call(&["agent", "focus", &pane])?;
             return Ok(Outcome::Focused);
         }
-        let launch = Launch { workspace: r.workspace.clone(), label: r.label.clone(), tab: r.tab.clone(), agent: r.agent.clone(), prompt: String::new(), folder: None };
+        let launch = Launch { workspace: r.workspace.clone(), label: r.label.clone(), tab: r.tab.clone(), agent: r.agent.clone(), prompt: String::new(), folder: None, task: None, sessions: Vec::new() };
         let pane = match (&r.session, &r.fresh_repo, &r.prompt) {
             (Some((_, cwd)), _, _) => {
                 if !std::path::Path::new(cwd).is_dir() {
@@ -363,6 +369,11 @@ pub fn watch_focus(attention: std::sync::Arc<crate::attention::Attention>, wakes
     });
 }
 
+/// Whether a Herdr server answers (it can be reached from outside Herdr, through its socket).
+pub fn answers() -> bool {
+    herdr_json(&["agent".to_string(), "list".to_string()]).is_ok_and(|v| v.get("error").is_none())
+}
+
 pub fn inside_herdr() -> bool {
     std::env::var("HERDR_ENV").is_ok_and(|v| v == "1")
 }
@@ -443,6 +454,8 @@ mod tests {
             agent: "proj-123-t2-plan".into(),
             prompt: "/story-plan-task PROJ-123 T2".into(),
             folder: None,
+            task: Some("T2".into()),
+            sessions: Vec::new(),
         }
     }
 

@@ -2,6 +2,7 @@ use capcom::{agents, attention, cache, durations, finish, fixstate, kodiak, pr_s
 mod app;
 mod demo;
 mod herdr;
+mod hosts;
 mod loading;
 mod palette;
 mod panel;
@@ -46,7 +47,7 @@ struct Cli {
     /// Print the pane (from `herdr pane list` JSON on stdin) already running capcom-tui; used by the plugin
     #[arg(long, hide = true)]
     find_pane: bool,
-    /// Folder new Herdr workspaces and tabs start in (default: the current folder, or ~/code when that is ~)
+    /// Folder new sessions start in when a task has none (default: the current folder, or ~/code when that is ~)
     #[arg(long, env = "CAPCOM_WORKDIR")]
     workdir: Option<PathBuf>,
     /// Try it with invented stories, PRs and runs: needs no stories folder, GitHub or Herdr
@@ -180,9 +181,11 @@ fn main() -> Result<()> {
         wakes.push(wake.clone());
         app.attach_feed(rx, wake);
     }
-    if herdr::inside_herdr() {
-        let cwd = cli.workdir.unwrap_or_else(capcom::session::default_workdir);
-        app.herdr = Some(Arc::new(herdr::Cli::new(cwd)));
+    let home = capcom::host::detect(|k| std::env::var(k).ok());
+    let cwd = cli.workdir.unwrap_or_else(capcom::session::default_workdir);
+    if let Some(router) = hosts::router(home, cwd) {
+        app.home = home;
+        app.herdr = Some(Arc::new(router));
         app.start_agents();
     }
     if let Some(config) = capcom::session::config_dir() {

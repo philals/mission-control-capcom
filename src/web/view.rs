@@ -81,19 +81,7 @@ pub(super) struct Ctx<'a> {
     pub workdir: &'a std::path::Path,
 }
 
-fn percent(text: &str) -> String {
-    text.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
-}
-
-/// The link that opens a new Claude Code desktop session in `folder` with `prompt` typed in (not sent).
-pub(super) fn new_session_link(prompt: &str, folder: &std::path::Path) -> String {
-    format!("claude://code/new?prompt={}&folder={}", percent(prompt), percent(&folder.to_string_lossy()))
-}
+pub(super) use crate::claude::new_session_link;
 
 fn effective(url: &str, per_pr: &[(String, bool)], default: bool, pasted: bool) -> bool {
     per_pr.iter().find(|(u, _)| same_url(u, url)).map_or(default && !pasted, |(_, on)| *on)

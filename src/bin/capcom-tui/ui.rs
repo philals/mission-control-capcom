@@ -806,7 +806,7 @@ fn draw_new_story(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     if app.herdr.is_some() {
         lines.push(Line::from(Span::styled(" Starts /story-break-down in a new Herdr workspace.", dim)));
     } else {
-        lines.push(Line::from(Span::styled(" Not running inside Herdr: nothing can be started.", Style::new().fg(theme::RED))));
+        lines.push(Line::from(Span::styled(" Not running inside Herdr, Orca or Claude Desktop: nothing can be started.", Style::new().fg(theme::RED))));
     }
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
@@ -1223,7 +1223,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("g", "automerge on the selected pull request: its merge bot's label, on or off".into()),
         row("a", "go to the agent that made the selected pull request, or (on a story's board) the agent working the selected task".into()),
         row("paste  u", "paste a pull request link to follow someone else's PR like your own (auto-fix starts off); u stops following a pasted one".into()),
-        row("A", "show or hide the agents panel left of the stories (inside Herdr, on terminals at least 110 wide); click an agent to bring it to the front".into()),
+        row("A", "show or hide the agents panel left of the stories (inside Herdr, Orca or Claude Desktop, on terminals at least 110 wide); click an agent to bring it to the front".into()),
         row("d", "show or hide completed stories (list)".into()),
         row("Esc  b", "back to the list, or close a sheet".into()),
         row("r", "reload now (it also reloads by itself)".into()),
@@ -3665,6 +3665,8 @@ mod tests {
                 agent: "proj-1-t3-plan".into(),
                 prompt: "/story-plan-task PROJ-1 T3".into(),
                 folder: None,
+                task: Some("T3".into()),
+                sessions: Vec::new(),
             }]
         );
         assert_eq!(app.selected_task().unwrap().status, Status::Todo, "the skill moves the card, not the drag");
@@ -3864,6 +3866,8 @@ mod tests {
                 agent: "new-5-breakdown".into(),
                 prompt: "/story-break-down NEW-5".into(),
                 folder: None,
+                task: None,
+                sessions: Vec::new(),
             }]
         );
     }
@@ -4330,6 +4334,8 @@ mod tests {
                 agent: "proj-4-review".into(),
                 prompt: "/story-review PROJ-4".into(),
                 folder: None,
+                task: None,
+                sessions: Vec::new(),
             }]
         );
         assert_eq!(story_status_of(&app, "PROJ-4"), StoryStatus::InProgress, "the skill moves the story, not the drag");

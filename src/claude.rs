@@ -15,6 +15,20 @@ pub fn pane_of(entrypoint: &str, pid: u64, host: Option<&str>) -> String {
     }
 }
 
+fn percent(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// The link that opens a new Claude Code desktop session in `folder` with `prompt` typed in (not sent).
+pub fn new_session_link(prompt: &str, folder: &Path) -> String {
+    format!("claude://code/new?prompt={}&folder={}", percent(prompt), percent(&folder.to_string_lossy()))
+}
+
 /// The link that has the desktop app import a terminal session and open it (`claude://resume?session=…`);
 /// None unless the id looks like one (letters, digits and hyphens).
 pub fn import_link(session: &str) -> Option<String> {
