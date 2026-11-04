@@ -81,7 +81,13 @@ The **AGENTS** panel lists the Claude Code sessions running on this machine, fro
 
 Add `/agent-note` (see the README) and each agent also says what it was asked, where it has got to, what it waits on and what you need to do (`capcom note`, one small file per session). The note shows under the agent: `you: pick option A or B` in orange when it waits on you (the header counts those), `waiting: CI on the PR` when it waits on something else, otherwise where it has got to; click it for all of it. Below the running sessions, **EARLIER** lists the notes of sessions that have ended, for a week, newest first with how long ago. A session whose note says it needs you only shouts while the session is not working.
 
-A `desktop` session is clickable: the click opens it in the Claude Code desktop app, through the app's own `claude://code/continue?session=…` link (the id is the one the app keeps for the session, `hostSessionId` in the session file). The 🤖 on a PR opens the session that made it: the same link when that session is running in the desktop app, else `claude://resume?session=…`, which has the app import the terminal session. The app takes a second or two to come forward (the system starts a whole second copy of it that hands the link over, about 1.9 s whatever the flags); the row says `opening…` meanwhile, and the same link clicked again within 4 seconds is ignored so clicks do not pile up launches. A `cli` session has no link of its own, because the desktop app does not know it. (`capcom-tui` lists the agents of Herdr instead; the notes are shared by both.)
+A `desktop` session is clickable: the click opens it in the Claude Code desktop app, through the app's own `claude://code/continue?session=…` link (the id is the one the app keeps for the session, `hostSessionId` in the session file). The 🤖 on a PR opens the session that made it: the same link when that session is running in the desktop app, else `claude://resume?session=…`, which has the app import the terminal session. The app takes a second or two to come forward (the system starts a whole second copy of it that hands the link over, about 1.9 s whatever the flags); the row says `opening…` meanwhile, and the same link clicked again within 4 seconds is ignored so clicks do not pile up launches. A `cli` session has no link of its own, because the desktop app does not know it. (`capcom-tui` lists the agents of Herdr, Orca and Claude Desktop; the notes are shared by both.)
+
+## In Orca's browser
+
+Open the page in Orca's built-in browser as `http://127.0.0.1:1969/?host=orca` (the page keeps it for the tab; Orca's browser does not say it is Orca). Then plan, implement, review and break-down start a Claude terminal in Orca, in the task's folder, instead of a desktop session. Sessions running in Orca terminals are tagged `orca` in the agents panel (from `ORCA_TERMINAL_HANDLE` in the session's process), and a click switches to the terminal in Orca. capcom web finds Orca's command-line tool the way `capcom-tui` does (see [tui.md](tui.md#orca)); without it, an Orca page says so and starts nothing.
+
+Starting a task from the page, in either app, is refused while the task's session is running anywhere (the page opens that one instead) or was started in the last five minutes.
 
 ## Keys
 
@@ -131,7 +137,7 @@ This repository has that file in `.claude/launch.json`. Put the same file in `.c
 ## What is not the same as the TUI
 
 - **Layout:** the same arrangement as the TUI, with draggable edges between consoles (above) instead of the TUI's divider keys; below 1000 px it shows one console at a time.
-- **Herdr:** no workspaces, tabs or panes: skills start in new desktop sessions (above), and "go to the agent" opens a session in the desktop app.
+- **Herdr:** no workspaces, tabs or panes: skills start in new desktop sessions (above), or in Orca (below), and a Herdr agent can't be reached from the page.
 - **Auto-fix's last step:** marked on the PR with a one-click session, not sent to the agent (above).
 - **Loading screens, the bell and the terminal clipboard:** not ported (the page has a toast, the `log` and 📋 buttons).
 

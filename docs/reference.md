@@ -99,9 +99,19 @@ Panel sizes (PR/runs split, bottom height, kanban column widths) are saved when 
 `$CAPCOM_TUI_SETTINGS`, else `$XDG_CONFIG_HOME/capcom/tui.json`, else
 `~/.config/capcom/tui.json`. Values are clamped on load; a missing or damaged file means defaults.
 
+### Which app launches
+
+`capcom-tui` launches in the app it runs in: Herdr (`HERDR_ENV=1`), else Orca (`ORCA_TERMINAL_HANDLE` set), else Claude
+Desktop (`CLAUDE_CODE_ENTRYPOINT=claude-desktop` or `TERM_PROGRAM=claude-desktop`); in any other terminal it launches
+nothing. Orca: `orca agent launch --agent claude --surface terminal --worktree path:<folder> --prompt "/skill KEY ID" --focus`,
+or for a folder inside a checkout `orca terminal create --worktree path:<checkout> --command "cd <folder> && claude '<prompt>'"`;
+resume is `cd <session folder> && claude --resume <id> ['<prompt>']`. Claude Desktop: `claude://code/new?prompt=…&folder=…`.
+Before any launch, a task whose recorded session is live in any app is focused instead, and a "starting" mark
+(`starting.json` in the cache folder, five minutes, cleared by `capcom set-session`) refuses a second start.
+
 ### Herdr launches
 
-Only when `HERDR_ENV=1` (the TUI is running in a Herdr pane). `--workdir` / `CAPCOM_WORKDIR` (default: the current
+When `HERDR_ENV=1` (the TUI is running in a Herdr pane). `--workdir` / `CAPCOM_WORKDIR` (default: the current
 folder, or `~/code` when that is `~`) is where new workspaces and tabs start. A launch looks for a workspace labelled with the story key (creating it,
 `--no-focus`, if missing), puts the agent in a new tab of it (the root tab of a new workspace), then runs
 `herdr agent start NAME --kind claude --pane P` and `herdr agent prompt NAME "/skill KEY [ID]"`. A live agent with the

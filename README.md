@@ -93,7 +93,7 @@ A typical run, in order: break the story down and approve the table; plan each t
 
 - **Stories and boards:** a kanban of your stories (TO DO, DOING, IN REVIEW) and a kanban per story with a card for each task (ready to implement, waits on dependencies, blocked, PRs merged). Drag a finished story from DOING to IN REVIEW and it opens a Herdr tab running `/story-review`.
 - **Your PRs, with CI:** every open PR from a GitHub search you control, `[DRAFT]` or `[READY]`, with the CI stages that are running, queued or failed listed one per line. A PR that is all green and only waiting for a reviewer is lit up with a green `GO · ◉ AWAITING REVIEW` block, a green bar and a tinted row, and counted in the panel title. Click to open, copy the link, or mark a draft ready (it asks first). Paste someone else's PR link to follow it the same way (auto-fix starts off for it).
-- **Back to the agent:** a PR made through a task has a `🤖` button that focuses the Claude Code session that made it in Herdr, or resumes it (`claude --resume`) if the tab was closed. PRs you made outside the workflow work too: Claude Code records which session made each PR, and capcom reads that.
+- **Back to the agent:** a PR made through a task has a `🤖` button that focuses the Claude Code session that made it in the app it runs in (Herdr, Orca or Claude Desktop), or resumes it (`claude --resume`) if the tab was closed. PRs you made outside the workflow work too: Claude Code records which session made each PR, and capcom reads that.
 - **Copilot and fixing:** each PR shows Copilot's state (`reviewing`, `✎ 3 to fix`, `✔ reviewed`) and notifies you when its review lands. Two ticks on each of your PRs, `auto-review` and `auto-fix` (both on for new PRs unless you untick the defaults), do the loop for you: Copilot is asked to review the PR, and whenever CI fails or Copilot leaves comments the agent that made the PR is asked to merge the default branch in, fix the failures and address then resolve the comments (the `/pr-address` skill), up to 5 rounds and only when something has changed. Boxes on the panel set the defaults.
 - **Runs and watch:** the "Run workflow" runs you started, such as a nonprod deploy, plus any GitHub Actions run you paste a link to, and your PRs merged in the last 12 hours (in purple). Each shows its stages and a link, finished runs leave after 30 minutes, and you get a bell, a status line and (with `notify-send`) a desktop notification when one finishes.
 - **Finishing tasks:** drag an IMPLEMENTING card to DONE (or press `x`) and capcom checks its PRs on GitHub, and only finishes the task if every one is merged.
@@ -119,12 +119,14 @@ or from a shell, `claude plugin install capcom --marketplace philals/mission-con
 | `CAPCOM_ROOT` | `--root` | Folder holding one folder per story | required (not with `--demo`) |
 | `CAPCOM_PR_QUERY` | `--pr-query` | GitHub search for the PR panel (`@me` is resolved by GitHub) | `is:pr author:@me state:open archived:false sort:updated-desc -label:icebox` |
 | `CAPCOM_DEPLOY_REPOS` | `--deploy-repos` | Extra `owner/name` repos (comma separated) to look for your manual runs in | repos of your PRs and stories |
-| `CAPCOM_WORKDIR` | `--workdir` | Where new Herdr workspaces start | the current folder, or `~/code` when that is `~` |
+| `CAPCOM_WORKDIR` | `--workdir` | Where new sessions start when a task has no folder | the current folder, or `~/code` when that is `~` |
 | `CAPCOM_TUI_SETTINGS` | | File for the saved panel sizes | `~/.config/capcom/tui.json` |
 | `CAPCOM_CACHE_DIR` | | Shared GitHub cache | `~/.cache/capcom` |
 | | `--no-prs`, `--no-runs` | Turn the PR or runs panel off | |
 
-## Herdr
+## Herdr, Orca and Claude Desktop
+
+New sessions open in the app you are using when you start them: `capcom-tui` in a Herdr pane opens them in Herdr, in an Orca terminal in Orca, and in Claude Desktop's terminal panel in Claude Desktop; the web page opens them in Claude Desktop, or in Orca when opened in Orca's browser as `http://127.0.0.1:1969/?host=orca`. Clicking an agent takes you to it in whichever app it runs in. See [docs/tui.md](docs/tui.md#starting-agents-herdr-orca-or-claude-desktop).
 
 If you use [Herdr](https://herdr.dev), `capcom-tui` run inside a Herdr pane can start the skills for you: paste a Jira key to start a breakdown, or drag a card onto PLANNING or IMPLEMENTING. The repo is also a Herdr plugin with an `open` action, so a key such as `prefix+y` opens the board as an overlay. Install it with `herdr plugin install philals/mission-control-capcom` (it builds the binaries, so it needs Rust; read [Herdr's trust note](https://herdr.dev/docs/plugins/#trust-and-security) first, since a plugin is ordinary code), then bind a key as described in [docs/tui.md](docs/tui.md#herdr-plugin). Nothing here needs Herdr; outside it those features are simply off.
 
