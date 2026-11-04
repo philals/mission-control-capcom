@@ -149,3 +149,26 @@ These fire with no click, so there is no "app you are in".
 - Wording of notices.
 - Docs: `docs/tui.md`, `docs/web.md`, `docs/reference.md` and the README describe Herdr today and need
   the other two apps added.
+
+## Spike results (2026-11-05, Orca 1.4.247)
+
+1. **Orca agents and session files.** A Claude agent started with `orca agent launch --surface terminal`
+   writes an ordinary `~/.claude/sessions/<pid>.json` with `entrypoint: "cli"`. Its process environment
+   holds `ORCA_TERMINAL_HANDLE`, `ORCA_PANE_KEY` and `ORCA_WORKTREE_ID`, so a live session is tied to
+   its Orca terminal by reading `/proc/<pid>/environ`. The launch reply has the handle at
+   `result.outcome.handle` (not `result.launch.outcome.handle`). `worktree ps` agent rows for terminal
+   agents carry `paneKey` = `<uuid>:<uuid>` (no session id), `state` and `agentType`; `terminal list`
+   rows join on `recordedPaneKey == paneKey` and give `handle`.
+2. **Orca's browser user agent** is a plain Chrome string with nothing marking Orca, so the page needs
+   `?host=orca`.
+3. **Claude Desktop's Terminal panel** sets `TERM_PROGRAM=claude-desktop` (no `CLAUDE_CODE_ENTRYPOINT`).
+   Goal 4 stands: detection checks `TERM_PROGRAM` too.
+4. **Herdr from outside.** `herdr agent list` talks to a fixed socket (`~/.config/herdr/herdr.sock`);
+   with no Herdr server it answers `server_not_running`. So Herdr is reachable from anywhere while it
+   runs: capcom includes Herdr whenever `herdr agent list` answers, whatever app it is in.
+5. **`claude://code/continue`** reads only `session` and `source` (the desktop app's link handler), so
+   it cannot carry a prompt. Automatic prompts for a desktop agent use the fallback:
+   `claude://code/new?prompt=…&folder=<session folder>`.
+6. **Web sandbox.** The Orca CLI shim works under the service's exact settings (`PrivateTmp=true`,
+   `ProtectHome=read-only`, `NoNewPrivileges=true`), tested with `systemd-run --user`. No unit change
+   is needed.
