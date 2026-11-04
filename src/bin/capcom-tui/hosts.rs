@@ -110,7 +110,12 @@ impl Herdr for DesktopHost {
 }
 
 impl Herdr for OrcaHost {
+    /// A task starts in its own folder, never quietly in another repo: one with no folder, or a folder
+    /// that has gone, is refused. Story-wide work (review, break-down) starts in the work folder.
     fn launch(&self, l: &Launch) -> Result<Outcome, String> {
+        if let Some(task) = &l.task {
+            capcom::orca::check_task_folder(&l.workspace, task, l.folder.as_deref())?;
+        }
         self.orca.launch(&start_folder(l, &self.workdir).to_string_lossy(), &l.prompt, true)?;
         Ok(Outcome::Started)
     }
@@ -199,19 +204,34 @@ impl Herdr for Router {
     fn launch(&self, l: &Launch) -> Result<Outcome, String> {
         let now = (self.now)();
         let mark = l.task.as_deref().zip(self.starting.as_ref());
-        if let Some((task, marks)) = mark {
-            if let Some(h) = marks.live(&l.workspace, task, now) {
-                return Ok(Outcome::AlreadyStarting(h));
+        let clear = || {
+            if let Some((task, marks)) = mark {
+                marks.clear(&l.workspace, task);
             }
-        }
+        };
+        // the mark is taken first: looking through every app takes a while, and a second click meanwhile
+        // must find it taken
+        let taken = match mark {
+            Some((task, marks)) if !marks.mark(&l.workspace, task, self.home, now) => marks.live(&l.workspace, task, now),
+            _ => None,
+        };
         if let Some((host, a)) = self.running(&l.sessions) {
+            if taken.is_none() {
+                clear();
+            }
             host.focus(&a.pane)?;
             return Ok(Outcome::Focused);
         }
-        let home = self.home()?;
-        if let Some((task, marks)) = mark {
-            marks.mark(&l.workspace, task, self.home, now);
+        if let Some(h) = taken {
+            return Ok(Outcome::AlreadyStarting(h));
         }
+        let home = match self.home() {
+            Ok(h) => h,
+            Err(e) => {
+                clear();
+                return Err(e);
+            }
+        };
         let out = home.launch(l);
         if !matches!(out, Ok(Outcome::Started)) {
             if let Some((task, marks)) = mark {
@@ -462,15 +482,27 @@ mod tests {
             calls.lock().unwrap().last().unwrap(),
             &format!("agent launch --agent claude --surface terminal --worktree path:{w} --prompt /story-implement-task K-1 T2 --focus --json")
         );
-        o.launch(&launch(Some("/gone/folder"))).unwrap();
-        assert!(calls.lock().unwrap().last().unwrap().contains(&format!("path:{w} ")), "a missing folder falls back to the work folder");
+    }
+
+    #[test]
+    fn an_orca_task_without_a_folder_says_so_and_starts_nothing() {
+        let work = tempfile::tempdir().unwrap();
+        let (o, calls) = orca_host(false, "idle", work.path());
+        let none = o.launch(&launch(None)).unwrap_err();
+        assert!(none.contains("T2 has no folder") && none.contains("capcom set-folder K-1 T2"), "{none}");
+        let gone = o.launch(&launch(Some("/gone/folder"))).unwrap_err();
+        assert!(gone.contains("/gone/folder") && gone.contains("no longer exists"), "{gone}");
+        assert!(calls.lock().unwrap().is_empty(), "nothing asked of Orca");
+        let mut review = launch(None);
+        review.task = None;
+        assert_eq!(o.launch(&review), Ok(Outcome::Started), "story-wide work starts in the work folder");
     }
 
     #[test]
     fn orca_not_running_is_reported_as_orca() {
         let work = tempfile::tempdir().unwrap();
         let (o, _) = orca_host(true, "idle", work.path());
-        assert!(o.launch(&launch(None)).unwrap_err().starts_with("Orca: "));
+        assert!(o.launch(&launch(Some(&work.path().to_string_lossy()))).unwrap_err().starts_with("Orca: "));
     }
 
     #[test]
@@ -533,6 +565,49 @@ mod tests {
         assert_eq!(r.launch(&launch(None)), Ok(Outcome::Started));
         assert_eq!(r.launch(&launch(None)), Ok(Outcome::AlreadyStarting(Host::Desktop)));
         assert_eq!(calls.lock().unwrap().iter().filter(|c| c.contains("launch")).count(), 1);
+    }
+
+    /// An app that takes a while to list its agents, like Orca's CLI or Herdr's socket.
+    struct Slow(Calls);
+
+    impl Herdr for Slow {
+        fn launch(&self, l: &Launch) -> Result<Outcome, String> {
+            self.0.lock().unwrap().push(format!("launch {}", l.prompt));
+            Ok(Outcome::Started)
+        }
+        fn resume(&self, _r: &Resume) -> Result<Outcome, String> {
+            Ok(Outcome::Focused)
+        }
+        fn agents(&self) -> Result<Vec<AgentInfo>, String> {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn two_clicks_at_once_start_one_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let calls: Calls = Arc::new(Mutex::new(Vec::new()));
+        let r = Arc::new(router_of(Host::Orca, vec![(Host::Orca, Arc::new(Slow(calls.clone())))], &dir));
+        let clicks: Vec<_> = (0..2).map(|_| {
+            let r = r.clone();
+            std::thread::spawn(move || r.launch(&launch(None)))
+        }).collect();
+        let mut outcomes: Vec<String> = clicks.into_iter().map(|c| format!("{:?}", c.join().unwrap())).collect();
+        outcomes.sort();
+        assert_eq!(outcomes, ["Ok(AlreadyStarting(Orca))", "Ok(Started)"]);
+        assert_eq!(calls.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_marked_task_whose_agent_is_now_running_is_brought_to_the_front() {
+        let dir = tempfile::tempdir().unwrap();
+        let calls: Calls = Arc::new(Mutex::new(Vec::new()));
+        let running = vec![agent("w1:p2", "s-1", Status::Idle, "/w")];
+        let r = router_of(Host::Herdr, vec![(Host::Herdr, fake("herdr", running, &calls, false))], &dir);
+        r.starting.as_ref().unwrap().mark("K-1", "T2", Host::Herdr, now());
+        assert_eq!(r.launch(&launch(None)), Ok(Outcome::Focused));
+        assert_eq!(*calls.lock().unwrap(), vec!["herdr focus w1:p2"]);
     }
 
     #[test]

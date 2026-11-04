@@ -25,11 +25,25 @@ impl Starting {
         std::fs::read(&self.path).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| v.as_object().cloned()).unwrap_or_default()
     }
 
-    fn write(&self, marks: &Map<String, Value>) {
+    /// Holds `<file>.lock` while a read-modify-write runs, so the TUI and capcom web (and a TUI's threads)
+    /// never both take the same mark or drop each other's. Without a lock file it goes ahead unlocked.
+    fn locked<T>(&self, f: impl FnOnce() -> T) -> T {
         if let Some(dir) = self.path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let tmp = self.path.with_extension("json.tmp");
+        let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.path.with_extension("json.lock"));
+        let held = lock.as_ref().ok().filter(|f| f.lock().is_ok());
+        let out = f();
+        if let Some(f) = held {
+            let _ = f.unlock();
+        }
+        out
+    }
+
+    fn write(&self, marks: &Map<String, Value>) {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = self.path.with_extension(format!("json.{}.{n}.tmp", std::process::id()));
         if std::fs::write(&tmp, Value::Object(marks.clone()).to_string()).is_ok() {
             let _ = std::fs::rename(&tmp, &self.path);
         }
@@ -41,21 +55,25 @@ impl Starting {
 
     /// Mark `key`/`task` as starting in `host`; false (and nothing written) when a live mark exists.
     pub fn mark(&self, key: &str, task: &str, host: Host, now: u64) -> bool {
-        if self.live(key, task, now).is_some() {
-            return false;
-        }
-        let mut marks = self.read();
-        marks.retain(|_, m| m["at"].as_u64().is_some_and(|at| now.saturating_sub(at) <= KEPT.as_secs()));
-        marks.insert(Self::id(key, task), json!({ "host": host.word(), "at": now }));
-        self.write(&marks);
-        true
+        self.locked(|| {
+            if self.live(key, task, now).is_some() {
+                return false;
+            }
+            let mut marks = self.read();
+            marks.retain(|_, m| m["at"].as_u64().is_some_and(|at| now.saturating_sub(at) <= KEPT.as_secs()));
+            marks.insert(Self::id(key, task), json!({ "host": host.word(), "at": now }));
+            self.write(&marks);
+            true
+        })
     }
 
     pub fn clear(&self, key: &str, task: &str) {
-        let mut marks = self.read();
-        if marks.remove(&Self::id(key, task)).is_some() {
-            self.write(&marks);
-        }
+        self.locked(|| {
+            let mut marks = self.read();
+            if marks.remove(&Self::id(key, task)).is_some() {
+                self.write(&marks);
+            }
+        })
     }
 
     pub fn live(&self, key: &str, task: &str, now: u64) -> Option<Host> {
@@ -110,6 +128,26 @@ mod tests {
         assert_eq!(s.live("K-1", "T2", 1000), None);
         assert!(s.mark("K-1", "T2", Host::Desktop, 1000));
         assert_eq!(s.live("K-1", "T2", 1000), Some(Host::Desktop));
+    }
+
+    #[test]
+    fn marks_made_at_the_same_moment_let_exactly_one_through() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("starting.json");
+        let threads: Vec<_> = (0..16)
+            .map(|i| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    let s = Starting::new(path);
+                    (s.mark("K-1", "T2", Host::Orca, 1000), s.mark("K-1", &format!("T{}", 10 + i), Host::Orca, 1000))
+                })
+            })
+            .collect();
+        let results: Vec<(bool, bool)> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+        assert_eq!(results.iter().filter(|(same, _)| *same).count(), 1, "{results:?}");
+        assert!(results.iter().all(|(_, own)| *own), "each thread's own task is marked");
+        let s = Starting::new(path);
+        assert!((0..16).all(|i| s.live("K-1", &format!("T{}", 10 + i), 1000).is_some()), "no mark was lost");
     }
 
     #[test]

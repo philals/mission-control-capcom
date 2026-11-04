@@ -566,7 +566,7 @@ fn an_orca_page_starts_the_session_in_orca() {
     let r = rig();
     let work = tempfile::tempdir().unwrap();
     let w = work.path().to_string_lossy().to_string();
-    r.server.set_workdir(work.path().to_path_buf());
+    store::update(&r._dir.path().join("stories"), "PROJ-1", |b| crate::ops::set_folder(b, "T1", Some(&w))).unwrap();
     let orca = orca_for(&r, &w, false);
     let out = start(&r, Some("orca"));
     assert_eq!(out["ok"], true, "{out}");
@@ -578,7 +578,7 @@ fn an_orca_page_starts_the_session_in_orca() {
 fn orca_unreachable_from_an_orca_page_says_so_and_returns_no_link() {
     let r = rig();
     let work = tempfile::tempdir().unwrap();
-    r.server.set_workdir(work.path().to_path_buf());
+    store::update(&r._dir.path().join("stories"), "PROJ-1", |b| crate::ops::set_folder(b, "T1", Some(&work.path().to_string_lossy()))).unwrap();
     orca_for(&r, "/elsewhere", true);
     let out = start(&r, Some("orca"));
     assert_eq!(out["ok"], false, "{out}");
@@ -587,6 +587,19 @@ fn orca_unreachable_from_an_orca_page_says_so_and_returns_no_link() {
     assert!(!start(&r, Some("orca"))["message"].as_str().unwrap().contains("already starting"), "a failed start leaves no mark");
     r.server.set_orca(None);
     assert!(start(&r, Some("orca"))["message"].as_str().unwrap().contains("Orca"), "no Orca CLI is said, not opened elsewhere");
+}
+
+#[test]
+fn an_orca_page_refuses_a_task_without_a_folder() {
+    let r = rig();
+    let work = tempfile::tempdir().unwrap();
+    r.server.set_workdir(work.path().to_path_buf());
+    let orca = orca_for(&r, &work.path().to_string_lossy(), false);
+    let out = start(&r, Some("orca"));
+    assert_eq!(out["ok"], false, "{out}");
+    assert!(out["message"].as_str().unwrap().contains("capcom set-folder PROJ-1 T1"), "{out}");
+    assert!(orca.lock().unwrap().is_empty());
+    assert_eq!(start(&r, None)["ok"], true, "the desktop app still starts it in the work folder");
 }
 
 #[test]
@@ -613,6 +626,19 @@ fn a_task_whose_session_is_running_is_opened_not_started_again() {
     assert_eq!(out["ok"], true, "{out}");
     assert_eq!(out["link"], "claude://code/continue?session=local_abc");
     assert!(out["message"].as_str().unwrap().contains("already running"), "{out}");
+}
+
+#[test]
+fn a_running_planning_session_does_not_stop_implementing() {
+    let r = rig();
+    r.server.set_workdir("/w/code".into());
+    let root = r._dir.path().join("stories");
+    store::update(&root, "PROJ-1", |b| crate::ops::add_session(b, "T1", "s-1", "story-plan-task", "/w/code", "2026-11-05T00:00:00Z").map(|_| ())).unwrap();
+    lock(&r.server.live).agents = vec![AgentInfo {
+        pane: "claude-desktop:7:local_abc".into(), name: None, status: AgentStatus::Idle, topic: String::new(), workspace: String::new(), cwd: "/w/code".into(), session: Some("s-1".into()),
+    }];
+    let out = start(&r, None);
+    assert_eq!(out["link"], "claude://code/new?prompt=%2Fstory-implement-task%20PROJ-1%20T1&folder=%2Fw%2Fcode", "{out}");
 }
 
 #[test]

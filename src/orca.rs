@@ -28,6 +28,15 @@ pub fn find_cli_here() -> Option<PathBuf> {
     find_cli(|k| std::env::var(k).ok(), &home, on_path)
 }
 
+/// A task started in Orca needs a folder that exists: Orca has no "somewhere sensible" to fall back on.
+pub fn check_task_folder(key: &str, task: &str, folder: Option<&str>) -> Result<(), String> {
+    match folder {
+        None => Err(format!("{task} has no folder to start in: set one with `capcom set-folder {key} {task} <folder>`")),
+        Some(f) if !Path::new(f).is_dir() => Err(format!("{task}'s folder {f} no longer exists: set another with `capcom set-folder {key} {task} <folder>`")),
+        Some(_) => Ok(()),
+    }
+}
+
 pub fn handle_of(pane: &str) -> Option<&str> {
     pane.strip_prefix("orca:").filter(|h| !h.is_empty())
 }

@@ -2719,7 +2719,7 @@ impl App {
             prompt: format!("/{skill} {key} {task_id}"),
             folder: self.board.as_ref().and_then(|b| b.task(task_id)).and_then(|t| t.folder.clone()),
             task: Some(task_id.to_string()),
-            sessions: self.stories.iter().find(|s| s.key == key).map(|s| s.sessions.iter().filter(|(t, _)| t == task_id).map(|(_, x)| x.id.clone()).collect()).unwrap_or_default(),
+            sessions: self.stories.iter().find(|s| s.key == key).map(|s| s.sessions.iter().filter(|(t, x)| t == task_id && x.skill == skill).map(|(_, x)| x.id.clone()).collect()).unwrap_or_default(),
         });
     }
 

@@ -3685,6 +3685,21 @@ mod tests {
     }
 
     #[test]
+    fn only_sessions_of_the_same_skill_count_as_already_running() {
+        let (root, _) = sample();
+        store::update(root.path(), "PROJ-1", |b| {
+            ops::add_session(b, "T1", "s-plan", "story-plan-task", "/w", "2026-11-05T00:00:00Z")?;
+            ops::add_session(b, "T1", "s-impl", "story-implement-task", "/w", "2026-11-05T01:00:00Z")
+        })
+        .unwrap();
+        let mut app = App::new(root.path().to_path_buf(), Some("PROJ-1".into()));
+        let fake = with_herdr(&mut app);
+        drag_card(&mut app, "T1 Add endpoint", "IMPLEMENTING");
+        let launches = launches_after(&mut app, &fake, 1);
+        assert_eq!(launches[0].sessions, vec!["s-impl".to_string()]);
+    }
+
+    #[test]
     fn a_todo_card_can_go_straight_to_implementing_and_still_waits_for_its_dependencies() {
         let (_root, mut app) = sample();
         let fake = with_herdr(&mut app);

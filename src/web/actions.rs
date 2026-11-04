@@ -327,8 +327,13 @@ impl Server {
             let Some(t) = board.task(task) else {
                 return answer(false, format!("no task {task} in {key}"));
             };
+            if host == "orca" {
+                if let Err(e) = crate::orca::check_task_folder(key, task, t.folder.as_deref()) {
+                    return answer(false, e);
+                }
+            }
             let folder = t.folder.as_deref().map(std::path::PathBuf::from).filter(|f| f.is_dir()).unwrap_or(workdir);
-            (format!("/{skill} {key} {task}"), folder, Some(task), t.sessions.iter().map(|s| s.id.clone()).collect::<Vec<_>>())
+            (format!("/{skill} {key} {task}"), folder, Some(task), t.sessions.iter().filter(|s| s.skill == skill).map(|s| s.id.clone()).collect::<Vec<_>>())
         };
         let host = if host == "orca" { Host::Orca } else { Host::Desktop };
         let marks = lock(&self.starting).clone();
@@ -345,7 +350,10 @@ impl Server {
             return out;
         }
         if let (Some(t), Some(m)) = (task, &marks) {
-            m.mark(key, t, host, now);
+            if !m.mark(key, t, host, now) {
+                let h = m.live(key, t, now).map_or("another app", |h| h.name());
+                return answer(false, format!("{key} {t} is already starting in {h}: give it a moment"));
+            }
         }
         let clear = || {
             if let (Some(t), Some(m)) = (task, &marks) {
