@@ -22,6 +22,7 @@ pub mod rules;
 pub mod runs;
 pub mod session;
 pub mod settings;
+pub mod starting;
 pub mod store;
 pub mod taskdoc;
 pub mod usage;

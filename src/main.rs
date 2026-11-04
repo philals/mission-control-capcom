@@ -435,15 +435,24 @@ fn main() -> Result<()> {
             ops::set_agent(b, &id, &pane, &skill, &now)?;
             task_json(b, &id)
         }),
-        Cmd::SetSession { key, id, skill, session, cwd } => mutate(root, &key, |b, _| {
-            let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-            let cwd = match cwd.or_else(|| capcom::session::start_dir(&session)) {
-                Some(c) => c,
-                None => std::env::current_dir()?.to_string_lossy().to_string(),
-            };
-            ops::add_session(b, &id, &session, &skill, &cwd, &now)?;
-            task_json(b, &id)
-        }),
+        Cmd::SetSession { key, id, skill, session, cwd } => {
+            let (done_key, done_id) = (key.clone(), id.clone());
+            let out = mutate(root, &key, |b, _| {
+                let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                let cwd = match cwd.or_else(|| capcom::session::start_dir(&session)) {
+                    Some(c) => c,
+                    None => std::env::current_dir()?.to_string_lossy().to_string(),
+                };
+                ops::add_session(b, &id, &session, &skill, &cwd, &now)?;
+                task_json(b, &id)
+            });
+            if out.is_ok() {
+                if let Some(marks) = capcom::starting::Starting::default() {
+                    marks.clear(&done_key, &done_id);
+                }
+            }
+            out
+        }
         Cmd::ClearAgent { key, id } => mutate(root, &key, |b, _| {
             ops::clear_agent(b, &id)?;
             task_json(b, &id)

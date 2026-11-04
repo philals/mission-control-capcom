@@ -328,3 +328,25 @@ fn a_note_needs_no_stories_folder_and_keeps_what_an_update_leaves_out() {
     assert_eq!((note["waiting"].as_str(), note["needs_you"].as_bool()), (Some(""), Some(false)));
     assert!(notes.path().join("s-7.json").exists());
 }
+
+#[test]
+fn recording_a_session_clears_the_tasks_starting_mark() {
+    let root = TempDir::new().unwrap();
+    let cache = TempDir::new().unwrap();
+    story_with_tasks(&root, 2);
+    let now = chrono::Utc::now().timestamp() as u64;
+    let marks = capcom::starting::Starting::new(cache.path().join("starting.json"));
+    assert!(marks.mark("PROJ-1", "T1", capcom::host::Host::Orca, now));
+    assert!(marks.mark("PROJ-1", "T2", capcom::host::Host::Orca, now));
+    let out = Command::cargo_bin("capcom")
+        .unwrap()
+        .env("CAPCOM_CACHE_DIR", cache.path())
+        .arg("--root")
+        .arg(root.path())
+        .args(["set-session", "PROJ-1", "T1", "--skill", "story-implement-task", "--session", "abc-123", "--cwd", "/work/api"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(marks.live("PROJ-1", "T1", now), None);
+    assert_eq!(marks.live("PROJ-1", "T2", now), Some(capcom::host::Host::Orca));
+}
