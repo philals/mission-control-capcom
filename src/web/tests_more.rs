@@ -590,6 +590,26 @@ fn orca_unreachable_from_an_orca_page_says_so_and_returns_no_link() {
 }
 
 #[test]
+fn the_app_can_come_in_a_header() {
+    let r = rig();
+    let work = tempfile::tempdir().unwrap();
+    let w = work.path().to_string_lossy().to_string();
+    store::update(&r._dir.path().join("stories"), "PROJ-1", |b| crate::ops::set_folder(b, "T1", Some(&w))).unwrap();
+    let orca = orca_for(&r, &w, false);
+    let send = |host: &str| {
+        let body = json!({ "action": "session.start", "key": "PROJ-1", "task": "T1", "kind": "implement" }).to_string();
+        let request = format!("POST /api/do HTTP/1.1\r\nHost: 127.0.0.1:7878\r\n{HEADERS}X-Capcom-Host: {host}\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+        let out = String::from_utf8_lossy(&r.server.answer(&request)).to_string();
+        serde_json::from_str::<Value>(out.split("\r\n\r\n").nth(1).unwrap()).unwrap()
+    };
+    let herdr = send("herdr");
+    assert_eq!(herdr["ok"], false);
+    assert!(herdr["message"].as_str().unwrap().contains("Herdr"), "{herdr}");
+    assert_eq!(send("orca")["ok"], true);
+    assert!(orca.lock().unwrap().iter().any(|c| c.starts_with("agent launch")));
+}
+
+#[test]
 fn an_orca_page_refuses_a_task_without_a_folder() {
     let r = rig();
     let work = tempfile::tempdir().unwrap();

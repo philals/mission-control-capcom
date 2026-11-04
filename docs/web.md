@@ -85,7 +85,7 @@ A `desktop` session is clickable: the click opens it in the Claude Code desktop 
 
 ## In Orca's browser
 
-Open the page in Orca's built-in browser as `http://127.0.0.1:1969/?host=orca` (the page keeps it for the tab; Orca's browser does not say it is Orca). Then plan, implement, review and break-down start a Claude terminal in Orca, in the task's folder, instead of a desktop session. Sessions running in Orca terminals are tagged `orca` in the agents panel (from `ORCA_TERMINAL_HANDLE` in the session's process), and a click switches to the terminal in Orca. capcom web finds Orca's command-line tool the way `capcom-tui` does (see [tui.md](tui.md#orca)); without it, an Orca page says so and starts nothing.
+Open the page in Orca's built-in browser as `http://127.0.0.1:1969/?host=orca` (the page keeps it for the tab and sends it with every action as an `X-Capcom-Host` header; Orca's browser sends an ordinary Chrome user agent, so the page cannot tell by itself). `?host=desktop` goes back to the desktop app, which is also what a request with no app means; `herdr` is refused, since the page cannot be open inside Herdr. Then plan, implement, review and break-down start a Claude terminal in Orca, in the task's folder, instead of a desktop session. Sessions running in Orca terminals are tagged `orca` in the agents panel (from `ORCA_TERMINAL_HANDLE` in the session's process), and a click switches to the terminal in Orca. capcom web finds Orca's command-line tool the way `capcom-tui` does (see [tui.md](tui.md#orca)); without it, an Orca page says so and starts nothing.
 
 Starting a task from the page, in either app, is refused while the task's session is running anywhere (the page opens that one instead) or was started in the last five minutes.
 

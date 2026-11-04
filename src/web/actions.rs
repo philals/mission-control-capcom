@@ -35,12 +35,17 @@ impl Server {
         if h("x-capcom") != Some("do") || h("origin").is_some_and(|o| !self.own_origin(o)) || h("sec-fetch-site").is_some_and(|s| s != "same-origin") {
             return plain("403 Forbidden", "not from the page");
         }
-        let Ok(request) = serde_json::from_str::<Value>(body) else {
+        let Ok(mut request) = serde_json::from_str::<Value>(body) else {
             return plain("400 Bad Request", "need json");
         };
-        let Some(action) = request["action"].as_str() else {
+        let Some(action) = request["action"].as_str().map(str::to_string) else {
             return plain("400 Bad Request", "need an action");
         };
+        // the app the page is open in: the page's `X-Capcom-Host` header, or a `host` field
+        if let (Some(host), true) = (h("x-capcom-host"), request.get("host").and_then(Value::as_str).is_none_or(str::is_empty)) {
+            request["host"] = json!(host.to_ascii_lowercase());
+        }
+        let action = action.as_str();
         if CONFIRMED.contains(&action) && request["confirm"] != json!(true) {
             return plain("400 Bad Request", "this one needs a confirmation");
         }
@@ -335,7 +340,12 @@ impl Server {
             let folder = t.folder.as_deref().map(std::path::PathBuf::from).filter(|f| f.is_dir()).unwrap_or(workdir);
             (format!("/{skill} {key} {task}"), folder, Some(task), t.sessions.iter().filter(|s| s.skill == skill).map(|s| s.id.clone()).collect::<Vec<_>>())
         };
-        let host = if host == "orca" { Host::Orca } else { Host::Desktop };
+        let host = match host {
+            "orca" => Host::Orca,
+            "" | "desktop" => Host::Desktop,
+            "herdr" => return answer(false, "the page can't start sessions in Herdr: use capcom-tui in a Herdr pane"),
+            other => return answer(false, format!("unknown app {other:?}: use orca or desktop")),
+        };
         let marks = lock(&self.starting).clone();
         let now = Utc::now().timestamp().max(0) as u64;
         if let (Some(t), Some(m)) = (task, &marks) {

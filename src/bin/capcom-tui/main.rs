@@ -50,6 +50,9 @@ struct Cli {
     /// Folder new sessions start in when a task has none (default: the current folder, or ~/code when that is ~)
     #[arg(long, env = "CAPCOM_WORKDIR")]
     workdir: Option<PathBuf>,
+    /// The app new sessions open in: herdr, orca or desktop (default: the app this terminal belongs to)
+    #[arg(long, env = "CAPCOM_HOST")]
+    host: Option<String>,
     /// Try it with invented stories, PRs and runs: needs no stories folder, GitHub or Herdr
     #[arg(long)]
     demo: bool,
@@ -181,7 +184,7 @@ fn main() -> Result<()> {
         wakes.push(wake.clone());
         app.attach_feed(rx, wake);
     }
-    let home = capcom::host::detect(|k| std::env::var(k).ok());
+    let home = capcom::host::choose(cli.host.as_deref(), |k| std::env::var(k).ok()).map_err(anyhow::Error::msg)?;
     let cwd = cli.workdir.unwrap_or_else(capcom::session::default_workdir);
     if let Some(router) = hosts::router(home, cwd) {
         app.home = home;

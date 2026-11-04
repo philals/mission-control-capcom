@@ -97,7 +97,8 @@ function link(text, url, cls) {
   return a;
 }
 
-// The app this page is open in: "orca" when opened as /?host=orca (kept for the tab), else the desktop app.
+// The app this page is open in, from /?host=orca (or herdr, desktop), kept for the tab and sent with every
+// action as X-Capcom-Host. With none, the server takes the desktop app.
 const HOST = (() => {
   const asked = new URLSearchParams(location.search).get("host");
   try {
@@ -113,7 +114,7 @@ async function act(action, args = {}) {
   try {
     const response = await fetch("/api/do", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Capcom": "do" },
+      headers: { "Content-Type": "application/json", "X-Capcom": "do", ...(HOST ? { "X-Capcom-Host": HOST } : {}) },
       body: JSON.stringify({ action, ...args }),
     });
     if (!response.ok) {

@@ -118,7 +118,7 @@ When there are no runs (or the panel is switched off), the runs panel shrinks to
 | Claude Desktop's terminal panel | `TERM_PROGRAM=claude-desktop` | a new Claude Desktop session with the skill typed in (press Enter to send it) |
 | any other terminal | | nothing: starting is off and says so |
 
-Herdr is checked first, so a TUI in a Herdr pane inside an Orca terminal uses Herdr. The **AGENTS** panel lists the agents of every app it can reach (Herdr while its server runs, Orca when its command-line tool is found, and Claude Desktop), and a click brings an agent to the front in its own app; one in an app capcom cannot reach says which app it is in.
+Herdr is checked first, so a TUI in a Herdr pane inside an Orca terminal uses Herdr. To say which app yourself, start it with `--host herdr`, `--host orca` or `--host desktop` (or set `CAPCOM_HOST`); that wins over what the terminal shows. The **AGENTS** panel lists the agents of every app it can reach (Herdr while its server runs, Orca when its command-line tool is found, and Claude Desktop), and a click brings an agent to the front in its own app; one in an app capcom cannot reach says which app it is in.
 
 **No double starts, in any app:** a task whose recorded session is running anywhere is brought to the front instead. Starting a task also leaves a "starting" mark for five minutes (in `~/.cache/capcom/starting.json`), cleared when the skill records its session, so a second click in the meantime says "already starting in …" and starts nothing.
 

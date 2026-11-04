@@ -49,6 +49,16 @@ pub fn detect(var: impl Fn(&str) -> Option<String>) -> Host {
     }
 }
 
+/// The app capcom-tui was told it runs in (`--host` / `CAPCOM_HOST`), else the one its environment shows.
+pub fn choose(asked: Option<&str>, var: impl Fn(&str) -> Option<String>) -> Result<Host, String> {
+    match asked.map(str::trim).filter(|a| !a.is_empty()) {
+        None => Ok(detect(var)),
+        Some(word) => Host::parse(&word.to_lowercase())
+            .filter(|h| *h != Host::Plain)
+            .ok_or_else(|| format!("unknown app {word:?}: use herdr, orca or desktop")),
+    }
+}
+
 /// The app an agent runs in, from its pane id: `orca:…`, `claude-desktop:…`, `cli:…`, else a Herdr pane.
 pub fn of_pane(pane: &str) -> Host {
     match pane.split(':').next().unwrap_or_default() {
@@ -108,6 +118,17 @@ mod tests {
         assert_eq!(of_pane("claude-desktop:7:local_a"), Host::Desktop);
         assert_eq!(of_pane("cli:7"), Host::Plain);
         assert_eq!(of_pane("w1-p2"), Host::Herdr);
+    }
+
+    #[test]
+    fn an_app_asked_for_wins_over_the_environment() {
+        assert_eq!(choose(Some("orca"), env(&[("HERDR_ENV", "1")])), Ok(Host::Orca));
+        assert_eq!(choose(Some("desktop"), env(&[])), Ok(Host::Desktop));
+        assert_eq!(choose(Some("herdr"), env(&[])), Ok(Host::Herdr));
+        assert_eq!(choose(None, env(&[("ORCA_TERMINAL_HANDLE", "t1")])), Ok(Host::Orca));
+        assert_eq!(choose(Some(""), env(&[("ORCA_TERMINAL_HANDLE", "t1")])), Ok(Host::Orca), "empty means not asked");
+        let err = choose(Some("vscode"), env(&[])).unwrap_err();
+        assert!(err.contains("herdr, orca or desktop"), "{err}");
     }
 
     #[test]
