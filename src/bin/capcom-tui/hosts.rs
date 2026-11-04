@@ -66,6 +66,11 @@ impl Herdr for DesktopHost {
     fn resume(&self, r: &Resume) -> Result<Outcome, String> {
         if let Some((id, _)) = &r.session {
             if let Some(a) = self.running().into_iter().find(|a| holds(a, id)) {
+                // the desktop app cannot be typed into from outside: a new session in the same folder gets the prompt
+                if let Some(prompt) = &r.prompt {
+                    (self.open)(&capcom::claude::new_session_link(prompt, Path::new(&a.cwd)))?;
+                    return Ok(Outcome::Prompted);
+                }
                 let link = capcom::claude::desktop_link(&a.pane).ok_or("the desktop app gave this session no id to open it by")?;
                 (self.open)(&link)?;
                 return Ok(Outcome::Focused);
@@ -596,6 +601,33 @@ mod tests {
         r.resume(&resume(Some(("s-1", "/w")), None, true)).unwrap();
         r.resume(&resume(Some(("s-5", "/w")), None, true)).unwrap();
         assert_eq!(*calls.lock().unwrap(), vec!["orca resume ", "desktop resume "]);
+    }
+
+    #[test]
+    fn an_automatic_prompt_to_a_desktop_agent_opens_it_with_the_prompt() {
+        let work = tempfile::tempdir().unwrap();
+        let (d, calls) = desktop(vec![agent("claude-desktop:7:local_abc", "s-1", Status::Idle, "/w/app")], work.path());
+        assert_eq!(d.resume(&resume(Some(("s-1", "/w/app")), Some("/pr-address x"), false)), Ok(Outcome::Prompted));
+        assert_eq!(calls.lock().unwrap()[0], capcom::claude::new_session_link("/pr-address x", Path::new("/w/app")));
+    }
+
+    #[test]
+    fn an_automatic_prompt_to_an_orca_agent_is_sent_without_switching() {
+        let work = tempfile::tempdir().unwrap();
+        let (o, calls) = orca_host(false, "idle", work.path());
+        assert_eq!(o.resume(&resume(Some(("s-1", "/w/app")), Some("/pr-address x"), false)), Ok(Outcome::Prompted));
+        let calls = calls.lock().unwrap();
+        assert!(calls.iter().any(|c| c.starts_with("terminal send --terminal term_9")), "{calls:?}");
+        assert!(!calls.iter().any(|c| c.starts_with("terminal switch")), "{calls:?}");
+    }
+
+    #[test]
+    fn an_automatic_prompt_with_no_agent_starts_one_in_the_home_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let calls: Calls = Arc::new(Mutex::new(Vec::new()));
+        let r = router_of(Host::Orca, vec![(Host::Orca, fake("orca", vec![], &calls, false)), (Host::Desktop, fake("desktop", vec![], &calls, false))], &dir);
+        r.resume(&resume(Some(("s-9", "/w")), Some("/pr-address x"), false)).unwrap();
+        assert_eq!(*calls.lock().unwrap(), vec!["orca resume /pr-address x"]);
     }
 
     #[test]
