@@ -52,6 +52,7 @@ fn rig() -> Rig {
     });
     tools.notify = Arc::new(move |title, body| c6.lock().unwrap().push(format!("{title} | {body}")));
     server.set_tools(tools);
+    server.set_starting(Some(crate::starting::Starting::new(dir.path().join("starting.json"))));
     Rig { _dir: dir, server, calls, notices }
 }
 
@@ -520,4 +521,122 @@ fn the_plan_usage_the_status_line_wrote_is_in_the_state_and_missing_is_null() {
     assert_eq!(usage["sevenDay"]["pct"], 41.0);
     assert_eq!(usage["sevenDay"]["resetsAt"], Value::Null);
     assert_eq!(usage["at"], "2026-09-21T14:13:20Z");
+}
+
+
+fn orca_for(rig: &Rig, known: &str, fail: bool) -> Arc<Mutex<Vec<String>>> {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (log, known) = (calls.clone(), known.to_string());
+    let run: crate::orca::Runner = Box::new(move |args: &[String]| {
+        log.lock().unwrap().push(args.join(" "));
+        if fail {
+            return Err("Orca CLI is unavailable; reopen Orca or register the CLI again.".into());
+        }
+        Ok(match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+            ["worktree", "list", ..] => json!({"ok": true, "result": {"worktrees": [{"path": known}]}}),
+            ["agent", "launch", ..] => json!({"ok": true, "result": {"outcome": {"handle": "term_9"}}}),
+            _ => json!({"ok": true, "result": {}}),
+        })
+    });
+    rig.server.set_orca(Some(Arc::new(crate::orca::Orca::with_runner(run))));
+    calls
+}
+
+fn start(rig: &Rig, host: Option<&str>) -> Value {
+    let mut body = json!({ "action": "session.start", "key": "PROJ-1", "task": "T1", "kind": "implement" });
+    if let Some(h) = host {
+        body["host"] = json!(h);
+    }
+    act(rig, body).1
+}
+
+#[test]
+fn a_page_with_no_host_still_gets_claude_links() {
+    let r = rig();
+    r.server.set_workdir("/w/code".into());
+    let orca = orca_for(&r, "/w/code", false);
+    let out = start(&r, None);
+    assert_eq!(out["ok"], true, "{out}");
+    assert_eq!(out["link"], "claude://code/new?prompt=%2Fstory-implement-task%20PROJ-1%20T1&folder=%2Fw%2Fcode");
+    assert!(orca.lock().unwrap().is_empty());
+}
+
+#[test]
+fn an_orca_page_starts_the_session_in_orca() {
+    let r = rig();
+    let work = tempfile::tempdir().unwrap();
+    let w = work.path().to_string_lossy().to_string();
+    r.server.set_workdir(work.path().to_path_buf());
+    let orca = orca_for(&r, &w, false);
+    let out = start(&r, Some("orca"));
+    assert_eq!(out["ok"], true, "{out}");
+    assert!(out.get("link").is_none(), "{out}");
+    assert!(orca.lock().unwrap().contains(&format!("agent launch --agent claude --surface terminal --worktree path:{w} --prompt /story-implement-task PROJ-1 T1 --focus --json")));
+}
+
+#[test]
+fn orca_unreachable_from_an_orca_page_says_so_and_returns_no_link() {
+    let r = rig();
+    let work = tempfile::tempdir().unwrap();
+    r.server.set_workdir(work.path().to_path_buf());
+    orca_for(&r, "/elsewhere", true);
+    let out = start(&r, Some("orca"));
+    assert_eq!(out["ok"], false, "{out}");
+    assert!(out["message"].as_str().unwrap().starts_with("Orca: "), "{out}");
+    assert!(out.get("link").is_none());
+    assert!(!start(&r, Some("orca"))["message"].as_str().unwrap().contains("already starting"), "a failed start leaves no mark");
+    r.server.set_orca(None);
+    assert!(start(&r, Some("orca"))["message"].as_str().unwrap().contains("Orca"), "no Orca CLI is said, not opened elsewhere");
+}
+
+#[test]
+fn a_second_start_within_five_minutes_is_refused() {
+    let r = rig();
+    r.server.set_workdir("/w/code".into());
+    assert_eq!(start(&r, None)["ok"], true);
+    let again = start(&r, None);
+    assert_eq!(again["ok"], false);
+    assert!(again["message"].as_str().unwrap().contains("already starting in Claude Desktop"), "{again}");
+    assert!(again.get("link").is_none());
+}
+
+#[test]
+fn a_task_whose_session_is_running_is_opened_not_started_again() {
+    let r = rig();
+    r.server.set_workdir("/w/code".into());
+    let root = r._dir.path().join("stories");
+    store::update(&root, "PROJ-1", |b| crate::ops::add_session(b, "T1", "s-1", "story-implement-task", "/w/code", "2026-11-05T00:00:00Z").map(|_| ())).unwrap();
+    lock(&r.server.live).agents = vec![AgentInfo {
+        pane: "claude-desktop:7:local_abc".into(), name: None, status: AgentStatus::Idle, topic: String::new(), workspace: String::new(), cwd: "/w/code".into(), session: Some("s-1".into()),
+    }];
+    let out = start(&r, None);
+    assert_eq!(out["ok"], true, "{out}");
+    assert_eq!(out["link"], "claude://code/continue?session=local_abc");
+    assert!(out["message"].as_str().unwrap().contains("already running"), "{out}");
+}
+
+#[test]
+fn orca_agents_show_in_the_list_with_source_orca() {
+    let r = rig();
+    lock(&r.server.live).agents = vec![AgentInfo {
+        pane: "orca:term_9".into(), name: None, status: AgentStatus::Working, topic: "Implement T1".into(), workspace: "code".into(), cwd: "/w/code".into(), session: Some("s-1".into()),
+    }];
+    let s = state(&r);
+    let entries: Vec<&Value> = s["agents"]["groups"].as_array().unwrap().iter().flat_map(|g| g["entries"].as_array().unwrap()).collect();
+    assert_eq!(entries.len(), 1, "{s}");
+    assert_eq!(entries[0]["source"], "orca");
+    assert_eq!(entries[0]["pane"], "orca:term_9");
+}
+
+#[test]
+fn opening_an_agent_goes_to_its_app() {
+    let r = rig();
+    let orca = orca_for(&r, "/w/code", false);
+    let out = act(&r, json!({ "action": "agent.open", "pane": "orca:term_9" })).1;
+    assert_eq!(out["ok"], true, "{out}");
+    assert_eq!(orca.lock().unwrap().last().unwrap(), "terminal switch --terminal term_9 --json");
+    assert_eq!(act(&r, json!({ "action": "agent.open", "pane": "claude-desktop:7:local_abc" })).1["link"], "claude://code/continue?session=local_abc");
+    let herdr = act(&r, json!({ "action": "agent.open", "pane": "w1:p2" })).1;
+    assert_eq!(herdr["ok"], false);
+    assert!(herdr["message"].as_str().unwrap().contains("Herdr"), "{herdr}");
 }

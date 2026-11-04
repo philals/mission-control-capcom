@@ -112,6 +112,20 @@ pub fn live(config: &Path) -> Vec<AgentInfo> {
     found.into_iter().map(|(_, a)| a).collect()
 }
 
+/// Sessions running in an Orca terminal (their process has `ORCA_TERMINAL_HANDLE`) get the pane
+/// `orca:<handle>`, so they can be told apart from other terminal sessions and switched to in Orca.
+pub fn tag_orca(live: Vec<AgentInfo>, environ: impl Fn(u64, &str) -> Option<String>) -> Vec<AgentInfo> {
+    live.into_iter()
+        .map(|mut a| {
+            let handle = a.pane.strip_prefix("cli:").and_then(|pid| pid.parse().ok()).and_then(|pid| environ(pid, "ORCA_TERMINAL_HANDLE")).filter(|h| !h.is_empty());
+            if let Some(h) = handle {
+                a.pane = format!("orca:{h}");
+            }
+            a
+        })
+        .collect()
+}
+
 /// A subagent a session started with its Agent tool, from `projects/<folder>/<session>/subagents/agent-<id>.meta.json`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Subagent {
@@ -357,4 +371,17 @@ mod tests {
         assert!(subagent_transcript(dir.path(), "s-1", "nope").is_none());
         assert!(subagent_transcript(dir.path(), "s-1", "../a1").is_none());
     }
+
+    #[test]
+    fn sessions_in_orca_terminals_are_named_by_their_orca_terminal() {
+        let live = vec![
+            AgentInfo { pane: "cli:11".into(), name: None, status: Status::Idle, topic: String::new(), workspace: String::new(), cwd: String::new(), session: Some("s-11".into()) },
+            AgentInfo { pane: "cli:12".into(), name: None, status: Status::Idle, topic: String::new(), workspace: String::new(), cwd: String::new(), session: Some("s-12".into()) },
+            AgentInfo { pane: "claude-desktop:13:local_a".into(), name: None, status: Status::Idle, topic: String::new(), workspace: String::new(), cwd: String::new(), session: None },
+        ];
+        let environ = |pid: u64, name: &str| (pid == 11 && name == "ORCA_TERMINAL_HANDLE").then(|| "term_9".to_string());
+        let panes: Vec<String> = tag_orca(live, environ).into_iter().map(|a| a.pane).collect();
+        assert_eq!(panes, ["orca:term_9", "cli:12", "claude-desktop:13:local_a"]);
+    }
+
 }

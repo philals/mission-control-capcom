@@ -314,8 +314,14 @@ function column(title, count, ...kids) {
   return col;
 }
 
-function startSession(link, what) {
-  openExternal(link, `opened a new Claude Code session with ${what} typed in: press Enter to send it`);
+// With `req` ({key, task, kind}) the server decides: Orca starts it there, the desktop app gets the link
+// back to open as before, and a task already running or starting is not started again.
+function startSession(link, what, req) {
+  const typed = `opened a new Claude Code session with ${what} typed in: press Enter to send it`;
+  if (!req) return openExternal(link, typed);
+  act("session.start", { ...req, host: HOST }).then((out) => {
+    if (out && out.ok && out.link) openExternal(out.link, out.message || typed);
+  });
 }
 
 function markStoryDone(story) {
@@ -350,9 +356,9 @@ function finishTask(story, task) {
 function storyMenu(story, x, y) {
   openMenu(x, y, [
     ["Open", () => (location.hash = `#/story/${encodeURIComponent(story.key)}`)],
-    story.tasks.length === 0 ? ["Break it down in a new session ↗", () => startSession(story.breakdown, "/story-break-down")] : null,
-    story.allFinished && story.status === "in_progress" ? ["Review it in a new session ↗", () => startSession(story.review, "/story-review")] : null,
-    story.status === "in_review" ? ["Run the review again in a new session ↗", () => startSession(story.review, "/story-review")] : null,
+    story.tasks.length === 0 ? ["Break it down in a new session ↗", () => startSession(story.breakdown, "/story-break-down", { key: story.key, kind: "breakdown" })] : null,
+    story.allFinished && story.status === "in_progress" ? ["Review it in a new session ↗", () => startSession(story.review, "/story-review", { key: story.key, kind: "review" })] : null,
+    story.status === "in_review" ? ["Run the review again in a new session ↗", () => startSession(story.review, "/story-review", { key: story.key, kind: "review" })] : null,
     story.status === "in_progress" && story.allFinished ? ["Mark done…", () => markStoryDone(story)] : null,
     story.status === "in_review" ? ["Accept the review (mark done)…", () => markStoryDone(story)] : null,
     story.status === "in_review" || story.status === "done" ? ["Reopen…", () => reopenStory(story)] : null,
@@ -450,8 +456,8 @@ function taskCard(story, task) {
   }
   const actions = el("div", "task-actions");
   add(actions, btn("details", () => taskSheet(story.key, task.id), "small", "its plan or description, and its file"));
-  if (task.status === "todo") add(actions, btn("plan ↗", () => startSession(task.plan, `/story-plan-task ${story.key} ${task.id}`), "small", "open a new Claude Code session with the planning skill typed in"));
-  if ((task.status === "todo" || task.status === "planned") && task.waitingOn.length === 0 && !task.blocked) add(actions, btn("implement ↗", () => startSession(task.implement, `/story-implement-task ${story.key} ${task.id}`), "small", "open a new Claude Code session with the implement skill typed in"));
+  if (task.status === "todo") add(actions, btn("plan ↗", () => startSession(task.plan, `/story-plan-task ${story.key} ${task.id}`, { key: story.key, task: task.id, kind: "plan" }), "small", "open a new Claude Code session with the planning skill typed in"));
+  if ((task.status === "todo" || task.status === "planned") && task.waitingOn.length === 0 && !task.blocked) add(actions, btn("implement ↗", () => startSession(task.implement, `/story-implement-task ${story.key} ${task.id}`, { key: story.key, task: task.id, kind: "implement" }), "small", "open a new Claude Code session with the implement skill typed in"));
   if (task.status === "implementing") add(actions, btn(task.allMerged ? "finish ✓" : "finish…", () => finishTask(story, task), task.allMerged ? "small primary" : "small", "check its PRs on GitHub and finish it when they are all merged"));
   card.append(actions);
   return card;
@@ -846,8 +852,8 @@ function taskSheet(storyKey, taskId) {
     add(body, el("h4", "", detail ? detail.label : "…"));
     add(body, el("pre", "doc", detail ? detail.body : "loading…"));
     const foot = [];
-    if (task.status === "todo") foot.push(btn("Plan ↗", () => startSession(task.plan, `/story-plan-task ${storyKey} ${task.id}`)));
-    if ((task.status === "todo" || task.status === "planned") && !task.waitingOn.length) foot.push(btn("Implement ↗", () => startSession(task.implement, `/story-implement-task ${storyKey} ${task.id}`)));
+    if (task.status === "todo") foot.push(btn("Plan ↗", () => startSession(task.plan, `/story-plan-task ${storyKey} ${task.id}`, { key: storyKey, task: task.id, kind: "plan" })));
+    if ((task.status === "todo" || task.status === "planned") && !task.waitingOn.length) foot.push(btn("Implement ↗", () => startSession(task.implement, `/story-implement-task ${storyKey} ${task.id}`, { key: storyKey, task: task.id, kind: "implement" })));
     if (task.status === "implementing") foot.push(btn("Finish…", () => finishTask(story, task)));
     foot.push(btn("Close", closeModal));
     return { body, foot };
@@ -920,6 +926,10 @@ function renderAgentRow(body, e, a) {
       }, 3000);
       openExternal(e.deepLink, "asked Claude Code desktop to open it: this can take a couple of seconds");
     };
+  } else if (e.source === "orca") {
+    row.classList.add("clickable");
+    row.title = "switch to this agent in Orca";
+    row.onclick = () => act("agent.open", { pane: e.pane });
   } else if (e.source === "cli") {
     row.title = "a terminal session: it can only be reached in its terminal";
   }

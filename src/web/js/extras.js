@@ -136,12 +136,12 @@ function paletteItems() {
     push(`Back to the stories`, "Esc", () => (location.hash = ""));
     for (const t of story.tasks) {
       push(`Details of ${t.id}: ${t.title}`, "", () => taskSheet(story.key, t.id));
-      if (t.status === "todo") push(`Plan ${t.id} in a new session`, "", () => startSession(t.plan, `/story-plan-task ${story.key} ${t.id}`));
-      if ((t.status === "todo" || t.status === "planned") && !t.waitingOn.length) push(`Implement ${t.id} in a new session`, "", () => startSession(t.implement, `/story-implement-task ${story.key} ${t.id}`));
+      if (t.status === "todo") push(`Plan ${t.id} in a new session`, "", () => startSession(t.plan, `/story-plan-task ${story.key} ${t.id}`, { key: story.key, task: t.id, kind: "plan" }));
+      if ((t.status === "todo" || t.status === "planned") && !t.waitingOn.length) push(`Implement ${t.id} in a new session`, "", () => startSession(t.implement, `/story-implement-task ${story.key} ${t.id}`, { key: story.key, task: t.id, kind: "implement" }));
       if (t.status === "implementing") push(`Finish ${t.id}`, "", () => finishTask(story, t));
     }
     push(`Sync ${story.key} with GitHub`, "", () => syncStory(story));
-    if (story.allFinished && story.status === "in_progress") push(`Review ${story.key} in a new session`, "", () => startSession(story.review, "/story-review"));
+    if (story.allFinished && story.status === "in_progress") push(`Review ${story.key} in a new session`, "", () => startSession(story.review, "/story-review", { key: story.key, kind: "review" }));
     if (story.allFinished && story.status !== "done") push(`Mark ${story.key} done`, "", () => markStoryDone(story));
     if (story.status !== "in_progress") push(`Reopen ${story.key}`, "", () => reopenStory(story));
     push(`Delete ${story.key}`, "", () => deleteStory(story));
@@ -156,7 +156,10 @@ function paletteItems() {
   push("Keys and what things mean", "?", helpDialog);
   for (const s of data.stories) push(`Open story ${s.key}: ${s.title}`, "", () => (location.hash = `#/story/${encodeURIComponent(s.key)}`));
   for (const p of data.prs) if (!pr || p.url !== pr.url) push(`Select ${prName(p)}: ${p.title}`, "", () => { ui.selPr = p.url; setView("prs"); scrollToSelected(); });
-  for (const g of data.agents.groups) for (const e of g.entries) if (e.deepLink) push(`Go to agent ${e.label} (${e.status})`, "", () => openExternal(e.deepLink, "asked Claude Code desktop to open it"));
+  for (const g of data.agents.groups) for (const e of g.entries) {
+    if (e.deepLink) push(`Go to agent ${e.label} (${e.status})`, "", () => openExternal(e.deepLink, "asked Claude Code desktop to open it"));
+    else if (e.source === "orca") push(`Go to agent ${e.label} (${e.status}) in Orca`, "", () => act("agent.open", { pane: e.pane }));
+  }
   for (const run of data.runs.items) push(`Details of run ${run.repo} ${run.name} (${run.state})`, "", () => runSheet(run.repo, run.id));
   return items;
 }

@@ -311,6 +311,8 @@ fn main() -> Result<()> {
             let (listener, port) = web::bind(port)?;
             let server = web::Server::new(root.to_path_buf(), port);
             server.set_opener(Arc::new(web::SystemBrowser { command: browser }));
+            server.set_orca(capcom::orca::find_cli_here().map(|cli| Arc::new(capcom::orca::Orca::new(cli))));
+            server.set_starting(capcom::starting::Starting::default());
             server.set_tools(web::Tools::real());
             server.set_workdir(workdir.unwrap_or_else(capcom::session::default_workdir));
             server.set_extra_repos(deploy_repos);

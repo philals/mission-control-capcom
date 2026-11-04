@@ -97,6 +97,17 @@ function link(text, url, cls) {
   return a;
 }
 
+// The app this page is open in: "orca" when opened as /?host=orca (kept for the tab), else the desktop app.
+const HOST = (() => {
+  const asked = new URLSearchParams(location.search).get("host");
+  try {
+    if (asked) sessionStorage.setItem("capcom-host", asked);
+    return sessionStorage.getItem("capcom-host") || "";
+  } catch (_) {
+    return asked || "";
+  }
+})();
+
 // A change: the server checks it against what it knows, and the confirmed kinds need `confirm`.
 async function act(action, args = {}) {
   try {

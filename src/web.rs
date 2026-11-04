@@ -128,7 +128,7 @@ pub struct ClaudeSessions {
 
 impl AgentSource for ClaudeSessions {
     fn agents(&self) -> Result<Vec<AgentInfo>, String> {
-        Ok(crate::claude::live(&self.config))
+        Ok(crate::claude::tag_orca(crate::claude::live(&self.config), crate::orca::environ))
     }
     fn subagents(&self, session: &str) -> Vec<crate::claude::Subagent> {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
@@ -150,6 +150,10 @@ pub struct Server {
     live: Mutex<Live>,
     source: Mutex<Option<Arc<dyn AgentSource>>>,
     opener: Mutex<Option<Arc<dyn Opener>>>,
+    /// Orca's CLI, when it is installed: an Orca page's sessions start there.
+    orca: Mutex<Option<Arc<crate::orca::Orca>>>,
+    /// "Starting" marks, so a second click does not start a second session for a task.
+    starting: Mutex<Option<Arc<crate::starting::Starting>>>,
     /// The last link opened and when: the same link again within a few seconds is the same click, not a new launch.
     last_open: Mutex<Option<(String, std::time::Instant)>>,
     viewed: AtomicI64,
@@ -179,6 +183,8 @@ impl Server {
             live: Mutex::new(Live::default()),
             source: Mutex::new(None),
             opener: Mutex::new(None),
+            orca: Mutex::new(None),
+            starting: Mutex::new(None),
             last_open: Mutex::new(None),
             viewed: AtomicI64::new(0),
             attention: Attention::waiting_at_least(AWAY_WAIT),
@@ -225,6 +231,14 @@ impl Server {
     /// Let a click on a link open it in your own browser through `opener`.
     pub fn set_opener(&self, opener: Arc<dyn Opener>) {
         *self.opener.lock().unwrap_or_else(|e| e.into_inner()) = Some(opener);
+    }
+
+    pub fn set_orca(&self, orca: Option<Arc<crate::orca::Orca>>) {
+        *self.orca.lock().unwrap_or_else(|e| e.into_inner()) = orca;
+    }
+
+    pub fn set_starting(&self, starting: Option<crate::starting::Starting>) {
+        *self.starting.lock().unwrap_or_else(|e| e.into_inner()) = starting.map(Arc::new);
     }
 
     fn own_origin(&self, origin: &str) -> bool {

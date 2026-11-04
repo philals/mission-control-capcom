@@ -74,6 +74,8 @@ impl Server {
             "story.sync" => self.sync_story(&text("key")),
             "task.finish" => self.finish_task(&text("key"), &text("id")),
             "story.new" => self.new_story(&text("key")),
+            "session.start" => self.start_session(&text("key"), &text("task"), &text("kind"), &text("host")),
+            "agent.open" => self.open_agent(&text("pane")),
             _ => answer(false, "unknown action"),
         }
     }
@@ -298,6 +300,96 @@ impl Server {
         match opener.open(&link) {
             Ok(()) => answer(true, format!("opened a session for {key}: press Enter to start the break-down")),
             Err(e) => answer(false, format!("could not open the desktop app: {e}")),
+        }
+    }
+}
+
+impl Server {
+    /// Start a skill's session in the app the page is open in: Orca for `host: "orca"`, else the desktop
+    /// app (returned as a link for the page to open, as before). A task whose session is already running
+    /// anywhere, or that was started moments ago, is not started again.
+    fn start_session(&self, key: &str, task: &str, kind: &str, host: &str) -> Value {
+        use crate::host::Host;
+        let Ok(board) = store::load(&self.root, key) else {
+            return answer(false, format!("no story {key}"));
+        };
+        let skill = match kind {
+            "plan" => "story-plan-task",
+            "implement" => "story-implement-task",
+            "review" => "story-review",
+            "breakdown" => "story-break-down",
+            _ => return answer(false, "unknown kind of session"),
+        };
+        let workdir = lock(&self.eng.workdir).clone();
+        let (prompt, folder, task, sessions) = if task.is_empty() {
+            (format!("/{skill} {key}"), workdir, None, Vec::new())
+        } else {
+            let Some(t) = board.task(task) else {
+                return answer(false, format!("no task {task} in {key}"));
+            };
+            let folder = t.folder.as_deref().map(std::path::PathBuf::from).filter(|f| f.is_dir()).unwrap_or(workdir);
+            (format!("/{skill} {key} {task}"), folder, Some(task), t.sessions.iter().map(|s| s.id.clone()).collect::<Vec<_>>())
+        };
+        let host = if host == "orca" { Host::Orca } else { Host::Desktop };
+        let marks = lock(&self.starting).clone();
+        let now = Utc::now().timestamp().max(0) as u64;
+        if let (Some(t), Some(m)) = (task, &marks) {
+            if let Some(h) = m.live(key, t, now) {
+                return answer(false, format!("{key} {t} is already starting in {}: give it a moment", h.name()));
+            }
+        }
+        let running = lock(&self.live).agents.iter().find(|a| a.session.as_ref().is_some_and(|s| sessions.contains(s))).map(|a| a.pane.clone());
+        if let Some(pane) = running {
+            let mut out = self.open_agent(&pane);
+            out["message"] = json!(format!("{key} {} is already running: {}", task.unwrap_or_default(), out["message"].as_str().unwrap_or("opening it")));
+            return out;
+        }
+        if let (Some(t), Some(m)) = (task, &marks) {
+            m.mark(key, t, host, now);
+        }
+        let clear = || {
+            if let (Some(t), Some(m)) = (task, &marks) {
+                m.clear(key, t);
+            }
+        };
+        match host {
+            Host::Orca => {
+                let Some(orca) = lock(&self.orca).clone() else {
+                    clear();
+                    return answer(false, "Orca: its command-line tool was not found (open Orca, or register its CLI)");
+                };
+                match orca.launch(&folder.to_string_lossy(), &prompt, true) {
+                    Ok(_) => answer(true, format!("started {prompt} in Orca")),
+                    Err(e) => {
+                        clear();
+                        answer(false, e)
+                    }
+                }
+            }
+            _ => json!({ "ok": true, "link": new_session_link(&prompt, &folder) }),
+        }
+    }
+
+    /// Go to a running agent in the app it runs in: switch to it in Orca, or a link the page opens for
+    /// the desktop app. Herdr and plain terminals cannot be reached from the page.
+    fn open_agent(&self, pane: &str) -> Value {
+        use crate::host::{of_pane, Host};
+        match of_pane(pane) {
+            Host::Orca => {
+                let (Some(orca), Some(handle)) = (lock(&self.orca).clone(), crate::orca::handle_of(pane)) else {
+                    return answer(false, "Orca: its command-line tool was not found");
+                };
+                match orca.switch(handle) {
+                    Ok(()) => answer(true, "switched to it in Orca"),
+                    Err(e) => answer(false, e),
+                }
+            }
+            Host::Desktop => match crate::claude::desktop_link(pane) {
+                Some(link) => json!({ "ok": true, "link": link }),
+                None => answer(false, "the desktop app gave this session no id to open it by"),
+            },
+            Host::Plain => answer(false, "it's running in a terminal: switch to that terminal to reach it"),
+            h => answer(false, format!("it's running in {}; switch to {} to reach it", h.name(), h.name())),
         }
     }
 }
