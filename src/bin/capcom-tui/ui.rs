@@ -292,6 +292,7 @@ fn light(app: &App) -> Option<(String, ratatui::style::Color)> {
 /// The brand and the go/no-go light, and where the light is (offset and width in cells) to click on.
 fn brand(app: &App) -> (Vec<Span<'static>>, Option<(usize, usize)>) {
     let mut spans = vec![Span::styled("🚀 CAPCOM", Style::new().fg(panel::ORANGE).add_modifier(Modifier::BOLD))];
+    spans.push(Span::styled(format!("  ▸ {}", app.home.name()), Style::new().fg(theme::CYAN)));
     if app.attention.away() {
         spans.push(Span::styled("  ☾ AWAY · slow polling", Style::new().fg(theme::DIM)));
     }

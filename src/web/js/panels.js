@@ -226,6 +226,8 @@ function renderHeaderNow() {
     tile(data.red > 0, data.red > 0 ? `no-go · ${data.red} red` : "no-go", "red", jumpToRed, "jump to the first red PR"),
   );
   add(top, brand, gonogo);
+  const hostName = { orca: "Orca", herdr: "Herdr", desktop: "Claude Desktop" }[HOST || "desktop"] || HOST;
+  add(top, tile(true, `sessions open in ${hostName}`, "cyan", null, HOST ? "the app new sessions open in, from ?host= on this page's address" : "no ?host= on this page's address, so sessions open in Claude Desktop. Add ?host=orca or ?host=herdr to change it."));
   if (data.redWithAutofix > 0) add(top, tile(true, `auto-fix on for ${data.redWithAutofix}`, "cyan"));
   if (data.awaitingReview > 0) add(top, tile(true, `${data.awaitingReview} awaiting review`, "green"));
   if (data.agents.needsYou > 0) add(top, tile(true, `${data.agents.needsYou} agent${data.agents.needsYou === 1 ? "" : "s"} need you`, "amber pulse"));

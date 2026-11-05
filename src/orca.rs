@@ -164,10 +164,10 @@ impl Orca {
     pub fn agents(&self, sessions: &HashMap<String, String>) -> Result<Vec<AgentInfo>, String> {
         let ps = self.call(&["worktree", "ps"])?;
         let terminals = self.call(&["terminal", "list"])?;
-        let handle_for = |key: &str| {
-            terminals["result"]["terminals"].as_array().into_iter().flatten().find(|t| t["recordedPaneKey"] == key || t["paneKey"] == key).and_then(|t| t["handle"].as_str())
-        };
         let text = |v: &Value| v.as_str().unwrap_or_default().to_string();
+        let handle_for = |key: &str| {
+            terminals["result"]["terminals"].as_array().into_iter().flatten().find(|t| format!("{}:{}", text(&t["tabId"]), text(&t["leafId"])) == key).and_then(|t| t["handle"].as_str())
+        };
         let mut found = Vec::new();
         for w in ps["result"]["worktrees"].as_array().into_iter().flatten() {
             for a in w["agents"].as_array().into_iter().flatten().filter(|a| a["agentType"] == "claude") {
@@ -238,8 +238,8 @@ mod tests {
                 ["worktree", "list", ..] => json!({"ok": true, "result": {"worktrees": worktrees()}}),
                 ["worktree", "ps", ..] => ps(),
                 ["terminal", "list", ..] => json!({"ok": true, "result": {"terminals": [
-                    {"handle": "term_9", "recordedPaneKey": "tab1:leaf1", "worktreePath": "/w/app"},
-                    {"handle": "term_8", "recordedPaneKey": "tab2:leaf2", "worktreePath": "/w/app"},
+                    {"handle": "term_9", "tabId": "tab1", "leafId": "leaf1", "worktreePath": "/w/app"},
+                    {"handle": "term_8", "tabId": "tab2", "leafId": "leaf2", "worktreePath": "/w/app"},
                 ]}}),
                 ["agent", "launch", ..] => json!({"ok": true, "result": {"outcome": {"kind": "terminal", "handle": "term_9"}}}),
                 ["terminal", "create", ..] => json!({"ok": true, "result": {"terminal": {"handle": "term_7"}}}),
