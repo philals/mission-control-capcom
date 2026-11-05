@@ -16,6 +16,8 @@ Environment=CAPCOM_WORKDIR=%h/code
 Restart=on-failure
 RestartSec=10
 NoNewPrivileges=true
+# PrivateTmp and ProtectHome stop capcom web reading other processes' environment, so it cannot tell which
+# sessions run in Orca (they show as plain terminal sessions); remove both lines if you want that
 PrivateTmp=true
 ProtectHome=read-only
 # what the page changes: its cache, the settings it shares with capcom-tui and the stories folder

@@ -104,6 +104,7 @@ Panel sizes (PR/runs split, bottom height, kanban column widths) are saved when 
 `capcom-tui` launches in the app it runs in: Herdr (`HERDR_ENV=1`), else Orca (`ORCA_TERMINAL_HANDLE` set), else Claude
 Desktop (`CLAUDE_CODE_ENTRYPOINT=claude-desktop` or `TERM_PROGRAM=claude-desktop`); in any other terminal it launches
 nothing. Orca: `orca agent launch --agent claude --surface terminal --worktree path:<folder> --prompt "/skill KEY ID" --focus`,
+a plain folder (no `.git`, such as the parent of several repositories) Orca does not know yet is added with `orca repo add --path <folder> --kind folder` first;
 or for a folder inside a checkout `orca terminal create --worktree path:<checkout> --command "cd <folder> && claude '<prompt>'"`;
 resume is `cd <session folder> && claude --resume <id> ['<prompt>']`. Claude Desktop: `claude://code/new?prompt=…&folder=…`.
 Before any launch, a task whose recorded session is live in any app is focused instead, and a "starting" mark

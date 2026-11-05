@@ -112,18 +112,32 @@ impl Orca {
         Ok(v)
     }
 
-    /// The Orca worktree that is `folder` or holds it.
-    pub fn checkout_of(&self, folder: &str) -> Result<String, String> {
+    fn find_checkout(&self, folder: &str) -> Result<Option<String>, String> {
         let list = self.call(&["worktree", "list"])?;
-        list["result"]["worktrees"]
+        Ok(list["result"]["worktrees"]
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(|w| w["path"].as_str())
             .filter(|p| same_or_inside(folder, p))
             .max_by_key(|p| p.len())
-            .map(|p| p.trim_end_matches('/').to_string())
-            .ok_or_else(|| format!("Orca does not know {folder}: add it with `orca repo add --path {folder}`"))
+            .map(|p| p.trim_end_matches('/').to_string()))
+    }
+
+    /// The Orca worktree that is `folder` or holds it. A plain folder (no git, such as the parent of several
+    /// repositories) Orca does not know yet is added to it as a folder project.
+    pub fn checkout_of(&self, folder: &str) -> Result<String, String> {
+        if let Some(found) = self.find_checkout(folder)? {
+            return Ok(found);
+        }
+        let path = Path::new(folder);
+        if path.is_dir() && !path.join(".git").exists() {
+            self.call(&["repo", "add", "--path", folder, "--kind", "folder"])?;
+            if let Some(found) = self.find_checkout(folder)? {
+                return Ok(found);
+            }
+        }
+        Err(format!("Orca does not know {folder}: add it with `orca repo add --path {folder}`"))
     }
 
     fn create(&self, checkout: &str, command: &str, focus: bool) -> Result<String, String> {
@@ -251,6 +265,38 @@ mod tests {
 
     fn last(calls: &Calls) -> Vec<String> {
         calls.lock().unwrap().last().cloned().unwrap_or_default()
+    }
+
+    #[test]
+    fn a_plain_folder_orca_does_not_know_is_added_as_a_folder_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().to_str().unwrap().to_string();
+        let calls: Calls = Arc::new(Mutex::new(Vec::new()));
+        let (log, added, path) = (calls.clone(), Arc::new(Mutex::new(false)), folder.clone());
+        let run: Runner = Box::new(move |args| {
+            log.lock().unwrap().push(args.to_vec());
+            let a: Vec<&str> = args.iter().map(String::as_str).collect();
+            Ok(match a.as_slice() {
+                ["repo", "add", ..] => {
+                    *added.lock().unwrap() = true;
+                    json!({"ok": true, "result": {}})
+                }
+                ["worktree", "list", ..] if *added.lock().unwrap() => json!({"ok": true, "result": {"worktrees": [{"path": path}]}}),
+                _ => json!({"ok": true, "result": {"worktrees": []}}),
+            })
+        });
+        assert_eq!(Orca::with_runner(run).checkout_of(&folder), Ok(folder.clone()));
+        assert!(calls.lock().unwrap().iter().any(|c| c.len() > 5 && c[..5] == ["repo", "add", "--path", &folder, "--kind"]));
+    }
+
+    #[test]
+    fn a_git_folder_orca_does_not_know_is_not_added_for_you() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        let folder = dir.path().to_str().unwrap();
+        let (o, calls) = orca(None);
+        assert!(o.checkout_of(folder).unwrap_err().contains("orca repo add --path"));
+        assert!(!calls.lock().unwrap().iter().any(|c| c[0] == "repo"));
     }
 
     #[test]
