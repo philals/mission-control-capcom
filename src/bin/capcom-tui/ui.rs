@@ -27,7 +27,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     theme::paint(f);
     let area = f.area();
     let mut hits: Hits = Vec::new();
-    let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)])
+    let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(footer_height(app, area.width))])
         .split(area);
     let wide = area.width >= WIDE_FROM;
     let panel_height = bottom_height(app, rows[1].height, wide, area.width);
@@ -887,12 +887,38 @@ fn draw_agent_ask(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
 const START_BUTTON: &str = "[ Enter Start ]";
 const CANCEL_BUTTON: &str = "[ Esc Cancel ]";
 
-fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
-    if let Some(err) = &app.error {
-        let text = trunc(&format!("! {err}"), area.width as usize);
-        f.render_widget(Paragraph::new(Span::styled(text, Style::new().fg(theme::RED))), area);
-        return;
+const FOOTER_MAX_LINES: usize = 6;
+
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for word in text.split_whitespace() {
+        let mut word = word.to_string();
+        while word.chars().count() > width {
+            if !cur.is_empty() {
+                lines.push(std::mem::take(&mut cur));
+            }
+            let head: String = word.chars().take(width).collect();
+            word = word.chars().skip(width).collect();
+            lines.push(head);
+        }
+        let need = if cur.is_empty() { 0 } else { cur.chars().count() + 1 };
+        if need + word.chars().count() > width && !cur.is_empty() {
+            lines.push(std::mem::take(&mut cur));
+        }
+        if !cur.is_empty() {
+            cur.push(' ');
+        }
+        cur.push_str(&word);
     }
+    if !cur.is_empty() || lines.is_empty() {
+        lines.push(cur);
+    }
+    lines
+}
+
+fn footer_keys(app: &App) -> Vec<Span<'static>> {
     let dim = Style::new().fg(theme::DIM);
     let keys: &[&str] = match app.screen {
         Screen::List => &["←→↑↓ move", "⏎ open", "v review", "n new", "d done", "Tab PRs/runs", "^P palette", "? help", "q quit"],
@@ -906,6 +932,37 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
         left.push(Span::styled(format!("[ {key} ]"), dim));
         left.push(Span::raw(" "));
     }
+    left
+}
+
+/// Lines a long error or notice needs when it will not fit on the key strip's row.
+fn footer_message(app: &App, width: u16) -> Option<(Vec<String>, ratatui::style::Color)> {
+    let w = width as usize;
+    if let Some(err) = &app.error {
+        return Some((wrap(&format!("! {err}"), w), theme::RED));
+    }
+    let notice = app.current_notice()?;
+    let keys = Line::from(footer_keys(app)).width();
+    if keys + notice.chars().count() <= w {
+        return None;
+    }
+    Some((wrap(notice, w), panel::ORANGE))
+}
+
+fn footer_height(app: &App, width: u16) -> u16 {
+    footer_message(app, width).map_or(1, |(lines, _)| lines.len().min(FOOTER_MAX_LINES) as u16)
+}
+
+fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
+    if let Some((mut lines, color)) = footer_message(app, area.width) {
+        lines.truncate(area.height as usize);
+        let text: Vec<Line> = lines.into_iter().map(|l| Line::from(Span::styled(l, Style::new().fg(color).add_modifier(Modifier::BOLD)))).collect();
+        f.render_widget(Block::new().style(Style::new().bg(theme::HEADER)), area);
+        f.render_widget(Paragraph::new(text), area);
+        return;
+    }
+    let dim = Style::new().fg(theme::DIM);
+    let left = footer_keys(app);
     let right = match (app.current_notice(), app.tooltip()) {
         (Some(notice), _) => vec![Span::styled(notice.to_string(), Style::new().fg(panel::ORANGE).add_modifier(Modifier::BOLD))],
         (None, Some(tip)) => vec![Span::styled(tip.to_string(), Style::new().fg(theme::CYAN))],
