@@ -137,7 +137,7 @@ fn draw_hover(f: &mut Frame, app: &App, hits: &Hits) {
     };
     let button = matches!(
         target,
-        Target::PrAuto(_) | Target::PrReview(_) | Target::PrMerge(_) | Target::PrAgent(_) | Target::TaskAgent | Target::TaskFolder | Target::AgentClose(_) | Target::NoteDismiss(_) | Target::PrCopy(_) | Target::PrCopyBranch(_) | Target::PrDetails(_) | Target::PrBadge(_)
+        Target::PrAuto(_) | Target::PrReview(_) | Target::PrMerge(_) | Target::PrAgent(_) | Target::TaskAgent | Target::TaskFolder | Target::TaskFolderCopy | Target::AgentClose(_) | Target::NoteDismiss(_) | Target::PrCopy(_) | Target::PrCopyBranch(_) | Target::PrDetails(_) | Target::PrBadge(_)
             | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::GoLight | Target::Refresh | Target::NewStory | Target::ToggleDone
             | Target::OpenCheck(..) | Target::OpenJob(..) | Target::RunDetails(_) | Target::Back | Target::PaletteItem(_)
     );
@@ -1237,16 +1237,16 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         lines.push(fact("Agent", format!("{} · {} · since {}", a.pane, a.skill, a.started_at)));
     }
     let folder_row = lines.len() as u16;
-    let folder_text = match &task.folder {
-        Some(folder) => format!("{folder}  "),
-        None => "none  ".to_string(),
-    };
     let folder_label = if task.folder.is_some() { "change (f)" } else { "set one (f)" };
-    lines.push(Line::from(vec![
-        Span::styled(format!("{:<12}", "Folder"), Style::new().fg(theme::DIM)),
-        Span::raw(trunc(&folder_text, width.saturating_sub(12 + folder_label.len()))),
-        Span::styled(folder_label, Style::new().fg(theme::CYAN)),
-    ]));
+    let folder_text = trunc(task.folder.as_deref().unwrap_or("none"), width.saturating_sub(12 + folder_label.len() + 5));
+    let folder_width = folder_text.chars().count() as u16;
+    let mut folder_spans = vec![Span::styled(format!("{:<12}", "Folder"), Style::new().fg(theme::DIM)), Span::raw(folder_text)];
+    if task.folder.is_some() {
+        folder_spans.push(Span::styled(" ⧉", Style::new().fg(theme::CYAN)));
+    }
+    folder_spans.push(Span::raw("  "));
+    folder_spans.push(Span::styled(folder_label, Style::new().fg(theme::CYAN)));
+    lines.push(Line::from(folder_spans));
     lines.push(fact("File", task.file.clone()));
     let agent_row = lines.len() as u16;
     let button = format!("{} go to agent", panel::AGENT_ICON);
@@ -1302,6 +1302,9 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     hits.push((rect, Target::Sheet));
     if folder_row < inner.height {
         hits.push((Rect::new(inner.x, inner.y + folder_row, inner.width, 1), Target::TaskFolder));
+        if task.folder.is_some() {
+            hits.push((Rect::new(inner.x + 12 + folder_width, inner.y + folder_row, 2, 1), Target::TaskFolderCopy));
+        }
     }
     if let Some(r) = agent_hit {
         hits.push((r, Target::TaskAgent));
@@ -1331,7 +1334,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("m", "mark the selected draft ready for review, or turn a ready PR back into a draft (asks first)".into()),
         row("t / v", "tick auto-fix / auto-review on the selected pull request".into()),
         row("g", "automerge on the selected pull request: its merge bot's label, on or off".into()),
-        row("f", "in a task's sheet: set or change the folder its sessions start in (an absolute path or ~/…; empty clears it)".into()),
+        row("f / y", "in a task's sheet: set or change the folder its sessions start in (an absolute path or ~/…; empty clears it) / copy it (or click ⧉)".into()),
         row("a", "go to the agent that made the selected pull request, or (on a story's board) the agent working the selected task".into()),
         row("paste  u", "paste a pull request link to follow someone else's PR like your own (auto-fix starts off); u stops following a pasted one".into()),
         row("A", "show or hide the agents panel left of the stories (inside Herdr, Orca or Claude Desktop, on terminals at least 110 wide); click an agent to bring it to the front".into()),
@@ -4075,6 +4078,8 @@ mod tests {
         assert!(app.folder_edit.is_none());
         assert_eq!(store::load(root.path(), "PROJ-1").unwrap().task(&id).unwrap().folder.as_deref(), Some("/w/api"));
         assert!(render(&app, 120, 40).contains("change (f)"));
+        app.on_key(KeyCode::Char('y'), false);
+        assert!(app.current_notice().is_some_and(|n| n.contains("copied /w/api")), "{:?}", app.current_notice());
         app.on_key(KeyCode::Char('f'), false);
         assert_eq!(app.folder_edit.as_ref().map(|(_, b)| b.as_str()), Some("/w/api"), "starts from the current folder");
         app.on_key(KeyCode::Esc, false);

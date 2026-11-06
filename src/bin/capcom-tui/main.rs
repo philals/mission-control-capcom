@@ -228,7 +228,22 @@ fn main() -> Result<()> {
     run_terminal(&mut app)
 }
 
+static RESTART: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// When the installed binary changes: its modified time and size, if it can be read.
+fn binary_stamp(path: &std::path::Path) -> Option<(std::time::SystemTime, u64)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
+/// Starts this program again in place with the same arguments (a new version was installed).
+#[cfg(unix)]
+fn restart_in_place(exe: &std::path::Path) -> std::io::Error {
+    std::os::unix::process::CommandExt::exec(std::process::Command::new(exe).args(std::env::args_os().skip(1)))
+}
+
 fn run_terminal(app: &mut App) -> Result<()> {
+    let exe = std::env::current_exe().ok();
     let mut terminal = ratatui::init();
     execute!(std::io::stdout(), EnableMouseCapture, EnableBracketedPaste, EnableFocusChange, SetTitle(herdr::PANE_TITLE))?;
     let previous_hook = std::panic::take_hook();
@@ -236,17 +251,25 @@ fn run_terminal(app: &mut App) -> Result<()> {
         let _ = execute!(std::io::stdout(), DisableMouseCapture, DisableBracketedPaste, DisableFocusChange);
         previous_hook(info);
     }));
-    let result = run(&mut terminal, app);
+    let result = run(&mut terminal, app, exe.as_deref());
     let _ = execute!(std::io::stdout(), DisableMouseCapture, DisableBracketedPaste, DisableFocusChange);
     ratatui::restore();
+    #[cfg(unix)]
+    if let (true, Some(exe), Ok(())) = (RESTART.load(std::sync::atomic::Ordering::SeqCst), exe.as_deref(), &result) {
+        let err = restart_in_place(exe);
+        return Err(anyhow::anyhow!("a new version was installed but it could not be started: {err}"));
+    }
     result
 }
 
-fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
+fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, exe: Option<&std::path::Path>) -> Result<()> {
     // Draw only when something changed, and on a slow tick for the "ago" and "running 2m 05s" texts.
     let mut dirty = true;
     let mut drawn_tick = u64::MAX;
     let mut checked_files = std::time::Instant::now();
+    let started_with = exe.and_then(binary_stamp);
+    let mut checked_binary = std::time::Instant::now();
+    let mut seen_change: Option<(std::time::SystemTime, u64)> = None;
     loop {
         let tick = app.started.elapsed().as_millis() as u64 / app.tick_millis();
         if dirty || tick != drawn_tick {
@@ -286,6 +309,18 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         if app.take_bell() {
             let _ = std::io::Write::write_all(&mut std::io::stdout(), b"\x07");
             let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+        // a new install is picked up once its file has stopped changing, and not while you are typing
+        if checked_binary.elapsed() >= Duration::from_secs(2) {
+            checked_binary = std::time::Instant::now();
+            let now = exe.and_then(binary_stamp);
+            if now.is_some() && now != started_with {
+                if seen_change == now && !app.busy() {
+                    RESTART.store(true, std::sync::atomic::Ordering::SeqCst);
+                    return Ok(());
+                }
+                seen_change = now;
+            }
         }
         // the story files are looked at once a second, not on every wake-up
         if checked_files.elapsed() >= Duration::from_secs(1) || dirty {

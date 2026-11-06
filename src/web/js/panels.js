@@ -863,7 +863,9 @@ function taskSheet(storyKey, taskId) {
     if (detail && detail.agent) add(body, kv("Agent", `${detail.agent.pane} · ${detail.agent.skill} · since ${detail.agent.startedAt}`));
     if (detail) {
       const folder = el("span", "");
-      add(folder, detail.folder ? el("code", "", detail.folder) : "none ", btn(detail.folder ? "Change…" : "Set one…", () => folderDialog(storyKey, task, detail), "small", "the folder sessions for this task start in"));
+      if (detail.folder) add(folder, el("code", "", detail.folder), btn("⧉", (ev) => copy(detail.folder, ev.target), "small", "copy the folder path"));
+      else add(folder, "none ");
+      add(folder, btn(detail.folder ? "Change…" : "Set one…", () => folderDialog(storyKey, task, detail), "small", "the folder sessions for this task start in"));
       add(body, kv("Folder", folder));
       add(body, kv("File", detail.file));
     }

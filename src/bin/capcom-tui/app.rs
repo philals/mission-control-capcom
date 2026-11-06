@@ -97,6 +97,8 @@ pub enum Target {
     TaskAgent,
     /// The `Folder` line of a task's sheet: click to set or change it.
     TaskFolder,
+    /// The copy icon beside a task's folder.
+    TaskFolderCopy,
     FolderSave,
     FolderCancel,
     /// A row of the agents panel: the agent at this index of `App::agents`.
@@ -2870,6 +2872,20 @@ impl App {
         self.new_story = Some(String::new());
     }
 
+    /// A prompt or question is open, so the program should not restart under it.
+    pub fn busy(&self) -> bool {
+        self.agent_ask.is_some() || self.new_story.is_some() || self.folder_edit.is_some() || self.confirm.is_some() || self.palette.is_some()
+    }
+
+    pub fn copy_folder(&mut self) {
+        let Some(folder) = self.selected_task().and_then(|t| t.folder.clone()) else {
+            self.set_notice("this task has no folder to copy".into());
+            return;
+        };
+        (self.copier)(&folder);
+        self.set_notice(format!("copied {folder}"));
+    }
+
     pub fn open_folder_edit(&mut self) {
         if self.screen != Screen::Board {
             return;
@@ -3333,6 +3349,7 @@ impl App {
             KeyCode::Char('i') => self.start_selected(Status::Implementing),
             KeyCode::Char('a') => self.open_task_agent(),
             KeyCode::Char('f') if self.detail => self.open_folder_edit(),
+            KeyCode::Char('y') if self.detail => self.copy_folder(),
             KeyCode::Char('x') => self.finish_selected(),
             KeyCode::Char('R') => self.sync_story_now(),
             KeyCode::Char('D') => self.finish_selected_story(),
@@ -3521,6 +3538,7 @@ impl App {
                     "close this idle agent: click the red ✕, then the red ? to confirm"
                 }
             }
+            Target::TaskFolderCopy => "copy this task's folder path (y)",
             Target::TaskFolder => "set or change the folder sessions for this task start in (f)",
             Target::TaskAgent => "go to the agent working on this task: bring it to the front, or resume its session (a)",
             Target::PrCopy(_) => "copy the link of this PR (c)",
@@ -3615,6 +3633,7 @@ impl App {
             match target {
                 Some(Target::Sheet) => {}
                 Some(Target::TaskAgent) => self.open_task_agent(),
+                Some(Target::TaskFolderCopy) => self.copy_folder(),
                 Some(Target::TaskFolder) => self.open_folder_edit(),
                 Some(Target::OpenPr) => self.open_selected_pr(),
                 Some(Target::OpenSelectedRun) => self.open_selected_run(),
