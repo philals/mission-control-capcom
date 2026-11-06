@@ -128,6 +128,11 @@ pub fn set_repos(board: &mut Board, id: &str, repos: Vec<String>) -> Result<()> 
 /// Set the folder sessions for this task start in; `None` clears it.
 pub fn set_folder(board: &mut Board, id: &str, folder: Option<&str>) -> Result<()> {
     let folder = folder.map(str::trim).filter(|f| !f.is_empty());
+    let expanded = folder.and_then(|f| {
+        let rest = if f == "~" { Some("") } else { f.strip_prefix("~/") }?;
+        std::env::var("HOME").ok().map(|h| format!("{}/{rest}", h.trim_end_matches('/')).trim_end_matches('/').to_string())
+    });
+    let folder = expanded.as_deref().or(folder);
     if let Some(f) = folder {
         if !std::path::Path::new(f).is_absolute() {
             bail!("the folder must be an absolute path");
@@ -328,6 +333,15 @@ mod tests {
         let err = add_task(&dir(&root), &mut board, "One", TaskType::Pr, vec![], vec![]).unwrap_err();
         assert!(!err.to_string().is_empty());
         assert!(board.tasks.is_empty());
+    }
+
+    #[test]
+    fn set_folder_expands_a_leading_tilde() {
+        let (root, mut board) = fresh();
+        add_task(&dir(&root), &mut board, "One", TaskType::Pr, vec![], vec![]).unwrap();
+        set_folder(&mut board, "T1", Some("~/code/api")).unwrap();
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(board.tasks[0].folder, Some(format!("{}/code/api", home.trim_end_matches('/'))));
     }
 
     #[test]

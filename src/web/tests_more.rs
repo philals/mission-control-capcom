@@ -92,6 +92,25 @@ fn calls(rig: &Rig) -> Vec<String> {
 }
 
 #[test]
+fn the_page_can_set_change_and_clear_a_tasks_folder() {
+    let r = rig();
+    let (_, answer) = act(&r, json!({ "action": "task.folder", "key": "PROJ-1", "id": "T1", "folder": "relative/dir" }));
+    assert_eq!(answer["ok"], false, "{answer}");
+    let (_, answer) = act(&r, json!({ "action": "task.folder", "key": "PROJ-1", "id": "T1", "folder": " /w/api " }));
+    assert_eq!(answer["ok"], true, "{answer}");
+    let detail = |r: &Rig| {
+        let page = String::from_utf8_lossy(&r.server.answer("GET /api/task?story=PROJ-1&id=T1 HTTP/1.1\r\nHost: 127.0.0.1:7878\r\n\r\n")).to_string();
+        serde_json::from_str::<Value>(page.split("\r\n\r\n").nth(1).unwrap()).unwrap()
+    };
+    assert_eq!(detail(&r)["folder"], "/w/api");
+    let (_, answer) = act(&r, json!({ "action": "task.folder", "key": "PROJ-1", "id": "T1", "folder": "/w/other" }));
+    assert_eq!(answer["ok"], true, "{answer}");
+    assert_eq!(detail(&r)["folder"], "/w/other");
+    act(&r, json!({ "action": "task.folder", "key": "PROJ-1", "id": "T1", "folder": "" }));
+    assert!(detail(&r)["folder"].is_null());
+}
+
+#[test]
 fn a_change_needs_the_page_headers_and_the_confirmed_ones_need_a_confirmation() {
     let r = rig();
     with_prs(&r, vec![pr(1)]);

@@ -95,6 +95,10 @@ pub enum Target {
     PrCopyBranch(usize),
     /// The `[ go to agent ]` line of a task's sheet.
     TaskAgent,
+    /// The `Folder` line of a task's sheet: click to set or change it.
+    TaskFolder,
+    FolderSave,
+    FolderCancel,
     /// A row of the agents panel: the agent at this index of `App::agents`.
     AgentRow(usize),
     /// The red ✕ on an idle agent's row.
@@ -646,6 +650,8 @@ pub struct App {
     pub agents_max: std::cell::Cell<usize>,
     /// The text typed or pasted into the "new story" box, while it is open.
     pub new_story: Option<String>,
+    /// Editing a task's folder: the task id and the text so far.
+    pub folder_edit: Option<(String, String)>,
     pub card_drag: Option<CardDrag>,
     pub story_drag: Option<StoryDrag>,
     launch_done: (Sender<AppMsg>, Receiver<AppMsg>),
@@ -759,6 +765,7 @@ impl App {
             agents_scroll: 0,
             agents_max: std::cell::Cell::new(0),
             new_story: None,
+            folder_edit: None,
             card_drag: None,
             story_drag: None,
             launch_done: std::sync::mpsc::channel(),
@@ -2863,7 +2870,38 @@ impl App {
         self.new_story = Some(String::new());
     }
 
+    pub fn open_folder_edit(&mut self) {
+        if self.screen != Screen::Board {
+            return;
+        }
+        if let Some(task) = self.selected_task() {
+            self.folder_edit = Some((task.id.clone(), task.folder.clone().unwrap_or_default()));
+        }
+    }
+
+    pub fn submit_folder(&mut self) {
+        let Some((id, text)) = self.folder_edit.clone() else {
+            return;
+        };
+        let Some(key) = self.keys.get(self.story).cloned() else {
+            return;
+        };
+        match store::update(&self.root, &key, |b| capcom::ops::set_folder(b, &id, Some(&text))) {
+            Ok(()) => {
+                self.folder_edit = None;
+                self.reload();
+                let now = text.trim();
+                self.set_notice(if now.is_empty() { format!("{id}'s folder is cleared") } else { format!("{id}'s folder is {now}") });
+            }
+            Err(e) => self.set_notice(format!("could not set the folder: {e:#}")),
+        }
+    }
+
     pub fn on_paste(&mut self, text: &str) {
+        if let Some((_, buffer)) = &mut self.folder_edit {
+            buffer.push_str(&text.replace(['\r', '\n'], ""));
+            return;
+        }
         if let Some((owner, name, number)) = crate::prs::pr_ref(text) {
             self.new_story = None;
             self.add_pasted_pr(&format!("https://github.com/{owner}/{name}/pull/{number}"));
@@ -3055,6 +3093,24 @@ impl App {
                 KeyCode::Char('y') | KeyCode::Enter => self.answer_agent(true),
                 KeyCode::Char('n') => self.answer_agent(false),
                 KeyCode::Esc | KeyCode::Char('q') => self.agent_ask = None,
+                _ => {}
+            }
+            return false;
+        }
+        if self.folder_edit.is_some() {
+            match code {
+                KeyCode::Enter => self.submit_folder(),
+                KeyCode::Esc => self.folder_edit = None,
+                KeyCode::Backspace => {
+                    if let Some((_, b)) = &mut self.folder_edit {
+                        b.pop();
+                    }
+                }
+                KeyCode::Char(c) => {
+                    if let Some((_, b)) = &mut self.folder_edit {
+                        b.push(c);
+                    }
+                }
                 _ => {}
             }
             return false;
@@ -3276,6 +3332,7 @@ impl App {
             KeyCode::Char('p') => self.start_selected(Status::Planning),
             KeyCode::Char('i') => self.start_selected(Status::Implementing),
             KeyCode::Char('a') => self.open_task_agent(),
+            KeyCode::Char('f') if self.detail => self.open_folder_edit(),
             KeyCode::Char('x') => self.finish_selected(),
             KeyCode::Char('R') => self.sync_story_now(),
             KeyCode::Char('D') => self.finish_selected_story(),
@@ -3293,7 +3350,7 @@ impl App {
 
     /// Open the command palette, unless a question is waiting for an answer.
     pub fn open_palette(&mut self) {
-        if self.agent_ask.is_some() || self.new_story.is_some() || self.confirm.is_some() {
+        if self.agent_ask.is_some() || self.new_story.is_some() || self.folder_edit.is_some() || self.confirm.is_some() {
             return;
         }
         self.close_overlays();
@@ -3392,7 +3449,7 @@ impl App {
 
     /// Right-click: a menu of what can be done to the PR, card or story under the pointer, else the palette.
     pub fn on_right_click(&mut self, x: u16, y: u16) {
-        if self.agent_ask.is_some() || self.new_story.is_some() || self.confirm.is_some() {
+        if self.agent_ask.is_some() || self.new_story.is_some() || self.folder_edit.is_some() || self.confirm.is_some() {
             return;
         }
         let target = self.hit(x, y);
@@ -3464,6 +3521,7 @@ impl App {
                     "close this idle agent: click the red ✕, then the red ? to confirm"
                 }
             }
+            Target::TaskFolder => "set or change the folder sessions for this task start in (f)",
             Target::TaskAgent => "go to the agent working on this task: bring it to the front, or resume its session (a)",
             Target::PrCopy(_) => "copy the link of this PR (c)",
             Target::PrCopyBranch(_) => "copy the name of this PR's branch",
@@ -3527,6 +3585,15 @@ impl App {
             }
             return;
         }
+        if self.folder_edit.is_some() {
+            match target {
+                Some(Target::FolderSave) => self.submit_folder(),
+                Some(Target::FolderCancel) => self.folder_edit = None,
+                Some(Target::Sheet) => {}
+                _ => self.folder_edit = None,
+            }
+            return;
+        }
         if self.new_story.is_some() {
             match target {
                 Some(Target::NewStoryStart) => self.submit_new_story(),
@@ -3548,6 +3615,7 @@ impl App {
             match target {
                 Some(Target::Sheet) => {}
                 Some(Target::TaskAgent) => self.open_task_agent(),
+                Some(Target::TaskFolder) => self.open_folder_edit(),
                 Some(Target::OpenPr) => self.open_selected_pr(),
                 Some(Target::OpenSelectedRun) => self.open_selected_run(),
                 Some(Target::OpenStage(k)) => self.open_sheet_stage(k),

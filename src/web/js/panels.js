@@ -832,6 +832,20 @@ function runSheet(repo, id) {
   }, { live: true, wide: true, kind: "run" });
 }
 
+function folderDialog(storyKey, task, detail) {
+  textDialog(
+    `${task.id} folder`,
+    "The folder sessions for this task start in: an absolute path, or one starting with ~/. Leave it empty to clear it.",
+    "/home/you/code/repo",
+    "Save",
+    async (folder) => {
+      await act("task.folder", { key: storyKey, id: task.id, folder });
+      taskSheet(storyKey, task.id);
+    },
+    detail.folder || "",
+  );
+}
+
 function taskSheet(storyKey, taskId) {
   let detail = null;
   const story = data.stories.find((s) => s.key === storyKey);
@@ -847,7 +861,12 @@ function taskSheet(storyKey, taskId) {
     add(body, kv("Repos", task.repos.length ? task.repos.join(", ") : "none"));
     add(body, kv("Jira", task.jira || "none"));
     if (detail && detail.agent) add(body, kv("Agent", `${detail.agent.pane} · ${detail.agent.skill} · since ${detail.agent.startedAt}`));
-    if (detail) add(body, kv("File", detail.file));
+    if (detail) {
+      const folder = el("span", "");
+      add(folder, detail.folder ? el("code", "", detail.folder) : "none ", btn(detail.folder ? "Change…" : "Set one…", () => folderDialog(storyKey, task, detail), "small", "the folder sessions for this task start in"));
+      add(body, kv("Folder", folder));
+      add(body, kv("File", detail.file));
+    }
     const prs = el("div", "chips");
     for (const p of task.prs) add(prs, link(`${p.repo}#${p.url.split("/").slice(-1)[0]} ${p.state.toUpperCase()}`, p.url, `chip ${p.state}`));
     add(body, kv("PRs", task.prs.length ? prs : "none"));

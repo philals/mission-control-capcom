@@ -78,6 +78,7 @@ impl Server {
             "story.delete" => self.delete_story(&text("key")),
             "story.sync" => self.sync_story(&text("key")),
             "task.finish" => self.finish_task(&text("key"), &text("id")),
+            "task.folder" => self.set_task_folder(&text("key"), &text("id"), &text("folder")),
             "story.new" => self.new_story(&text("key")),
             "session.start" => self.start_session(&text("key"), &text("task"), &text("kind"), &text("host")),
             "agent.open" => self.open_agent(&text("pane")),
@@ -285,6 +286,17 @@ impl Server {
     fn finish_task(&self, key: &str, id: &str) -> Value {
         let msgs = crate::finish::finish(&self.root, key, id, self.lookup().as_ref());
         self.messages(key, msgs, id)
+    }
+
+    fn set_task_folder(&self, key: &str, id: &str, folder: &str) -> Value {
+        if store::load(&self.root, key).is_err() {
+            return answer(false, format!("no story {key}"));
+        }
+        match store::update(&self.root, key, |b| crate::ops::set_folder(b, id, Some(folder))) {
+            Ok(()) if folder.trim().is_empty() => answer(true, format!("{id}'s folder is cleared")),
+            Ok(()) => answer(true, format!("{id}'s folder is set")),
+            Err(e) => answer(false, format!("could not set the folder: {e:#}")),
+        }
     }
 
     fn sync_story(&self, key: &str) -> Value {

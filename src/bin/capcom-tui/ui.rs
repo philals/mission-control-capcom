@@ -114,6 +114,9 @@ pub fn draw(f: &mut Frame, app: &App) {
     if app.new_story.is_some() {
         draw_new_story(f, area, app, &mut hits);
     }
+    if app.folder_edit.is_some() {
+        draw_folder_edit(f, area, app, &mut hits);
+    }
     if app.agent_ask.is_some() {
         draw_agent_ask(f, area, app, &mut hits);
     }
@@ -134,7 +137,7 @@ fn draw_hover(f: &mut Frame, app: &App, hits: &Hits) {
     };
     let button = matches!(
         target,
-        Target::PrAuto(_) | Target::PrReview(_) | Target::PrMerge(_) | Target::PrAgent(_) | Target::TaskAgent | Target::AgentClose(_) | Target::NoteDismiss(_) | Target::PrCopy(_) | Target::PrCopyBranch(_) | Target::PrDetails(_) | Target::PrBadge(_)
+        Target::PrAuto(_) | Target::PrReview(_) | Target::PrMerge(_) | Target::PrAgent(_) | Target::TaskAgent | Target::TaskFolder | Target::AgentClose(_) | Target::NoteDismiss(_) | Target::PrCopy(_) | Target::PrCopyBranch(_) | Target::PrDetails(_) | Target::PrBadge(_)
             | Target::ToggleAutoFix | Target::ToggleAutoCopilot | Target::GoLight | Target::Refresh | Target::NewStory | Target::ToggleDone
             | Target::OpenCheck(..) | Target::OpenJob(..) | Target::RunDetails(_) | Target::Back | Target::PaletteItem(_)
     );
@@ -825,6 +828,41 @@ fn draw_new_story(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     hits.push((cancel, Target::NewStoryCancel));
 }
 
+const SAVE_BUTTON: &str = "[ Enter Save ]";
+
+fn draw_folder_edit(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
+    let Some((id, text)) = &app.folder_edit else {
+        return;
+    };
+    let w = (area.width * 70 / 100).max(46).min(area.width);
+    let h = 8.min(area.height);
+    let rect = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
+    let room = (w as usize).saturating_sub(6);
+    let shown: String = text.chars().rev().take(room).collect::<Vec<_>>().into_iter().rev().collect();
+    let dim = Style::new().fg(theme::DIM);
+    let lines = vec![
+        Line::raw(""),
+        Line::from(Span::raw(" Folder sessions for this task start in (an absolute path, or ~/…):")),
+        Line::from(vec![Span::raw(" "), Span::styled(format!("{shown}▌"), Style::new().add_modifier(Modifier::BOLD))]),
+        Line::raw(""),
+        Line::from(Span::styled(" Leave it empty to clear it.", dim)),
+    ];
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(panel::ORANGE))
+        .title(Span::styled(format!(" {id} folder "), Style::new().add_modifier(Modifier::BOLD)));
+    theme::clear(f, rect);
+    f.render_widget(Paragraph::new(lines).block(block), rect);
+    let y = rect.y + rect.height.saturating_sub(2);
+    let save = Rect::new(rect.x + 2, y, SAVE_BUTTON.chars().count() as u16, 1);
+    let cancel = Rect::new(save.x + save.width + 2, y, CANCEL_BUTTON.chars().count() as u16, 1);
+    f.render_widget(Paragraph::new(Span::styled(SAVE_BUTTON, Style::new().fg(theme::GREEN).add_modifier(Modifier::BOLD))), save);
+    f.render_widget(Paragraph::new(Span::styled(CANCEL_BUTTON, Style::new().fg(theme::CYAN))), cancel);
+    hits.push((rect, Target::Sheet));
+    hits.push((save, Target::FolderSave));
+    hits.push((cancel, Target::FolderCancel));
+}
+
 const AGENT_YES: &str = "[ y Start an agent ]";
 const CLEANUP_NO: &str = "[ n No agent ]";
 const AGENT_NO: &str = "[ n No agent: just move it to IMPLEMENTING ]";
@@ -1198,6 +1236,17 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     if let Some(a) = &task.agent {
         lines.push(fact("Agent", format!("{} · {} · since {}", a.pane, a.skill, a.started_at)));
     }
+    let folder_row = lines.len() as u16;
+    let folder_text = match &task.folder {
+        Some(folder) => format!("{folder}  "),
+        None => "none  ".to_string(),
+    };
+    let folder_label = if task.folder.is_some() { "change (f)" } else { "set one (f)" };
+    lines.push(Line::from(vec![
+        Span::styled(format!("{:<12}", "Folder"), Style::new().fg(theme::DIM)),
+        Span::raw(trunc(&folder_text, width.saturating_sub(12 + folder_label.len()))),
+        Span::styled(folder_label, Style::new().fg(theme::CYAN)),
+    ]));
     lines.push(fact("File", task.file.clone()));
     let agent_row = lines.len() as u16;
     let button = format!("{} go to agent", panel::AGENT_ICON);
@@ -1251,6 +1300,9 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     theme::clear(f, rect);
     f.render_widget(Paragraph::new(all).block(block), rect);
     hits.push((rect, Target::Sheet));
+    if folder_row < inner.height {
+        hits.push((Rect::new(inner.x, inner.y + folder_row, inner.width, 1), Target::TaskFolder));
+    }
     if let Some(r) = agent_hit {
         hits.push((r, Target::TaskAgent));
     }
@@ -1279,6 +1331,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("m", "mark the selected draft ready for review, or turn a ready PR back into a draft (asks first)".into()),
         row("t / v", "tick auto-fix / auto-review on the selected pull request".into()),
         row("g", "automerge on the selected pull request: its merge bot's label, on or off".into()),
+        row("f", "in a task's sheet: set or change the folder its sessions start in (an absolute path or ~/…; empty clears it)".into()),
         row("a", "go to the agent that made the selected pull request, or (on a story's board) the agent working the selected task".into()),
         row("paste  u", "paste a pull request link to follow someone else's PR like your own (auto-fix starts off); u stops following a pasted one".into()),
         row("A", "show or hide the agents panel left of the stories (inside Herdr, Orca or Claude Desktop, on terminals at least 110 wide); click an agent to bring it to the front".into()),
@@ -4004,6 +4057,28 @@ mod tests {
                 assert!(got >= need, "{what}: {:?} at ({x},{y}) is {got:.1}:1 ({fg:?} on {bg:?}), needs {need}", cell.symbol());
             }
         }
+    }
+
+    #[test]
+    fn the_task_sheet_sets_and_changes_the_folder_with_f() {
+        let (root, mut app) = sample();
+        app.open_detail();
+        let id = app.selected_task().unwrap().id.clone();
+        let out = render(&app, 120, 40);
+        assert!(out.contains("Folder") && out.contains("set one (f)"), "{out}");
+        app.on_key(KeyCode::Char('f'), false);
+        assert!(render(&app, 120, 40).contains("Folder sessions for this task start in"));
+        for c in "/w/api".chars() {
+            app.on_key(KeyCode::Char(c), false);
+        }
+        app.on_key(KeyCode::Enter, false);
+        assert!(app.folder_edit.is_none());
+        assert_eq!(store::load(root.path(), "PROJ-1").unwrap().task(&id).unwrap().folder.as_deref(), Some("/w/api"));
+        assert!(render(&app, 120, 40).contains("change (f)"));
+        app.on_key(KeyCode::Char('f'), false);
+        assert_eq!(app.folder_edit.as_ref().map(|(_, b)| b.as_str()), Some("/w/api"), "starts from the current folder");
+        app.on_key(KeyCode::Esc, false);
+        assert!(app.folder_edit.is_none());
     }
 
     #[test]

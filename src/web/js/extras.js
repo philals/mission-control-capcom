@@ -1,10 +1,11 @@
 // ---- dialogs ------------------------------------------------------------------------------
 
-function textDialog(title, hint, placeholder, yes, onSubmit) {
+function textDialog(title, hint, placeholder, yes, onSubmit, initial = null) {
   openModal(title, () => {
     const input = el("input", "text");
     input.type = "text";
     input.placeholder = placeholder;
+    if (initial !== null) input.value = initial;
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") {
         ev.preventDefault();
@@ -13,7 +14,7 @@ function textDialog(title, hint, placeholder, yes, onSubmit) {
     });
     function submit() {
       const text = input.value.trim();
-      if (!text) return;
+      if (!text && initial === null) return;
       closeModal();
       onSubmit(text);
     }

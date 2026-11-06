@@ -402,6 +402,7 @@ impl Server {
             "label": summary.label,
             "body": summary.body,
             "file": task.file,
+            "folder": task.folder,
             "agent": task.agent.as_ref().map(|a| json!({ "pane": a.pane, "skill": a.skill, "startedAt": a.started_at })),
             "sessions": task.sessions.len(),
             "worktrees": worktrees,
