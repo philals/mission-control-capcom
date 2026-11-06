@@ -13,7 +13,7 @@ Success: for any story, you can see every task, its status, its dependencies and
 
 - Three skills: **break-down**, **plan-task**, **implement-task**.
 - Local files are the source of truth. No Jira status sync.
-- Jira is touched once: break-down may create subtasks under the story, then never updates them.
+- Jira is only read by default. Break-down creates subtasks under the story only if the user asks, and never updates them.
 - One board per story. Tasks are split in consultation with the user.
 - A task may have several PRs, across several repos.
 - No stacked PRs. A task starts only after its dependencies are merged.
@@ -108,7 +108,7 @@ Input: a Jira story key.
 2. Propose tasks. Each is tagged `pr`, `spike` or `decision`, with dependencies called out explicitly and a critical-path note.
 3. Consult the user on every split, merge and dependency. Anything bigger than one reviewable change is flagged. Unknowns get a spike first, with dependants marked provisional.
 4. Write `story.md`, `board.json` and one stub file per task.
-5. Ask whether to create Jira subtasks under the story. If yes, create them and store the keys in `jiraSubtask`. Never touch them again.
+5. Do not create Jira subtasks unless the user asks. If asked, create them and store the keys in `jiraSubtask`. Never touch them again.
 6. Re-running on an existing board proposes adds, splits and drops, and applies only what the user approves.
 
 ### plan-task

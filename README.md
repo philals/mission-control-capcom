@@ -39,7 +39,7 @@ If that sounds like you, great. If not, treat this as a worked example: fork it,
  (Jira)   /story-break-down                            /story-plan-task  /story-implement-task
 ```
 
-- **Local files are the source of truth.** Each story is a folder with a `board.json`, a `story.md` and one markdown file per task. Jira only ever receives the subtasks, once, if you say yes.
+- **Local files are the source of truth.** Each story is a folder with a `board.json`, a `story.md` and one markdown file per task. Jira is only read, unless you ask for subtasks, which are created once.
 - **Task statuses:** `todo → planning → planned → implementing → done`, plus `dropped`, and a `blocked` flag. A task can skip planning (`todo → implementing`) for spikes and manual testing. `done` means every expected PR is merged.
 - **Story statuses:** `in_progress → in_review → done`, moved by `/story-review` once every task is finished.
 - **PRs are always drafts, and never stacked.** You mark them ready and merge them yourself; capcom never merges anything (it can add or remove your merge bot's automerge label, but only when you tick it and confirm).
@@ -76,7 +76,7 @@ Then, in Claude Code:
 
 | Step | Command | What it does |
 |---|---|---|
-| 1 | `/story-break-down PROJ-123` | Reads the story, proposes tasks and dependencies, agrees them with you, writes `$CAPCOM_ROOT/PROJ-123/`. Offers to create Jira subtasks once. |
+| 1 | `/story-break-down PROJ-123` | Reads the story, proposes tasks and dependencies, agrees them with you, writes `$CAPCOM_ROOT/PROJ-123/`. Creates Jira subtasks only if you ask. |
 | 2 | `/story-plan-task PROJ-123 T1` | Researches one task, asks you questions, writes the plan into the task file. Never changes code. |
 | 3 | `/story-implement-task PROJ-123 T1` | Asks main checkout or worktree, implements the plan, opens **draft** PRs titled like `feat: PROJ-124 add notice endpoint (T1)`. |
 | 4 | `/story-review PROJ-123` | When every task is done: checks the subtasks, reviews the story's acceptance criteria and intent against what was built, and tells you what it found. |
