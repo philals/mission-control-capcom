@@ -705,3 +705,11 @@ fn opening_an_agent_goes_to_its_app() {
     assert_eq!(herdr["ok"], false);
     assert!(herdr["message"].as_str().unwrap().contains("Herdr"), "{herdr}");
 }
+
+#[test]
+fn a_pr_labelled_icebox_is_never_auto_fixed_or_auto_updated() {
+    let mut p = behind();
+    assert!(crate::autopilot::fix_needed(&p).is_some());
+    p.labels = vec!["Icebox".into()];
+    assert!(crate::autopilot::fix_needed(&p).is_none());
+}

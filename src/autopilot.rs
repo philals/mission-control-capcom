@@ -15,7 +15,7 @@ pub struct FixNeed {
 /// settled) and Copilot's unresolved comments (once its review is in), a merge conflict, or a
 /// branch that is behind.
 pub fn fix_needed(pr: &PullRequest) -> Option<FixNeed> {
-    if !pr.managed() {
+    if !pr.managed() || pr.has_label("icebox") {
         return None;
     }
     let mut failing: Vec<String> = pr.fixable_failures().iter().map(|c| c.name.clone()).collect();
