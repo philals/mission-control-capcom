@@ -107,18 +107,21 @@ Next to the pull requests panel (side by side when the terminal is about 150 col
 
 When there are no runs (or the panel is switched off), the runs panel shrinks to a narrow strip and the PRs get the room; it grows back as soon as there is a run, an error or a warning to show. Every panel can be resized, by mouse or keys: drag the divider between the PR and runs panels (also when the runs panel has shrunk; a size you choose is then respected even when it is empty), drag the top edge of the bottom area up or down, and on a board drag the border between two kanban columns. With the keys, `<` `>` make the PR panel narrower or wider, `+` `-` make the bottom area taller or shorter, and `,` `.` make the selected kanban column narrower or wider; `=` resets everything to automatic. **The sizes are saved** and restored the next time you start, in `~/.config/capcom/tui.json` (or `$XDG_CONFIG_HOME/capcom/tui.json`; set `CAPCOM_TUI_SETTINGS` to use another file). The file holds only those numbers, lives outside any repo, and a missing or damaged file just means the defaults.
 
-## Starting agents: Herdr, Orca or Claude Desktop
+## Starting agents: Herdr, the Herdr app, Orca or Claude Desktop
 
 `capcom-tui` starts new sessions in the app it is running in, and takes you to a running agent in the app that agent runs in:
 
 | capcom-tui runs in | Detected by | New sessions open as |
 |---|---|---|
 | a Herdr pane | `HERDR_ENV=1` | a tab of the story's Herdr workspace (below) |
+| a pane of the Herdr desktop app (`herdr-app`) | `HC_TERMINAL_SOCKET` | a tab of the story's space in the app, in the task's folder; the tab you are on stays shown |
 | an Orca terminal | `ORCA_TERMINAL_HANDLE` | a Claude terminal in Orca, in the task's folder |
 | Claude Desktop's terminal panel | `TERM_PROGRAM=claude-desktop` | a new Claude Desktop session with the skill typed in (press Enter to send it) |
 | any other terminal | | nothing: starting is off and says so |
 
-Herdr is checked first, so a TUI in a Herdr pane inside an Orca terminal uses Herdr. To say which app yourself, start it with `--host herdr`, `--host orca` or `--host desktop` (or set `CAPCOM_HOST`); that wins over what the terminal shows. The **AGENTS** panel lists the agents of every app it can reach (Herdr while its server runs, Orca when its command-line tool is found, and Claude Desktop), and a click brings an agent to the front in its own app; one in an app capcom cannot reach says which app it is in.
+Herdr is checked first, so a TUI in a Herdr pane inside an Orca terminal uses Herdr. To say which app yourself, start it with `--host herdr`, `--host herdr-app`, `--host orca` or `--host desktop` (or set `CAPCOM_HOST`); that wins over what the terminal shows. Any other word is refused when it starts, and with none given the terminal decides. The **AGENTS** panel lists the agents of every app it can reach (Herdr while its server runs, the Herdr app while it has a window open, Orca when its command-line tool is found, and Claude Desktop), and a click brings an agent to the front in its own app; one in an app capcom cannot reach says which app it is in.
+
+**The Herdr app is not Herdr.** The desktop app (`herdr-app`) keeps its own spaces and tabs, which the `herdr` command cannot see, so capcom drives it through `herdr-app` and `hc` instead: `herdr-app ls` lists its spaces and terminals, `herdr-app do tab.new` and `space.new` start Claude, `agent.focus` brings one to the front and `terminal.kill` closes one. Its panes do not set `HERDR_ENV`, which is why they are detected by `HC_TERMINAL_SOCKET`. The app cannot name an agent, so one is recognised by its Claude Code session, not by a name.
 
 **No double starts, in any app:** a task whose recorded session is running anywhere is brought to the front instead. Starting a task also leaves a "starting" mark for five minutes (in `~/.cache/capcom/starting.json`), cleared when the skill records its session, so a second click in the meantime says "already starting in …" and starts nothing.
 

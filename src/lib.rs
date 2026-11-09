@@ -9,6 +9,7 @@ pub mod durations;
 pub mod finish;
 pub mod fixstate;
 pub mod github;
+pub mod herdr_app;
 pub mod host;
 pub mod kodiak;
 pub mod model;

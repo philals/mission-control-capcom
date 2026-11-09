@@ -355,7 +355,7 @@ impl Server {
         let host = match host {
             "orca" => Host::Orca,
             "" | "desktop" => Host::Desktop,
-            "herdr" => return answer(false, "the page can't start sessions in Herdr: use capcom-tui in a Herdr pane"),
+            "herdr" | "herdr-app" => return answer(false, "the page can't start sessions in Herdr: use capcom-tui in a Herdr pane"),
             other => return answer(false, format!("unknown app {other:?}: use orca or desktop")),
         };
         let marks = lock(&self.starting).clone();

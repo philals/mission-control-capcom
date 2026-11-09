@@ -1,8 +1,9 @@
-//! The apps capcom-tui can start and reach agents in besides Herdr (Orca and the Claude desktop app),
+//! The apps capcom-tui can start and reach agents in besides Herdr (the Herdr app, Orca and the Claude desktop app),
 //! and the router that starts new agents in the app capcom-tui runs in and reaches each running agent
 //! in the app it runs in.
 use crate::agents::AgentInfo;
 use crate::herdr::{Herdr, Launch, Outcome, Resume};
+use capcom::herdr_app::{HerdrApp, Start};
 use capcom::host::Host;
 use capcom::orca::Orca;
 use capcom::starting::Starting;
@@ -24,6 +25,13 @@ pub struct OrcaHost {
     pub orca: Orca,
     /// Live sessions started in Orca terminals, by Orca pane key.
     pub sessions: Box<dyn Fn() -> HashMap<String, String> + Send + Sync>,
+    pub workdir: PathBuf,
+}
+
+pub struct HerdrAppHost {
+    pub app: HerdrApp,
+    /// The `capcom::claude::live` sessions.
+    pub live: Live,
     pub workdir: PathBuf,
 }
 
@@ -173,6 +181,85 @@ impl Herdr for OrcaHost {
     }
 }
 
+impl HerdrAppHost {
+    fn agents_now(&self) -> Result<Vec<AgentInfo>, String> {
+        self.app.agents(&capcom::herdr_app::sessions_by_pid(&(self.live)()))
+    }
+
+    fn start(&self, l: &Resume, folder: &Path, argv: Vec<String>, prompt: Option<&str>) -> Result<Outcome, String> {
+        let folder = folder.to_string_lossy();
+        self.app.start(&Start { space: &l.workspace, label: &l.label, tab: &l.tab, folder: &folder, argv, prompt, focus: l.focus })?;
+        Ok(Outcome::Started)
+    }
+}
+
+impl Herdr for HerdrAppHost {
+    /// The app cannot name an agent, so one already running is found by its session (the router does
+    /// that before it gets here), not by name.
+    fn launch(&self, l: &Launch) -> Result<Outcome, String> {
+        let folder = start_folder(l, &self.workdir);
+        let start = Start {
+            space: &l.workspace,
+            label: &l.label,
+            tab: &l.tab,
+            folder: &folder.to_string_lossy(),
+            argv: vec!["claude".into()],
+            prompt: Some(&l.prompt),
+            focus: false,
+        };
+        self.app.start(&start)?;
+        Ok(Outcome::Started)
+    }
+
+    fn resume(&self, r: &Resume) -> Result<Outcome, String> {
+        if let Some((id, _)) = &r.session {
+            if let Some(a) = self.agents_now()?.iter().find(|a| holds(a, id)) {
+                let terminal = capcom::herdr_app::terminal_of(&a.pane).unwrap_or_default();
+                if let Some(prompt) = &r.prompt {
+                    if a.status == crate::agents::Status::Working {
+                        return Ok(Outcome::Busy);
+                    }
+                    self.app.send(terminal, prompt)?;
+                    if r.focus {
+                        self.app.focus(terminal)?;
+                    }
+                    return Ok(Outcome::Prompted);
+                }
+                self.app.focus(terminal)?;
+                return Ok(Outcome::Focused);
+            }
+        }
+        match (&r.session, &r.fresh_repo, &r.prompt) {
+            (Some((id, cwd)), _, prompt) => {
+                if !Path::new(cwd).is_dir() {
+                    return Err(gone(cwd));
+                }
+                self.start(r, Path::new(cwd), vec!["claude".into(), "--resume".into(), id.clone()], prompt.as_deref())
+            }
+            (None, Some(repo), Some(prompt)) => {
+                let dir = self.workdir.join(repo);
+                if !dir.is_dir() {
+                    return Err(format!("no session is recorded for this PR and {} does not exist to start a new one in", dir.display()));
+                }
+                self.start(r, &dir, vec!["claude".into()], Some(prompt))
+            }
+            _ => Err(no_session()),
+        }
+    }
+
+    fn agents(&self) -> Result<Vec<AgentInfo>, String> {
+        self.agents_now()
+    }
+
+    fn focus(&self, pane: &str) -> Result<(), String> {
+        self.app.focus(capcom::herdr_app::terminal_of(pane).ok_or("not a Herdr app agent")?)
+    }
+
+    fn close(&self, pane: &str) -> Result<(), String> {
+        self.app.close(capcom::herdr_app::terminal_of(pane).ok_or("not a Herdr app agent")?)
+    }
+}
+
 impl Router {
     fn host(&self, host: Host) -> Option<&Arc<dyn Herdr>> {
         self.hosts.iter().find(|(h, _)| *h == host).map(|(_, x)| x)
@@ -186,6 +273,7 @@ impl Router {
     fn home(&self) -> Result<&Arc<dyn Herdr>, String> {
         self.host(self.home).ok_or_else(|| match self.home {
             Host::Orca => "Orca: its command-line tool was not found (open Orca, or register its CLI)".to_string(),
+            Host::HerdrApp => "Herdr app: it has no window open to start anything in (open it, then try again)".to_string(),
             h => format!("{} cannot be reached", h.name()),
         })
     }
@@ -285,7 +373,8 @@ fn unix_now() -> u64 {
 
 /// The router for a TUI running in `home`; None in a plain terminal, where nothing can be started.
 /// Herdr is reachable from anywhere while it runs (its socket is in a fixed place), so it is included
-/// whenever it answers; Orca whenever its CLI is found; the desktop app always.
+/// whenever it answers, and the Herdr app likewise while it has a window open; Orca whenever its CLI is
+/// found; the desktop app always.
 pub fn router(home: Host, workdir: PathBuf) -> Option<Router> {
     if home == Host::Plain {
         return None;
@@ -295,6 +384,10 @@ pub fn router(home: Host, workdir: PathBuf) -> Option<Router> {
     let mut hosts: Vec<(Host, Arc<dyn Herdr>)> = Vec::new();
     if home == Host::Herdr || crate::herdr::answers() {
         hosts.push((Host::Herdr, Arc::new(crate::herdr::Cli::new(workdir.clone()))));
+    }
+    if home == Host::HerdrApp || capcom::herdr_app::answers() {
+        let live = live.clone();
+        hosts.push((Host::HerdrApp, Arc::new(HerdrAppHost { app: HerdrApp::new(), live: Box::new(live), workdir: workdir.clone() })));
     }
     if let Some(cli) = capcom::orca::find_cli_here() {
         let live = live.clone();
@@ -441,6 +534,100 @@ mod tests {
             workdir: workdir.to_path_buf(),
         };
         (host, calls)
+    }
+
+    fn app_host(fail: bool, status: &str, workdir: &std::path::Path) -> (HerdrAppHost, Calls) {
+        let calls: Calls = Arc::new(Mutex::new(Vec::new()));
+        let (log, status) = (calls.clone(), status.to_string());
+        let run: capcom::herdr_app::Runner = Box::new(move |program, args| {
+            log.lock().unwrap().push(format!("{program} {}", args.join(" ")));
+            if fail {
+                return Err("no window is open".into());
+            }
+            Ok(match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+                ["ls"] => json!({"spaces": [{"id": "sp1", "name": "K-1 - Thing", "tabs": [{"id": "tb1", "name": "1", "terminals": [{"terminal": "t1", "status": status, "app": "claude-code", "name": null}]}]}]}),
+                ["status"] => json!({"space": "sp1", "tab": "tb1"}),
+                ["do", "tab.new" | "space.new", ..] => json!({"terminal": "t9"}),
+                ["get", "t1"] => json!({"cwd": "/w/app", "title": "Claude Code", "foreground": {"pid": 11}}),
+                _ => json!({"ok": true}),
+            })
+        });
+        let live = vec![AgentInfo { pane: "cli:11".into(), name: None, status: Status::Idle, topic: String::new(), workspace: String::new(), cwd: "/w/app".into(), session: Some("s-1".into()) }];
+        (HerdrAppHost { app: HerdrApp::with_runner(run), live: Box::new(move || live.clone()), workdir: workdir.to_path_buf() }, calls)
+    }
+
+    #[test]
+    fn launching_from_the_herdr_app_starts_claude_in_a_tab_of_the_story_space_in_the_task_folder() {
+        let work = tempfile::tempdir().unwrap();
+        let folder = work.path().join("repo");
+        std::fs::create_dir(&folder).unwrap();
+        let (h, calls) = app_host(false, "idle", work.path());
+        assert_eq!(h.launch(&launch(Some(&folder.to_string_lossy()))), Ok(Outcome::Started));
+        let all = calls.lock().unwrap().clone();
+        let made = all.iter().find(|c| c.contains("tab.new")).expect("a tab was made");
+        assert!(made.contains(&format!("--folder {}", folder.display())) && made.contains("--argv [\"claude\"]") && made.contains("--space sp1"), "{made}");
+    }
+
+    #[test]
+    fn the_herdr_app_not_answering_is_reported_as_it() {
+        let work = tempfile::tempdir().unwrap();
+        let (h, _) = app_host(true, "idle", work.path());
+        assert_eq!(h.launch(&launch(None)), Err("Herdr app: no window is open".to_string()));
+    }
+
+    #[test]
+    fn a_herdr_app_agent_with_the_session_is_focused_or_prompted() {
+        let work = tempfile::tempdir().unwrap();
+        let (h, calls) = app_host(false, "idle", work.path());
+        assert_eq!(h.resume(&resume(Some(("s-1", "/w/app")), None, false)), Ok(Outcome::Focused));
+        assert_eq!(h.resume(&resume(Some(("s-1", "/w/app")), Some("/pr-address x"), false)), Ok(Outcome::Prompted));
+        let all = calls.lock().unwrap().clone();
+        assert!(all.contains(&"herdr-app do agent.focus --terminal t1".to_string()), "{all:?}");
+        assert!(all.contains(&"hc send t1 /pr-address x".to_string()), "{all:?}");
+        assert_eq!(all.iter().filter(|c| c.contains("agent.focus")).count(), 1, "an automatic prompt leaves the screen alone");
+    }
+
+    #[test]
+    fn a_working_herdr_app_agent_is_not_prompted() {
+        let work = tempfile::tempdir().unwrap();
+        let (h, calls) = app_host(false, "working", work.path());
+        assert_eq!(h.resume(&resume(Some(("s-1", "/w/app")), Some("/pr-address x"), false)), Ok(Outcome::Busy));
+        assert!(!calls.lock().unwrap().iter().any(|c| c.starts_with("hc send")));
+    }
+
+    #[test]
+    fn a_closed_session_is_resumed_in_a_herdr_app_tab_from_its_own_folder() {
+        let work = tempfile::tempdir().unwrap();
+        let folder = work.path().to_string_lossy().to_string();
+        let (h, calls) = app_host(false, "idle", work.path());
+        assert_eq!(h.resume(&resume(Some(("s-gone", &folder)), Some("/pr-address x"), true)), Ok(Outcome::Started));
+        let all = calls.lock().unwrap().clone();
+        let made = all.iter().find(|c| c.contains("tab.new")).expect("a tab was made");
+        assert!(made.contains("--argv [\"claude\",\"--resume\",\"s-gone\"]") && made.contains("--task /pr-address x"), "{made}");
+        assert!(!all.iter().any(|c| c.contains("tab.select")), "focus was asked for: {all:?}");
+        assert_eq!(h.resume(&resume(Some(("s-gone", "/no/such/folder")), None, true)), Err(gone("/no/such/folder")));
+        assert_eq!(h.resume(&resume(None, None, true)), Err(no_session()));
+    }
+
+    #[test]
+    fn focus_and_close_go_to_the_herdr_app_by_terminal() {
+        let work = tempfile::tempdir().unwrap();
+        let (h, calls) = app_host(false, "idle", work.path());
+        h.focus("herdr-app:t1").unwrap();
+        h.close("herdr-app:t1").unwrap();
+        assert_eq!(h.focus("orca:t1"), Err("not a Herdr app agent".to_string()));
+        assert_eq!(*calls.lock().unwrap(), vec!["herdr-app do agent.focus --terminal t1", "herdr-app do terminal.kill --terminal t1"]);
+    }
+
+    #[test]
+    fn launching_from_the_herdr_app_is_not_started_twice_when_its_session_runs() {
+        let work = tempfile::tempdir().unwrap();
+        let (h, calls) = app_host(false, "idle", work.path());
+        let r = router_of(Host::HerdrApp, vec![(Host::HerdrApp, Arc::new(h))], &work);
+        let mut l = launch(None);
+        l.sessions = vec!["s-1".into()];
+        assert_eq!(r.launch(&l), Ok(Outcome::Focused));
+        assert!(!calls.lock().unwrap().iter().any(|c| c.contains("tab.new")));
     }
 
     #[test]
@@ -628,14 +815,20 @@ mod tests {
         let calls: Calls = Arc::new(Mutex::new(Vec::new()));
         let r = router_of(
             Host::Herdr,
-            vec![(Host::Herdr, fake("herdr", vec![], &calls, false)), (Host::Orca, fake("orca", vec![], &calls, false)), (Host::Desktop, fake("desktop", vec![], &calls, false))],
+            vec![
+                (Host::Herdr, fake("herdr", vec![], &calls, false)),
+                (Host::HerdrApp, fake("herdr-app", vec![], &calls, false)),
+                (Host::Orca, fake("orca", vec![], &calls, false)),
+                (Host::Desktop, fake("desktop", vec![], &calls, false)),
+            ],
             &dir,
         );
+        r.focus("herdr-app:t8").unwrap();
         r.focus("orca:term_9").unwrap();
         r.focus("claude-desktop:7:local_a").unwrap();
         r.focus("w1:p2").unwrap();
         r.close("orca:term_9").unwrap();
-        assert_eq!(*calls.lock().unwrap(), vec!["orca focus orca:term_9", "desktop focus claude-desktop:7:local_a", "herdr focus w1:p2", "orca close orca:term_9"]);
+        assert_eq!(*calls.lock().unwrap(), vec!["herdr-app focus herdr-app:t8", "orca focus orca:term_9", "desktop focus claude-desktop:7:local_a", "herdr focus w1:p2", "orca close orca:term_9"]);
     }
 
     #[test]

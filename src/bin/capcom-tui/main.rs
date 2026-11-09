@@ -50,8 +50,8 @@ struct Cli {
     /// Folder new sessions start in when a task has none (default: the current folder, or ~/code when that is ~)
     #[arg(long, env = "CAPCOM_WORKDIR")]
     workdir: Option<PathBuf>,
-    /// The app new sessions open in: herdr, orca or desktop (default: the app this terminal belongs to)
-    #[arg(long, env = "CAPCOM_HOST")]
+    /// The app new sessions open in: herdr, herdr-app, orca or desktop (default: the app this terminal belongs to)
+    #[arg(long, env = "CAPCOM_HOST", value_parser = capcom::host::check)]
     host: Option<String>,
     /// Try it with invented stories, PRs and runs: needs no stories folder, GitHub or Herdr
     #[arg(long)]

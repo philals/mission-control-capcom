@@ -120,14 +120,14 @@ or from a shell, `claude plugin install capcom --marketplace philals/mission-con
 | `CAPCOM_PR_QUERY` | `--pr-query` | GitHub search for the PR panel (`@me` is resolved by GitHub) | `is:pr author:@me state:open archived:false sort:updated-desc -label:icebox` |
 | `CAPCOM_DEPLOY_REPOS` | `--deploy-repos` | Extra `owner/name` repos (comma separated) to look for your manual runs in | repos of your PRs and stories |
 | `CAPCOM_WORKDIR` | `--workdir` | Where new sessions start when a task has no folder | the current folder, or `~/code` when that is `~` |
-| `CAPCOM_HOST` | `--host` | The app new sessions open in: `herdr`, `orca` or `desktop` | the app the terminal belongs to |
+| `CAPCOM_HOST` | `--host` | The app new sessions open in: `herdr`, `herdr-app`, `orca` or `desktop` (anything else is refused) | the app the terminal belongs to |
 | `CAPCOM_TUI_SETTINGS` | | File for the saved panel sizes | `~/.config/capcom/tui.json` |
 | `CAPCOM_CACHE_DIR` | | Shared GitHub cache | `~/.cache/capcom` |
 | | `--no-prs`, `--no-runs` | Turn the PR or runs panel off | |
 
-## Herdr, Orca and Claude Desktop
+## Herdr, the Herdr app, Orca and Claude Desktop
 
-New sessions open in the app you are using when you start them: `capcom-tui` in a Herdr pane opens them in Herdr, in an Orca terminal in Orca, and in Claude Desktop's terminal panel in Claude Desktop; the web page opens them in Claude Desktop, or in Orca when opened in Orca's browser as `http://127.0.0.1:1969/?host=orca`. Clicking an agent takes you to it in whichever app it runs in. See [docs/tui.md](docs/tui.md#starting-agents-herdr-orca-or-claude-desktop).
+New sessions open in the app you are using when you start them: `capcom-tui` in a Herdr pane opens them in Herdr, in a pane of the Herdr desktop app in that app, in an Orca terminal in Orca, and in Claude Desktop's terminal panel in Claude Desktop; the web page opens them in Claude Desktop, or in Orca when opened in Orca's browser as `http://127.0.0.1:1969/?host=orca`. Clicking an agent takes you to it in whichever app it runs in. See [docs/tui.md](docs/tui.md#starting-agents-herdr-the-herdr-app-orca-or-claude-desktop).
 
 If you use [Herdr](https://herdr.dev), `capcom-tui` run inside a Herdr pane can start the skills for you: paste a Jira key to start a breakdown, or drag a card onto PLANNING or IMPLEMENTING. The repo is also a Herdr plugin with an `open` action, so a key such as `prefix+y` opens the board as an overlay. Install it with `herdr plugin install philals/mission-control-capcom` (it builds the binaries, so it needs Rust; read [Herdr's trust note](https://herdr.dev/docs/plugins/#trust-and-security) first, since a plugin is ordinary code), then bind a key as described in [docs/tui.md](docs/tui.md#herdr-plugin). Nothing here needs Herdr; outside it those features are simply off.
 
