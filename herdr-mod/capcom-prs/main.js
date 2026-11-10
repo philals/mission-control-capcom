@@ -161,6 +161,21 @@ export default class CapcomPrs extends View {
       )
       .child(
         div()
+          .id(`cp-${pr.url}`)
+          .text_size(12)
+          .text_color(t.dim)
+          .flex_none()
+          .px(2)
+          .tooltip("Copy the PR link")
+          .hover((s) => s.text_color(t.foreground))
+          .on_click((_e, cx) => {
+            cx.stop_propagation();
+            this.copyUrl(pr.url);
+          })
+          .child("⧉"),
+      )
+      .child(
+        div()
           .id(`gh-${pr.url}`)
           .text_size(12)
           .text_color(t.dim)
@@ -200,28 +215,6 @@ export default class CapcomPrs extends View {
     const CHECK = { failed: t.ansi1, running: t.ansi3, queued: t.dim, cancelled: t.dim };
     const url = pr.url;
     const rows = [];
-    const icon = (id, glyph, tip, color, fn) =>
-      div()
-        .id(`${id}-${url}`)
-        .text_size(13)
-        .text_color(color)
-        .px(2)
-        .cursor_pointer()
-        .tooltip(tip)
-        .hover((s) => s.text_color(t.foreground))
-        .on_click((_e, cx) => {
-          cx.stop_propagation();
-          fn();
-        })
-        .child(glyph);
-    rows.push(
-      h_flex()
-        .gap(8)
-        .items_center()
-        .justify_end()
-        .when(!!pr.agent, (el) => el.child(icon("dg", "🤖", this.hint(pr), pr.agent?.terminal ? t.accent : t.dim, () => this.go(pr))))
-        .child(icon("dc", "⧉", "Copy the PR link", t.dim, () => this.copyUrl(url))),
-    );
     rows.push(
       h_flex().gap(8).flex_wrap().children((pr.rail ?? []).filter((r) => r.text !== "ready" && r.text !== "merge").map((r) => div().text_size(11).text_color(RAIL[r.state] ?? t.dim).child(`${r.state === "done" ? "✓" : r.state === "wrong" ? "✗" : r.state === "going" ? "◐" : "○"} ${r.text}`))),
     );
@@ -291,7 +284,7 @@ export default class CapcomPrs extends View {
           .py(6)
           .items_center()
           .justify_between()
-          .child(div().text_size(12).font_semibold().text_color(red ? t.ansi1 : t.foreground).child(red ? `PRs · ${red} red` : "PRs"))
+          .child(div().text_size(12).font_semibold().text_color(red ? t.ansi1 : t.foreground).child(red ? `My PRs · ${red} red` : "My PRs"))
           .child(
             h_flex()
               .gap(8)
