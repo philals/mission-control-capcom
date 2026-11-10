@@ -98,7 +98,7 @@ export default class CapcomPrs extends View {
   }
 
   row(pr, t, merged) {
-    const dot = merged ? t.ansi5 : pr.ci === "red" ? t.ansi1 : pr.ci === "pending" ? t.ansi3 : pr.ci === "none" ? t.dim : t.ansi2;
+    const dot = merged ? t.ansi5 : pr.ci === "red" ? "#ff1f1f" : pr.ci === "pending" ? "#ffb000" : pr.ci === "none" ? t.dim : "#22c55e";
     const live = !!pr.agent?.terminal;
     const ready = !merged && !pr.draft;
     const bits = [];
@@ -124,7 +124,7 @@ export default class CapcomPrs extends View {
         this.expanded = this.expanded === pr.url ? null : pr.url;
         cx.notify();
       })
-      .child(div().w(8).h(8).rounded(4).flex_none().bg(dot))
+      .child(div().w(10).h(10).rounded(5).flex_none().bg(dot))
       .child(
         v_flex()
           .flex_1()
