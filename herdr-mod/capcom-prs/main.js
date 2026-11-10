@@ -1,6 +1,6 @@
 // Your open and recently merged PRs, from `capcom prs`: CI, automerge, and a click back to the agent.
 
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, run, theme } from "herdr";
 
@@ -172,7 +172,7 @@ export default class CapcomPrs extends View {
             cx.stop_propagation();
             this.copyUrl(pr.url);
           })
-          .child("⧉"),
+          .child(svg("mods/workspace-chrome/files.svg").size(13).flex_none()),
       )
       .child(
         div()
