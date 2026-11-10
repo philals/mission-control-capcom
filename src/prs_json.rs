@@ -5,6 +5,8 @@ use crate::herdr_app::{terminal_of, HerdrApp};
 use crate::prs::{GhSource, PrSource, PullRequest, SharedSource, Cadence};
 use crate::runs::{Fetcher, GhApi, RunSource};
 use crate::session::{Index, PrSession};
+use crate::settings::Settings;
+use crate::web::view::{autofix_on, autoreview_on, check_state, rail};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -33,12 +35,23 @@ fn ci_of(pr: &PullRequest) -> &'static str {
         "red"
     } else if c.running + c.queued > 0 {
         "pending"
+    } else if c.passed == 0 {
+        "none"
     } else {
         "green"
     }
 }
 
-fn open_pr(pr: &PullRequest, sessions: &[(String, PrSession)], terminals: &[(String, String)]) -> Value {
+/// Checks that are not passing (failed, running, queued), which is what a person wants to see.
+fn open_checks(pr: &PullRequest) -> Vec<Value> {
+    pr.ordered_checks()
+        .iter()
+        .filter(|k| !matches!(k.state, crate::prs::CheckState::Passed | crate::prs::CheckState::Skipped))
+        .map(|k| json!({ "label": k.label(), "state": check_state(k.state), "startedAt": k.started_at, "url": k.url }))
+        .collect()
+}
+
+fn open_pr(pr: &PullRequest, settings: &Settings, sessions: &[(String, PrSession)], terminals: &[(String, String)]) -> Value {
     let c = pr.counts();
     json!({
         "repo": pr.repo,
@@ -53,6 +66,12 @@ fn open_pr(pr: &PullRequest, sessions: &[(String, PrSession)], terminals: &[(Str
         "conflict": pr.feedback.merge == crate::prs::MergeState::Conflicting,
         "automerge": { "available": !pr.automerge_labels().is_empty(), "on": pr.automerge_on() },
         "blocker": pr.merge_blocker(),
+        "managed": pr.managed(),
+        "labels": pr.labels,
+        "rail": rail(pr),
+        "checks": open_checks(pr),
+        "autofix": autofix_on(settings, pr),
+        "autoreview": autoreview_on(settings, pr),
         "updatedAt": pr.updated_at,
         "agent": agent_of(&pr.url, sessions, terminals),
     })
@@ -73,6 +92,80 @@ fn terminals(config: Option<&std::path::Path>) -> Vec<(String, String)> {
 
 /// Merged PRs stay this long in the sidebar.
 pub const MERGED_KEEP_MINUTES: i64 = 30;
+
+fn load_settings() -> Settings {
+    crate::settings::default_path().map(|p| crate::settings::load(&p)).unwrap_or_default()
+}
+
+/// Auto-fix and auto-review are done by a poller inside `capcom web` (or `capcom-tui`); the sidebar can say
+/// whether `capcom web` is there to do them.
+fn autopilot_running() -> bool {
+    use std::net::{SocketAddr, TcpStream};
+    let addr = SocketAddr::from(([127, 0, 0, 1], 1969));
+    TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(200)).is_ok()
+}
+
+/// What `capcom pr-do` can change.
+pub fn act(action: &str, url: &str, on: Option<bool>, query: &str) -> Result<String, String> {
+    let on_or = |what: &str| on.ok_or_else(|| format!("{what} needs --on true or --on false"));
+    let path = crate::settings::default_path();
+    let change = |f: &dyn Fn(&mut Settings)| -> Result<(), String> {
+        let path = path.as_ref().ok_or("no home folder for the settings")?;
+        let mut s = crate::settings::load(path);
+        f(&mut s);
+        crate::settings::save(path, &s).map_err(|e| format!("{e:#}"))
+    };
+    match action {
+        "setting-autofix" => {
+            let on = on_or("autofix")?;
+            change(&|s| s.autofix = on)?;
+            Ok(format!("auto-fix is {} by default", if on { "on" } else { "off" }))
+        }
+        "setting-autoreview" => {
+            let on = on_or("autoreview")?;
+            change(&|s| s.autocopilot = on)?;
+            Ok(format!("auto-review is {} by default", if on { "on" } else { "off" }))
+        }
+        "autofix" | "autoreview" => {
+            let on = on_or(action)?;
+            let fix = action == "autofix";
+            change(&|s| {
+                let list = if fix { &mut s.autofix_prs } else { &mut s.autocopilot_prs };
+                list.retain(|(u, _)| !same_url(u, url));
+                list.push((url.to_string(), on));
+            })?;
+            if on {
+                if let Some(dir) = crate::cache::Cache::default_dir() {
+                    let store = crate::fixstate::Store::new(dir);
+                    if fix { store.clear(url) } else { store.forget_copilot(url) }
+                }
+            }
+            Ok(format!("{action} is {} for this PR", if on { "on" } else { "off" }))
+        }
+        "ready" | "draft" => {
+            crate::actions::gh_pr_ready(url, action == "draft")?;
+            Ok(if action == "draft" { "it is a draft again".into() } else { "it is ready for review".into() })
+        }
+        "automerge" => {
+            let on = on_or("automerge")?;
+            let source = GhSource::new(query.to_string());
+            let prs = source.fetch().map_err(|e| format!("{e:#}"))?;
+            let pr = prs.iter().find(|p| same_url(&p.url, url) && p.managed() && !p.automerge_labels().is_empty())
+                .ok_or("automerge needs your own PR in a repo whose merge bot is set up (a .kodiak.toml)")?;
+            if on {
+                let first = &pr.automerge_labels()[0];
+                crate::actions::gh_set_label(&pr.repo, pr.number, first, true)?;
+                Ok(format!("automerge is on (added \"{first}\")"))
+            } else {
+                for l in pr.automerge_labels().iter().filter(|l| pr.has_label(l)) {
+                    crate::actions::gh_set_label(&pr.repo, pr.number, l, false)?;
+                }
+                Ok("automerge is off".into())
+            }
+        }
+        _ => Err(format!("unknown action {action:?}")),
+    }
+}
 
 pub fn build(query: &str, force: bool) -> Value {
     let cache_dir = crate::cache::Cache::default_dir();
@@ -103,10 +196,11 @@ pub fn build(query: &str, force: bool) -> Value {
         _ => Vec::new(),
     };
     let terminals = terminals(config.as_deref());
+    let settings = load_settings();
 
     let mut errors = Vec::new();
     let mut open = match &opened {
-        Ok(prs) => prs.iter().map(|p| (p, open_pr(p, &sessions, &terminals))).collect::<Vec<_>>(),
+        Ok(prs) => prs.iter().map(|p| (p, open_pr(p, &settings, &sessions, &terminals))).collect::<Vec<_>>(),
         Err(e) => {
             errors.push(format!("open PRs: {e:#}"));
             Vec::new()
@@ -141,6 +235,8 @@ pub fn build(query: &str, force: bool) -> Value {
         "at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         "open": open.into_iter().map(|(_, v)| v).collect::<Vec<_>>(),
         "merged": merged,
+        "settings": { "autofix": settings.autofix, "autoreview": settings.autocopilot },
+        "autopilot": autopilot_running(),
         "errors": errors,
     })
 }
