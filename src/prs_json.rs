@@ -22,6 +22,11 @@ fn agent_of(url: &str, sessions: &[(String, PrSession)], terminals: &[(String, S
     json!({ "session": made.session, "cwd": made.cwd, "terminal": terminal })
 }
 
+/// Whether a merge at `merged_at` (RFC 3339) is still within the time merged PRs are kept.
+fn merged_recently(merged_at: &str, now: chrono::DateTime<chrono::Utc>) -> bool {
+    chrono::DateTime::parse_from_rfc3339(merged_at).is_ok_and(|t| now - t.with_timezone(&chrono::Utc) < chrono::Duration::minutes(MERGED_KEEP_MINUTES))
+}
+
 fn ci_of(pr: &PullRequest) -> &'static str {
     let c = pr.counts();
     if pr.is_red() {
@@ -65,6 +70,9 @@ fn terminals(config: Option<&std::path::Path>) -> Vec<(String, String)> {
         .filter_map(|a| Some((a.session?, terminal_of(&a.pane)?.to_string())))
         .collect()
 }
+
+/// Merged PRs stay this long in the sidebar.
+pub const MERGED_KEEP_MINUTES: i64 = 30;
 
 pub fn build(query: &str, force: bool) -> Value {
     let cache_dir = crate::cache::Cache::default_dir();
@@ -114,6 +122,7 @@ pub fn build(query: &str, force: bool) -> Value {
         Ok(batch) => batch
             .runs
             .iter()
+            .filter(|r| merged_recently(&r.updated_at, chrono::Utc::now()))
             .map(|r| json!({
                 "repo": r.repo,
                 "number": r.id,
@@ -160,6 +169,14 @@ mod tests {
         let a = agent_of("https://github.com/acme/widgets/pull/7", &sessions, &[]);
         assert_eq!(a["session"], "s1");
         assert!(a["terminal"].is_null());
+    }
+
+    #[test]
+    fn a_merged_pr_drops_off_after_thirty_minutes() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-11-10T03:00:00Z").unwrap().with_timezone(&chrono::Utc);
+        assert!(merged_recently("2026-11-10T02:31:00Z", now));
+        assert!(!merged_recently("2026-11-10T02:29:00Z", now));
+        assert!(!merged_recently("not a time", now));
     }
 
     #[test]
