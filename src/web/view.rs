@@ -9,7 +9,7 @@ pub(super) fn same_url(a: &str, b: &str) -> bool {
     a.trim_end_matches('/').eq_ignore_ascii_case(b.trim_end_matches('/'))
 }
 
-pub(super) fn check_state(state: CheckState) -> &'static str {
+pub(crate) fn check_state(state: CheckState) -> &'static str {
     match state {
         CheckState::Queued => "queued",
         CheckState::Running => "running",
@@ -21,7 +21,7 @@ pub(super) fn check_state(state: CheckState) -> &'static str {
 }
 
 /// A step on a PR's way to a merge: ready, CI, Copilot, its conversations, approval, the merge.
-pub(super) fn rail(pr: &PullRequest) -> Vec<Value> {
+pub(crate) fn rail(pr: &PullRequest) -> Vec<Value> {
     let c = pr.counts();
     let failed = pr.real_failures().len();
     let step = |state: &str, text: String| json!({ "state": state, "text": text });
@@ -87,11 +87,11 @@ fn effective(url: &str, per_pr: &[(String, bool)], default: bool, pasted: bool) 
     per_pr.iter().find(|(u, _)| same_url(u, url)).map_or(default && !pasted, |(_, on)| *on)
 }
 
-pub(super) fn autofix_on(settings: &Settings, pr: &PullRequest) -> bool {
+pub(crate) fn autofix_on(settings: &Settings, pr: &PullRequest) -> bool {
     effective(&pr.url, &settings.autofix_prs, settings.autofix, pr.feedback.pasted)
 }
 
-pub(super) fn autoreview_on(settings: &Settings, pr: &PullRequest) -> bool {
+pub(crate) fn autoreview_on(settings: &Settings, pr: &PullRequest) -> bool {
     effective(&pr.url, &settings.autocopilot_prs, settings.autocopilot, pr.feedback.pasted)
 }
 

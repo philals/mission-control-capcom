@@ -516,7 +516,7 @@ mod tests {
             Ok(match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
                 ["worktree", "list", ..] => json!({"ok": true, "result": {"worktrees": [{"path": "/w/app"}, {"path": known}]}}),
                 ["worktree", "ps", ..] => ps.clone(),
-                ["terminal", "list", ..] => json!({"ok": true, "result": {"terminals": [{"handle": "term_9", "recordedPaneKey": "t:1"}]}}),
+                ["terminal", "list", ..] => json!({"ok": true, "result": {"terminals": [{"handle": "term_9", "tabId": "t", "leafId": "1"}]}}),
                 ["agent", "launch", ..] => json!({"ok": true, "result": {"outcome": {"handle": "term_9"}}}),
                 ["terminal", "create", ..] => json!({"ok": true, "result": {"terminal": {"handle": "term_7"}}}),
                 _ => json!({"ok": true, "result": {}}),

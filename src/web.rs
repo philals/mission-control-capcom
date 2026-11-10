@@ -26,7 +26,7 @@ mod runs_poll;
 mod states;
 #[cfg(test)]
 mod tests_more;
-mod view;
+pub(crate) mod view;
 pub use engine::Tools;
 use engine::Engine;
 use view::*;
