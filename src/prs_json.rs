@@ -2,6 +2,7 @@
 //! It reads GitHub (through the shared cache, so it can be polled often), the sessions that made each PR
 //! and the Herdr terminals running them, and needs no `capcom web`.
 use crate::herdr_app::{terminal_of, HerdrApp};
+use crate::durations::Durations;
 use crate::prs::{GhSource, PrSource, PullRequest, SharedSource, Cadence};
 use crate::runs::{Fetcher, GhApi, RunSource};
 use crate::session::{Index, PrSession};
@@ -56,16 +57,24 @@ fn open_checks(pr: &PullRequest) -> Vec<Value> {
         .collect()
 }
 
-/// One state per check that says something about the code, in a steady order, for the progress strip.
-fn strip(pr: &PullRequest) -> Vec<&'static str> {
+/// One entry per check that says something about the code, in a steady order, for the progress strip.
+/// `done` is how far a running check is through its usual time (0 to 1) when capcom has seen it pass before.
+fn strip(pr: &PullRequest, durations: &Durations) -> Vec<Value> {
+    let now = chrono::Utc::now();
     pr.checks
         .iter()
         .filter(|k| !matches!(k.state, crate::prs::CheckState::Skipped | crate::prs::CheckState::Cancelled))
-        .map(|k| check_state(k.state))
+        .map(|k| {
+            let done = (k.state == crate::prs::CheckState::Running)
+                .then(|| Some(crate::prs::check_seconds(k, now)? as f64 / durations.estimate(&pr.repo, k)?.max(1) as f64))
+                .flatten()
+                .map(|f| (f.clamp(0.0, 0.95) * 100.0).round() / 100.0);
+            json!({ "state": check_state(k.state), "group": k.workflow, "label": k.label(), "done": done })
+        })
         .collect()
 }
 
-fn open_pr(pr: &PullRequest, settings: &Settings, sessions: &[(String, PrSession)], terminals: &[(String, String)]) -> Value {
+fn open_pr(pr: &PullRequest, settings: &Settings, durations: &Durations, sessions: &[(String, PrSession)], terminals: &[(String, String)]) -> Value {
     let c = pr.counts();
     json!({
         "repo": pr.repo,
@@ -85,7 +94,7 @@ fn open_pr(pr: &PullRequest, settings: &Settings, sessions: &[(String, PrSession
         "labels": pr.labels,
         "rail": rail(pr),
         "checks": open_checks(pr),
-        "strip": strip(pr),
+        "strip": strip(pr, durations),
         "autofix": autofix_on(settings, pr),
         "autoreview": autoreview_on(settings, pr),
         "updatedAt": pr.updated_at,
@@ -215,10 +224,11 @@ pub fn build(query: &str, force: bool) -> Value {
     };
     let terminals = terminals(config.as_deref());
     let settings = load_settings();
+    let durations = cache_dir.as_ref().map(|d| Durations::load(&d.join("check-durations.json"))).unwrap_or_default();
 
     let mut errors = Vec::new();
     let mut open = match &opened {
-        Ok(prs) => prs.iter().map(|p| (p, open_pr(p, &settings, &sessions, &terminals))).collect::<Vec<_>>(),
+        Ok(prs) => prs.iter().map(|p| (p, open_pr(p, &settings, &durations, &sessions, &terminals))).collect::<Vec<_>>(),
         Err(e) => {
             errors.push(format!("open PRs: {e:#}"));
             Vec::new()

@@ -5,11 +5,12 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 home="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
-mod="$home/mods/capcom-prs"
-
-mkdir -p "$mod"
-cp herdr-mod/capcom-prs/main.js herdr-mod/capcom-prs/mod.json "$mod/"
-herdr-app check "$mod"
+for name in capcom-prs capcom-agents; do
+  mod="$home/mods/$name"
+  mkdir -p "$mod"
+  cp herdr-mod/$name/*.js herdr-mod/$name/mod.json herdr-mod/shared/*.js "$mod/"
+  herdr-app check "$mod"
+done
 
 if [ ! -f "$home/layouts/capcom.json" ]; then
   herdr-app do layout.clone --name main --as capcom >/dev/null
@@ -27,6 +28,11 @@ def find(node, id):
         found = find(child, id)
         if found:
             return found
+
+agents = find(layout, "agents")
+if agents and (agents.get("content") or {}).get("mod") == "agents":
+    agents["content"]["mod"] = "capcom-agents"
+    json.dump(layout, open(path, "w"), indent=2)
 
 lists = find(layout, "sidebar-lists")
 if lists is None:

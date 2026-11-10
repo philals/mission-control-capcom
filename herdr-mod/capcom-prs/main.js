@@ -2,10 +2,11 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, run, theme } from "herdr";
+import { exec, run, theme, shared, setShared } from "herdr";
+import { strip, stripCount, hasRunning } from "./strip.js";
+import { SH, capcom, openUrl, short, dotColor, prDo, pill, prDetails } from "./pr-details.js";
 
 const EVERY_MS = 30000;
-const SH = ["sh", "-c", 'PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"; exec "$@"', "sh"];
 
 function ago(iso, now) {
   const m = Math.floor((now - Date.parse(iso)) / 60000);
@@ -16,8 +17,6 @@ function ago(iso, now) {
   return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
 }
 
-const short = (repo) => repo.split("/").pop();
-
 export default class CapcomPrs extends View {
   init(_props, cx) {
     this.data = null;
@@ -26,8 +25,15 @@ export default class CapcomPrs extends View {
     this.now = Date.now();
     this.expanded = null;
     this.showSettings = false;
+    this.asked = shared("capcom.refresh");
     this.message = null;
+    this.pulse = true;
     cx.timer.every(EVERY_MS, (cx) => this.refresh(cx, false));
+    cx.timer.every(700, (cx) => {
+      if (!hasRunning(this.data?.open ?? [])) return;
+      this.pulse = !this.pulse;
+      cx.notify();
+    });
     this.refresh(cx, false);
   }
 
@@ -41,6 +47,7 @@ export default class CapcomPrs extends View {
         if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || `capcom exited ${r.code}`);
         this.data = JSON.parse(r.stdout);
         this.error = this.data.errors?.length ? this.data.errors.join("; ") : null;
+        setShared("capcom.prs", this.data);
       } catch (e) {
         this.error = String(e?.message ?? e);
       }
@@ -51,29 +58,22 @@ export default class CapcomPrs extends View {
   }
 
   capcom(args, options) {
-    return exec(SH[0], [...SH.slice(1), "capcom", ...args], options);
+    return capcom(args, options);
   }
 
   // `capcom pr-do`: change a PR or a setting, say what happened, then look again.
   change(cx, action, url, on) {
-    const args = ["pr-do", action, ...(url ? ["--url", url] : []), ...(on === undefined ? [] : ["--on", String(on)])];
     this.message = { text: "…", ok: true };
     cx.notify();
     cx.spawn(async (cx) => {
-      try {
-        const r = await this.capcom(args, { timeout: 60000 });
-        const out = JSON.parse(r.stdout);
-        this.message = { text: out.message, ok: out.ok };
-      } catch (e) {
-        this.message = { text: String(e?.message ?? e), ok: false };
-      }
+      this.message = await prDo(action, url, on);
       this.loading = false;
       this.refresh(cx, true);
     });
   }
 
   openUrl(url) {
-    exec(SH[0], [...SH.slice(1), "sh", "-c", 'xdg-open "$1" 2>/dev/null || open "$1"', "sh", url]).catch(() => {});
+    openUrl(url);
   }
 
   copyUrl(url) {
@@ -98,7 +98,7 @@ export default class CapcomPrs extends View {
   }
 
   row(pr, t, merged) {
-    const dot = merged ? t.ansi5 : pr.ci === "red" ? "#ff1f1f" : pr.ci === "pending" ? "#ffb000" : pr.ci === "none" ? t.dim : "#22c55e";
+    const dot = dotColor(pr, merged, t);
     const live = !!pr.agent?.terminal;
     const ready = !merged && !pr.draft;
     const bits = [];
@@ -142,8 +142,15 @@ export default class CapcomPrs extends View {
                 .child(pr.title),
             ),
           )
-          .child(div().text_size(11).text_color(t.muted).truncate().child([`${short(pr.repo)}#${pr.number}`, ...bits].join(" · ")))
-          .when(!merged && !!pr.strip?.length, (el) => el.child(this.strip(pr.strip, t))),
+          .child(
+            h_flex()
+              .gap(8)
+              .justify_between()
+              .child(div().text_size(11).text_color(t.muted).truncate().child([`${short(pr.repo)}#${pr.number}`, ...bits].join(" · ")))
+              .when(!merged && !!pr.strip?.length, (el) => el.child(div().text_size(10).flex_none().text_color(pr.ci === "red" ? t.ansi1 : t.muted).child(stripCount(pr.strip)))),
+          )
+          .when(!merged && !!pr.strip?.length, (el) => el.child(strip(pr.strip, t, this.pulse)))
+          .when(!merged && pr.ci === "red" && !!pr.failing?.length, (el) => el.child(div().text_size(11).text_color(t.ansi1).truncate().child(`✗ ${pr.failing[0]}`))),
       )
       .when(!merged && pr.automerge?.on, (el) => el.child(div().text_size(10).text_color(t.ansi2).flex_none().child("auto")))
       .child(
@@ -194,87 +201,8 @@ export default class CapcomPrs extends View {
     return v_flex().child(line).child(this.details(pr, t));
   }
 
-  // A thin strip with a segment per check: green passed, red failed, amber running, grey waiting.
-  strip(states, t) {
-    const COLOUR = { passed: "#22c55e", failed: "#ff1f1f", running: "#ffb000" };
-    return h_flex()
-      .gap(2)
-      .h(3)
-      .mt(2)
-      .children(states.map((s) => div().flex_1().h(3).rounded(1).bg(COLOUR[s] ?? t.border)));
-  }
-
-  // A tick box: ☑ or ☐ and its label.
-  pill(id, label, on, t, handler, tip) {
-    return h_flex()
-      .id(id)
-      .gap(4)
-      .items_center()
-      .py(2)
-      .text_size(12)
-      .cursor_pointer()
-      .text_color(on ? t.foreground : t.muted)
-      .hover((s) => s.text_color(t.foreground))
-      .tooltip(tip)
-      .on_click((_e, cx) => handler(cx))
-      .child(div().text_color(on ? t.ansi2 : t.dim).child(on ? "☑" : "☐"))
-      .child(label);
-  }
-
   details(pr, t) {
-    const RAIL = { done: t.ansi2, going: t.ansi3, wrong: t.ansi1, pending: t.dim };
-    const CHECK = { failed: t.ansi1, running: t.ansi3, queued: t.dim, cancelled: t.dim };
-    const url = pr.url;
-    const rows = [];
-    rows.push(
-      h_flex().gap(8).flex_wrap().children((pr.rail ?? []).filter((r) => r.text !== "ready" && r.text !== "merge").map((r) => div().text_size(11).text_color(RAIL[r.state] ?? t.dim).child(`${r.state === "done" ? "✓" : r.state === "wrong" ? "✗" : r.state === "going" ? "◐" : "○"} ${r.text}`))),
-    );
-    if (pr.blocker) rows.push(div().text_size(11).text_color(t.muted).child(`In the way: ${pr.blocker}`));
-    for (const k of (pr.checks ?? []).slice(0, 6)) {
-      rows.push(
-        div()
-          .id(`ck-${k.url ?? k.label}`)
-          .text_size(11)
-          .text_color(CHECK[k.state] ?? t.muted)
-          .truncate()
-          .cursor_pointer()
-          .hover((s) => s.text_color(t.foreground))
-          .tooltip(`${k.state}: ${k.label}`)
-          .on_click(() => k.url && this.openUrl(k.url))
-          .child(`${k.state} · ${k.label.split(" / ").slice(-2).join(" / ")}`),
-      );
-    }
-    if ((pr.checks ?? []).length > 6) rows.push(div().text_size(11).text_color(t.dim).child(`…and ${pr.checks.length - 6} more`));
-    const meta = [pr.branch, ...(pr.labels ?? [])].filter(Boolean).join(" · ");
-    if (meta) rows.push(div().text_size(11).text_color(t.dim).truncate().child(meta));
-    if (pr.managed) {
-      rows.push(
-        h_flex()
-          .gap(10)
-          .flex_wrap()
-          .when(pr.automerge?.available, (el) => el.child(this.pill(`am-${url}`, "automerge", pr.automerge.on, t, (cx) => this.change(cx, "automerge", url, !pr.automerge.on), "Add or remove the merge bot's automerge label")))
-          .when(pr.autoupdate?.available, (el) => el.child(this.pill(`au-${url}`, pr.autoupdate.always ? "auto-update (always)" : "auto-update", pr.autoupdate.on || pr.autoupdate.always, t, (cx) => pr.autoupdate.always ? null : this.change(cx, "autoupdate", url, !pr.autoupdate.on), pr.autoupdate.always ? "The merge bot updates every PR in this repo" : "Add or remove the merge bot's autoupdate label")))
-          .child(this.pill(`af-${url}`, "auto-fix", pr.autofix, t, (cx) => this.change(cx, "autofix", url, !pr.autofix), "Let capcom fix failing checks and conflicts on this PR"))
-          .child(this.pill(`ar-${url}`, "auto-review", pr.autoreview, t, (cx) => this.change(cx, "autoreview", url, !pr.autoreview), "Let capcom request and address Copilot's review on this PR"))
-          .child(
-            div()
-              .id(`dr-${url}`)
-              .px(8)
-              .py(2)
-              .rounded(10)
-              .text_size(11)
-              .cursor_pointer()
-              .border(1)
-              .border_color(t.border)
-              .text_color(t.muted)
-              .hover((s) => s.bg(t.hover))
-              .tooltip(pr.draft ? "Mark ready for review" : "Turn back into a draft")
-              .on_click((_e, cx) => this.change(cx, pr.draft ? "ready" : "draft", url))
-              .child(pr.draft ? "Mark ready" : "Make draft"),
-          ),
-      );
-    }
-    return v_flex().gap(4).pl(26).pr(10).pb(8).children(rows);
+    return prDetails(pr, t, (cx, action, url, on) => this.change(cx, action, url, on));
   }
 
   section(label, count, t) {
@@ -283,6 +211,11 @@ export default class CapcomPrs extends View {
 
   render(cx) {
     const t = theme();
+    const want = shared("capcom.refresh");
+    if (want && want !== this.asked) {
+      this.asked = want;
+      this.refresh(cx, true);
+    }
     const d = this.data;
     const open = d?.open ?? [];
     const merged = d?.merged ?? [];
@@ -331,8 +264,8 @@ export default class CapcomPrs extends View {
             .child(
               h_flex()
                 .gap(6)
-                .child(this.pill("def-af", "auto-fix", d.settings?.autofix, t, (cx) => this.change(cx, "setting-autofix", "", !d.settings?.autofix), "Default for PRs with no choice of their own"))
-                .child(this.pill("def-ar", "auto-review", d.settings?.autoreview, t, (cx) => this.change(cx, "setting-autoreview", "", !d.settings?.autoreview), "Default for PRs with no choice of their own")),
+                .child(pill("def-af", "auto-fix", d.settings?.autofix, t, (cx) => this.change(cx, "setting-autofix", "", !d.settings?.autofix), "Default for PRs with no choice of their own"))
+                .child(pill("def-ar", "auto-review", d.settings?.autoreview, t, (cx) => this.change(cx, "setting-autoreview", "", !d.settings?.autoreview), "Default for PRs with no choice of their own")),
             )
             .when(d && !d.autopilot, (el2) => el2.child(div().text_size(11).text_color(t.ansi3).child("capcom web is not running, so auto-fix and auto-review do nothing yet"))),
         ),
