@@ -142,7 +142,8 @@ export default class CapcomPrs extends View {
                 .child(pr.title),
             ),
           )
-          .child(div().text_size(11).text_color(t.muted).truncate().child([`${short(pr.repo)}#${pr.number}`, ...bits].join(" · "))),
+          .child(div().text_size(11).text_color(t.muted).truncate().child([`${short(pr.repo)}#${pr.number}`, ...bits].join(" · ")))
+          .when(!merged && !!pr.strip?.length, (el) => el.child(this.strip(pr.strip, t))),
       )
       .when(!merged && pr.automerge?.on, (el) => el.child(div().text_size(10).text_color(t.ansi2).flex_none().child("auto")))
       .child(
@@ -191,6 +192,16 @@ export default class CapcomPrs extends View {
       );
     if (merged || this.expanded !== pr.url) return line;
     return v_flex().child(line).child(this.details(pr, t));
+  }
+
+  // A thin strip with a segment per check: green passed, red failed, amber running, grey waiting.
+  strip(states, t) {
+    const COLOUR = { passed: "#22c55e", failed: "#ff1f1f", running: "#ffb000" };
+    return h_flex()
+      .gap(2)
+      .h(3)
+      .mt(2)
+      .children(states.map((s) => div().flex_1().h(3).rounded(1).bg(COLOUR[s] ?? t.border)));
   }
 
   // A tick box: ☑ or ☐ and its label.

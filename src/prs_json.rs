@@ -56,6 +56,15 @@ fn open_checks(pr: &PullRequest) -> Vec<Value> {
         .collect()
 }
 
+/// One state per check that says something about the code, in a steady order, for the progress strip.
+fn strip(pr: &PullRequest) -> Vec<&'static str> {
+    pr.checks
+        .iter()
+        .filter(|k| !matches!(k.state, crate::prs::CheckState::Skipped | crate::prs::CheckState::Cancelled))
+        .map(|k| check_state(k.state))
+        .collect()
+}
+
 fn open_pr(pr: &PullRequest, settings: &Settings, sessions: &[(String, PrSession)], terminals: &[(String, String)]) -> Value {
     let c = pr.counts();
     json!({
@@ -76,6 +85,7 @@ fn open_pr(pr: &PullRequest, settings: &Settings, sessions: &[(String, PrSession
         "labels": pr.labels,
         "rail": rail(pr),
         "checks": open_checks(pr),
+        "strip": strip(pr),
         "autofix": autofix_on(settings, pr),
         "autoreview": autoreview_on(settings, pr),
         "updatedAt": pr.updated_at,
