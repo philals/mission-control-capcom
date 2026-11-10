@@ -18,6 +18,7 @@ pub mod orca;
 pub mod ops;
 pub mod pr_state;
 pub mod prs;
+pub mod prs_json;
 pub mod refresh;
 pub mod rules;
 pub mod runs;

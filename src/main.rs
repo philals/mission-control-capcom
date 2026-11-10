@@ -74,6 +74,15 @@ enum Cmd {
         #[arg(long)]
         no_runs: bool,
     },
+    /// Print your open and recently merged PRs as JSON (CI, automerge, and the agent that made each), for the Herdr app's PR sidebar
+    Prs {
+        /// GitHub search for the open PRs (@me is resolved by GitHub)
+        #[arg(long, env = "CAPCOM_PR_QUERY", default_value = capcom::prs::DEFAULT_QUERY)]
+        query: String,
+        /// Ask GitHub again even if the shared cache is recent
+        #[arg(long)]
+        force: bool,
+    },
     /// Print the stories folder in use (from --root or CAPCOM_ROOT)
     Root,
     /// List every story with its title and task count
@@ -295,6 +304,9 @@ fn main() -> Result<()> {
         let note = capcom::notes::write(&dir, &session, capcom::notes::Update { task, progress, waiting, needs_you, next, cwd }, &now)?;
         return print(&serde_json::to_value(note)?);
     }
+    if let Cmd::Prs { query, force } = &cli.cmd {
+        return print(&capcom::prs_json::build(query, *force));
+    }
     let root = cli.root.ok_or_else(|| {
         anyhow::anyhow!("no stories folder: set CAPCOM_ROOT or pass --root DIR")
     })?;
@@ -304,7 +316,7 @@ fn main() -> Result<()> {
             ops::init_story(root, &key, &title, jira_url.as_deref())?;
             print(&json!({ "key": key, "dir": store::story_dir(root, &key)? }))
         }
-        Cmd::Note { .. } => unreachable!("handled before the root is needed"),
+        Cmd::Note { .. } | Cmd::Prs { .. } => unreachable!("handled before the root is needed"),
         Cmd::Web { port, pr_query, no_prs, browser, workdir, deploy_repos, no_runs } => {
             use capcom::{cache, fixstate, prs, runs, settings, web};
             use std::sync::Arc;
