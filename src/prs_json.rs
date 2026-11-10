@@ -43,6 +43,11 @@ fn ci_of(pr: &PullRequest) -> &'static str {
 }
 
 /// Checks that are not passing (failed, running, queued), which is what a person wants to see.
+/// The labels that make the repo's merge bot keep this PR's branch up to date (none without its config).
+fn autoupdate_labels(pr: &PullRequest) -> &[String] {
+    pr.feedback.kodiak.as_ref().map_or(&[], |k| k.autoupdate.as_slice())
+}
+
 fn open_checks(pr: &PullRequest) -> Vec<Value> {
     pr.ordered_checks()
         .iter()
@@ -65,6 +70,7 @@ fn open_pr(pr: &PullRequest, settings: &Settings, sessions: &[(String, PrSession
         "failing": pr.real_failures().iter().map(|k| k.label()).collect::<Vec<_>>(),
         "conflict": pr.feedback.merge == crate::prs::MergeState::Conflicting,
         "automerge": { "available": !pr.automerge_labels().is_empty(), "on": pr.automerge_on() },
+        "autoupdate": { "available": !autoupdate_labels(pr).is_empty(), "on": autoupdate_labels(pr).iter().any(|l| pr.has_label(l)), "always": pr.feedback.kodiak.as_ref().is_some_and(|k| k.update_always) },
         "blocker": pr.merge_blocker(),
         "managed": pr.managed(),
         "labels": pr.labels,
@@ -146,21 +152,23 @@ pub fn act(action: &str, url: &str, on: Option<bool>, query: &str) -> Result<Str
             crate::actions::gh_pr_ready(url, action == "draft")?;
             Ok(if action == "draft" { "it is a draft again".into() } else { "it is ready for review".into() })
         }
-        "automerge" => {
-            let on = on_or("automerge")?;
+        "automerge" | "autoupdate" => {
+            let on = on_or(action)?;
             let source = GhSource::new(query.to_string());
             let prs = source.fetch().map_err(|e| format!("{e:#}"))?;
-            let pr = prs.iter().find(|p| same_url(&p.url, url) && p.managed() && !p.automerge_labels().is_empty())
-                .ok_or("automerge needs your own PR in a repo whose merge bot is set up (a .kodiak.toml)")?;
+            let pr = prs.iter().find(|p| same_url(&p.url, url) && p.managed()).ok_or("only your own PRs can be changed")?;
+            let labels: Vec<String> = if action == "automerge" { pr.automerge_labels().to_vec() } else { autoupdate_labels(pr).to_vec() };
+            if labels.is_empty() {
+                return Err(format!("this repo's merge bot has no {action} label (a .kodiak.toml)"));
+            }
             if on {
-                let first = &pr.automerge_labels()[0];
-                crate::actions::gh_set_label(&pr.repo, pr.number, first, true)?;
-                Ok(format!("automerge is on (added \"{first}\")"))
+                crate::actions::gh_set_label(&pr.repo, pr.number, &labels[0], true)?;
+                Ok(format!("{action} is on (added \"{}\")", labels[0]))
             } else {
-                for l in pr.automerge_labels().iter().filter(|l| pr.has_label(l)) {
+                for l in labels.iter().filter(|l| pr.has_label(l)) {
                     crate::actions::gh_set_label(&pr.repo, pr.number, l, false)?;
                 }
-                Ok("automerge is off".into())
+                Ok(format!("{action} is off"))
             }
         }
         _ => Err(format!("unknown action {action:?}")),
