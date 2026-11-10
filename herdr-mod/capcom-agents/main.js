@@ -179,7 +179,7 @@ export default class Agents extends View {
 
   // One icon per PR this agent sent, coloured by CI (purple once merged). Hover for My PRs' details.
   prIcons(t, a) {
-    const mine = this.prsByAgent.get(a.address) ?? [];
+    const mine = [...(this.prsByAgent.get(a.address) ?? [])].sort((x, y) => x.merged - y.merged);
     const MAX = 4;
     return h_flex()
       .gap(2)
