@@ -3468,7 +3468,7 @@ mod tests {
         pr.review = review;
         pr.checks = vec![check("build", CheckState::Passed)];
         pr.labels = labels.iter().map(|l| l.to_string()).collect();
-        pr.feedback.kodiak = Some(crate::kodiak::Kodiak { automerge: vec!["automerge 🚀".into(), "automerge".into()], autoupdate: vec!["autoupdate".into()], update_always: false });
+        pr.feedback.kodiak = Some(capcom::kodiak::Kodiak { automerge: vec!["automerge 🚀".into(), "automerge".into()], autoupdate: vec!["autoupdate".into()], update_always: false });
         pr
     }
 

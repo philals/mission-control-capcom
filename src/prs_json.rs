@@ -194,6 +194,12 @@ pub fn act(action: &str, url: &str, on: Option<bool>, query: &str) -> Result<Str
     }
 }
 
+/// The same document from invented PRs, agents and settings (`capcom prs --demo`).
+pub fn build_demo() -> Value {
+    let terminals: Vec<(String, String)> = crate::demo::agent_specs().iter().filter_map(|a| Some((a.session.to_string(), crate::demo::terminal_of(a.session)?))).collect();
+    assemble(Ok(crate::demo::pull_requests()), Ok(crate::demo::merged()), crate::demo::sessions(), terminals, Settings::default(), Durations::default(), true)
+}
+
 pub fn build(query: &str, force: bool) -> Value {
     let cache_dir = crate::cache::Cache::default_dir();
     let shared = || cache_dir.clone().and_then(crate::cache::Cache::open);
@@ -226,6 +232,18 @@ pub fn build(query: &str, force: bool) -> Value {
     let settings = load_settings();
     let durations = cache_dir.as_ref().map(|d| Durations::load(&d.join("check-durations.json"))).unwrap_or_default();
 
+    assemble(opened, merged, sessions, terminals, settings, durations, autopilot_running())
+}
+
+fn assemble(
+    opened: Result<Vec<PullRequest>>,
+    merged: Result<crate::runs::Batch>,
+    sessions: Vec<(String, PrSession)>,
+    terminals: Vec<(String, String)>,
+    settings: Settings,
+    durations: Durations,
+    autopilot: bool,
+) -> Value {
     let mut errors = Vec::new();
     let mut open = match &opened {
         Ok(prs) => prs.iter().map(|p| (p, open_pr(p, &settings, &durations, &sessions, &terminals))).collect::<Vec<_>>(),
@@ -264,7 +282,7 @@ pub fn build(query: &str, force: bool) -> Value {
         "open": open.into_iter().map(|(_, v)| v).collect::<Vec<_>>(),
         "merged": merged,
         "settings": { "autofix": settings.autofix, "autoreview": settings.autocopilot },
-        "autopilot": autopilot_running(),
+        "autopilot": autopilot,
         "errors": errors,
     })
 }

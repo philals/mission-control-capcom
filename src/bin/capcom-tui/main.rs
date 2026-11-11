@@ -1,4 +1,4 @@
-use capcom::{agents, attention, cache, durations, finish, fixstate, kodiak, pr_state, prs, runs, settings, taskdoc};
+use capcom::{agents, attention, cache, durations, finish, fixstate, pr_state, prs, runs, settings, taskdoc};
 mod app;
 mod demo;
 mod herdr;

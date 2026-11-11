@@ -73,6 +73,9 @@ enum Cmd {
         /// Do not fetch your manual workflow runs from GitHub
         #[arg(long)]
         no_runs: bool,
+        /// Show invented stories, PRs, runs and agents: reads and changes nothing (for pictures)
+        #[arg(long)]
+        demo: bool,
     },
     /// Print your open and recently merged PRs as JSON (CI, automerge, and the agent that made each), for the Herdr app's PR sidebar
     Prs {
@@ -82,6 +85,9 @@ enum Cmd {
         /// Ask GitHub again even if the shared cache is recent
         #[arg(long)]
         force: bool,
+        /// Print invented PRs and agents instead of reading GitHub (for pictures)
+        #[arg(long, env = "CAPCOM_DEMO", hide = true)]
+        demo: bool,
     },
     /// Change one of your PRs from the Herdr app's PR sidebar: automerge, autofix, autoreview, ready, draft, or
     /// setting-autofix / setting-autoreview for the defaults. Prints `{ok, message}`.
@@ -316,8 +322,8 @@ fn main() -> Result<()> {
         let note = capcom::notes::write(&dir, &session, capcom::notes::Update { task, progress, waiting, needs_you, next, cwd }, &now)?;
         return print(&serde_json::to_value(note)?);
     }
-    if let Cmd::Prs { query, force } = &cli.cmd {
-        return print(&capcom::prs_json::build(query, *force));
+    if let Cmd::Prs { query, force, demo } = &cli.cmd {
+        return print(&if *demo { capcom::prs_json::build_demo() } else { capcom::prs_json::build(query, *force) });
     }
     if let Cmd::PrDo { action, url, on, query } = &cli.cmd {
         let result = capcom::prs_json::act(action, url, *on, query);
@@ -325,6 +331,9 @@ fn main() -> Result<()> {
             Ok(message) => json!({ "ok": true, "message": message }),
             Err(message) => json!({ "ok": false, "message": message }),
         });
+    }
+    if let Cmd::Web { port, demo: true, .. } = &cli.cmd {
+        return web_demo(*port);
     }
     let root = cli.root.ok_or_else(|| {
         anyhow::anyhow!("no stories folder: set CAPCOM_ROOT or pass --root DIR")
@@ -336,7 +345,7 @@ fn main() -> Result<()> {
             print(&json!({ "key": key, "dir": store::story_dir(root, &key)? }))
         }
         Cmd::Note { .. } | Cmd::Prs { .. } | Cmd::PrDo { .. } => unreachable!("handled before the root is needed"),
-        Cmd::Web { port, pr_query, no_prs, browser, workdir, deploy_repos, no_runs } => {
+        Cmd::Web { port, pr_query, no_prs, browser, workdir, deploy_repos, no_runs, demo: _ } => {
             use capcom::{cache, fixstate, prs, runs, settings, web};
             use std::sync::Arc;
             let (listener, port) = web::bind(port)?;
@@ -501,4 +510,36 @@ fn main() -> Result<()> {
             print(&json!({ "messages": messages }))
         }
     }
+}
+
+struct DemoAgents;
+
+impl capcom::web::AgentSource for DemoAgents {
+    fn agents(&self) -> Result<Vec<capcom::agents::AgentInfo>, String> {
+        Ok(capcom::demo::agents())
+    }
+}
+
+/// `capcom web --demo`: the page over invented stories, PRs, runs and agents, in a throwaway folder.
+fn web_demo(port: u16) -> Result<()> {
+    use capcom::{demo, web};
+    use std::sync::Arc;
+    let root = demo::make_root();
+    demo::build_stories(&root);
+    let notes = root.join(".notes");
+    demo::write_notes(&notes);
+    let usage = root.join(".usage.json");
+    demo::write_usage(&usage);
+    let (listener, port) = web::bind(port)?;
+    let server = web::Server::new(root.clone(), port);
+    server.set_workdir(root.clone());
+    server.set_usage_file(Some(usage));
+    server.set_sessions(demo::sessions());
+    server.poll_runs(Arc::new(demo::Source));
+    server.poll(Arc::new(demo::Source));
+    server.watch_agents(Arc::new(DemoAgents), Some(notes), web::AGENTS_EVERY, std::time::Duration::from_secs(1));
+    print(&json!({ "url": format!("http://127.0.0.1:{port}"), "demo": true }))?;
+    server.serve(listener);
+    let _ = std::fs::remove_dir_all(&root);
+    Ok(())
 }

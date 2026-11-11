@@ -182,6 +182,11 @@ impl Server {
         *lock(&self.eng.usage_path) = path;
     }
 
+    /// The PRs and the Claude Code sessions that made them, when something other than the transcripts says.
+    pub fn set_sessions(&self, sessions: Vec<(String, PrSession)>) {
+        *lock(&self.eng.sessions) = sessions;
+    }
+
     pub fn set_extra_repos(&self, repos: Vec<String>) {
         *lock(&self.eng.extra_repos) = repos;
     }

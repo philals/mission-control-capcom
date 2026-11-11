@@ -7,6 +7,7 @@ capcom web                  # port 1969, the year of Apollo 11; prints {"url": "
 capcom web --port 8080
 capcom web --workdir ~/code # where new Claude Code sessions started from the page begin
 capcom web --no-prs --no-runs
+capcom web --demo           # invented stories, PRs, runs and agents; reads and changes nothing
 ```
 
 It needs the stories folder (`--root` or `CAPCOM_ROOT`) and the GitHub CLI (`gh`) signed in, like `capcom-tui` (it uses the token `gh auth token` prints). It shares with the TUI the settings file (`~/.config/capcom/tui.json`: the per-PR ticks, the defaults, the PRs and runs you follow), the cache of GitHub answers and the learned check durations, so you can run either, or both.

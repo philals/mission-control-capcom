@@ -3,6 +3,7 @@ pub mod agents;
 pub mod attention;
 pub mod autopilot;
 pub mod cache;
+pub mod demo;
 pub mod claude;
 pub mod desktop;
 pub mod durations;

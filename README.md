@@ -9,7 +9,80 @@
   <img src="docs/img/board.svg" alt="capcom-tui showing a story board with tasks in the TODO, PLANNING, PLANNED, IMPLEMENTING and DONE columns, above panels of open pull requests with their CI stages and of manual workflow runs" width="100%">
 </p>
 
-> The picture is drawn from invented demo data. Try it yourself with no setup: `capcom-tui --demo`.
+> Every picture in this README is drawn from invented demo data (`acme/web`, `DEMO-101`). Try it yourself with no setup: `capcom-tui --demo` or `capcom web --demo`.
+
+## Features
+
+**Plan the work**
+- Break a Jira story into PR-sized tasks with dependencies, agreed with you, and kept as plain local files (`board.json`, `story.md`, one markdown file per task).
+- Task statuses `todo → planning → planned → implementing → done` (plus `dropped` and a `blocked` flag), with rules that refuse illegal moves.
+- A task can need several PRs, in several repos; it only finishes when every one is merged.
+- Stories move `in_progress → in_review → done`, reviewed against their acceptance criteria by `/story-review`.
+
+**Do the work with Claude Code**
+- Skills to break down, plan, implement and review, and to fix any PR (`/pr-address`). PRs are always drafts and never stacked.
+- Start a skill from the board with a click, a drag or a pasted Jira key, in the app you already use.
+- `/agent-note` gives every agent a one-line "what I'm doing, what I'm waiting on, what you need to do".
+
+**Watch it all**
+- Your open PRs with the rail `ready · CI · copilot · threads · approved · automerge · merge`, each CI stage live, and a lit-up block when a PR is green and waiting only for a reviewer.
+- Your manual workflow runs (a nonprod deploy, say) and any run you paste a link to, with a desktop notification when one finishes.
+- Your PRs merged in the last 12 hours, and the Claude plan usage gauges.
+- A GO / NO-GO light for the lot.
+
+**Let it do the boring part**
+- `auto-review` asks Copilot to review a PR; `auto-fix` hands failing CI and review comments back to the agent that made the PR, up to 5 rounds.
+- Mark a PR ready, toggle your merge bot's automerge label, or finish a task, each only when you click and confirm. capcom never merges anything.
+
+**Get back to the agent**
+- Every PR has a `🤖` button that focuses the session that made it, or resumes it if its tab was closed.
+
+## Integrations
+
+| Integration | What capcom does with it |
+|---|---|
+| **[Claude Code](https://claude.com/claude-code)** | Six skills; a console mod beside every session (`/capcom`); reads sessions to link PRs to the agent that made them |
+| **Jira** (Atlassian MCP server) | The skills read the story, and create sub-tasks only if you ask |
+| **GitHub** (`gh`) | PRs, CI checks, Copilot reviews, review threads, Actions runs, draft/ready, labels, branch updates |
+| **Merge bot** (Kodiak style) | Reads its config for automerge and autoupdate labels; adds or removes them when you tick it |
+| **[Herdr](https://herdr.dev)** terminal | A plugin that opens the board as an overlay and starts agents in panes |
+| **Herdr desktop app** | The My PRs and SG-1 agents sidebar panels, and agents started in its panes |
+| **Orca** | Starts and reaches agents in Orca terminals, and works from Orca's browser |
+| **Claude Desktop** | Starts sessions with a skill typed in, and reaches them again |
+| **Desktop notifications** | `notify-send`, when a run finishes, Copilot reviews or a PR needs you |
+| **Browser** | `capcom web`, the whole TUI as a page on `127.0.0.1:1969` |
+
+## Screenshots
+
+### The terminal board: `capcom-tui`
+
+<p align="center">
+  <img src="docs/img/list.svg" alt="capcom-tui story list: demo stories in TO DO, DOING and IN REVIEW columns with progress bars, above the pull requests and runs panels" width="100%">
+</p>
+
+The command palette (`Ctrl+P`) lists every action that fits where you are, each with its key:
+
+<p align="center">
+  <img src="docs/img/palette.svg" alt="The command palette open over the story list" width="100%">
+</p>
+
+### In a browser: `capcom web`
+
+<p align="center">
+  <img src="docs/img/web.png" alt="capcom web: agents down the left, stories beside them, and a strip of pull requests and runs along the bottom, with plan usage gauges in the top rail" width="100%">
+</p>
+
+<p align="center">
+  <img src="docs/img/web-story.png" alt="capcom web showing one story as a board of tasks in TO DO, PLANNING, PLANNED, IMPLEMENTING and DONE columns" width="100%">
+</p>
+
+### In the Herdr desktop app: My PRs and SG-1 agents
+
+<p align="center">
+  <img src="docs/img/herdr-sidebar.png" alt="The Herdr app's sidebar: agents grouped into Needs you, Working and Idle, each with a character portrait in a ring of chevrons showing its PR's progress, above the My PRs list with a progress strip per PR" width="380">
+</p>
+
+Each agent gets a Stargate SG-1 character whose ring of seven chevrons lights one step per stage of its PR; below, **My PRs** shows each PR's CI as a strip of segments, with buttons for its agent, its link and its details. See [herdr-mod/README.md](herdr-mod/README.md).
 
 ## The name
 
@@ -30,6 +103,7 @@ If that sounds like you, great. If not, treat this as a worked example: fork it,
 | **`capcom`** (command) | The only writer of each story's `board.json`: tasks, statuses, dependencies, PRs. Refuses illegal moves. Everything it prints is JSON. |
 | **Six Claude Code skills** | `/story-break-down`, `/story-plan-task`, `/story-implement-task`, `/story-review`, `/pr-address` (works on any PR) and `/agent-note` (an agent's TLDR of what it is doing and waiting for, shown in the agents panel). They talk to you, Jira and `git`/`gh`, and change the board only through `capcom`. |
 | **`capcom-tui`** | A live terminal board (keyboard and mouse): your stories, your open PRs with their CI stages, and the GitHub Actions runs you started by hand. It can start the skills for you and finish tasks when their PRs merge. |
+| **Herdr app mods** (optional) | `capcom-prs` (My PRs) and `capcom-agents` (SG-1 agents) panels for the Herdr desktop app; install with `scripts/install-herdr-mod.sh`. |
 | **Herdr plugin** (optional) | Opens `capcom-tui` from a keyboard shortcut in [Herdr](https://herdr.dev), and lets the board launch agents in Herdr panes. |
 
 ## How it works
@@ -87,10 +161,6 @@ A typical run, in order: break the story down and approve the table; plan each t
 
 ## The terminal board
 
-<p align="center">
-  <img src="docs/img/list.svg" alt="capcom-tui story board: demo stories in TO DO, DOING and IN REVIEW columns with progress bars and task counts, above the pull requests and runs and watch panels" width="100%">
-</p>
-
 - **Stories and boards:** a kanban of your stories (TO DO, DOING, IN REVIEW) and a kanban per story with a card for each task (ready to implement, waits on dependencies, blocked, PRs merged). Drag a finished story from DOING to IN REVIEW and it opens a Herdr tab running `/story-review`.
 - **Your PRs, with CI:** every open PR from a GitHub search you control, `[DRAFT]` or `[READY]`, with the CI stages that are running, queued or failed listed one per line. A PR that is all green and only waiting for a reviewer is lit up with a green `GO · ◉ AWAITING REVIEW` block, a green bar and a tinted row, and counted in the panel title. Click to open, copy the link, or mark a draft ready (it asks first). Paste someone else's PR link to follow it the same way (auto-fix starts off for it).
 - **Back to the agent:** a PR made through a task has a `🤖` button that focuses the Claude Code session that made it in the app it runs in (Herdr, Orca or Claude Desktop), or resumes it (`claude --resume`) if the tab was closed. PRs you made outside the workflow work too: Claude Code records which session made each PR, and capcom reads that.
@@ -100,7 +170,7 @@ A typical run, in order: break the story down and approve the table; plan each t
 - **Resizable and remembered:** drag any divider; sizes are saved.
 - **Accessible by design:** a fixed theme with at least 4.5:1 text contrast on every screen (a test checks it), state shown with words and icons as well as colour, and focus shown by a double border.
 
-Everything it does, every key and every setting is in [docs/tui.md](docs/tui.md). Everything the TUI does is also a page in a browser, for people who live in Claude Code (terminal and desktop app) rather than Herdr: `capcom web` ([docs/web.md](docs/web.md)) shows the boards, your PRs with their CI, your workflow runs and your running Claude Code sessions, can mark PRs ready, toggle automerge, finish tasks and sync stories after asking, and opens a Claude Code desktop session with a skill typed in to plan, implement, review or fix.
+Try the page with `capcom web --demo`. Everything it does, every key and every setting is in [docs/tui.md](docs/tui.md). Everything the TUI does is also a page in a browser, for people who live in Claude Code (terminal and desktop app) rather than Herdr: `capcom web` ([docs/web.md](docs/web.md)) shows the boards, your PRs with their CI, your workflow runs and your running Claude Code sessions, can mark PRs ready, toggle automerge, finish tasks and sync stories after asking, and opens a Claude Code desktop session with a skill typed in to plan, implement, review or fix.
 
 ## The console in every session
 
@@ -147,8 +217,11 @@ cargo build
 cargo test                                   # the whole suite (it is quick)
 cargo test --bin capcom-tui <name>           # one test
 capcom-tui --demo                            # a quick look at UI changes
+capcom web --demo                            # the web page over invented data (photograph it with headless Chrome)
+capcom prs --demo                            # the Herdr panels' feed, invented (the Herdr pictures run this in an isolated Herdr app)
 capcom-tui --screenshot docs/img/board.svg --screen board --size 150x34   # regenerate the README pictures
 capcom-tui --screenshot docs/img/list.svg  --screen list  --size 150x30
+capcom-tui --screenshot docs/img/palette.svg --screen palette --size 150x30
 ```
 
 ```
@@ -156,6 +229,8 @@ src/                      the capcom command and its library (board model, rules
 src/bin/capcom-tui/       the terminal board (app state, drawing, GitHub polling, Herdr, cache, demo data)
 skills/                   the six Claude Code skills
 schemas/board.schema.json JSON Schema for board.json
+herdr-mod/                the Herdr app panels (My PRs, SG-1 agents)
+src/demo.rs               the invented data behind every --demo and every picture
 herdr-plugin.toml         the Herdr plugin manifest (scripts/open.sh is its action)
 docs/                     design notes, command reference, TUI and web guides, README pictures
 ```
