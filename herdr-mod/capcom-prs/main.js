@@ -2,7 +2,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, run, theme, shared, setShared } from "herdr";
+import { exec, run, spaces, theme, shared, setShared } from "herdr";
 import { strip, stripCount, hasRunning } from "./strip.js";
 import { SH, capcom, openUrl, short, dotColor, prDo, pill, prDetails } from "./pr-details.js";
 
@@ -15,6 +15,13 @@ function ago(iso, now) {
   if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60);
   return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
+}
+
+// The space of the PR's story (named `KEY` or `KEY - words`), by the Jira key in its branch or title.
+function storySpace(pr) {
+  const key = /\b[A-Z][A-Z0-9]+-\d+\b/i.exec(`${pr.branch ?? ""} ${pr.title ?? ""}`)?.[0]?.toUpperCase();
+  if (!key) return undefined;
+  return spaces().find(s => { const n = (s.name ?? "").toUpperCase(); return n === key || n.startsWith(`${key} - `); })?.id;
 }
 
 export default class CapcomPrs extends View {
@@ -86,7 +93,8 @@ export default class CapcomPrs extends View {
     const a = pr.agent;
     if (a?.terminal) return run("agent.focus", { terminal: a.terminal });
     if (a?.session) {
-      return run("tab.new", { name: `${short(pr.repo)}#${pr.number}`, folder: a.cwd || undefined, argv: ["claude", "--resume", a.session] });
+      const space = storySpace(pr);
+      return run("tab.new", { name: `${short(pr.repo)}#${pr.number}`, folder: a.cwd || undefined, space, argv: ["claude", "--resume", a.session] });
     }
     this.openUrl(pr.url);
   }
