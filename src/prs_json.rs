@@ -264,7 +264,7 @@ pub fn act(action: &str, url: &str, on: Option<bool>, query: &str) -> Result<Str
 /// The same document from invented PRs, agents and settings (`capcom prs --demo`).
 pub fn build_demo() -> Value {
     let terminals: Vec<(String, String)> = crate::demo::agent_specs().iter().filter_map(|a| Some((a.session.to_string(), crate::demo::terminal_of(a.session)?))).collect();
-    let fetched = Fetched { opened: Ok(crate::demo::pull_requests()), watching: Ok(Vec::new()), merged: Ok(crate::demo::merged()), runs: Ok(crate::demo::runs()) };
+    let fetched = Fetched { opened: Ok(crate::demo::pull_requests()), watching: Ok(Vec::new()), merged: Ok(crate::demo::merged()), merged_watched: Vec::new(), runs: Ok(crate::demo::runs()) };
     assemble(fetched, crate::demo::sessions(), terminals, Settings::default(), Durations::default(), true)
 }
 
@@ -286,6 +286,11 @@ pub fn build(query: &str, force: bool) -> Value {
         None => merged_live,
     };
     let merged = merged_source.fetch_merged(force);
+    let open_urls: Vec<String> = opened.iter().flatten().chain(watching.iter().flatten()).map(|p| p.url.clone()).collect();
+    let (merged_watched, forget) = if watching.is_ok() { merged_watched(&settings, &open_urls, chrono::Utc::now()) } else { Default::default() };
+    if !forget.is_empty() {
+        let _ = act_forget(&forget);
+    }
     let runs = fetch_runs(&merged_source, &run_repos(&opened), &settings, force);
 
     let config = crate::session::config_dir();
@@ -302,7 +307,33 @@ pub fn build(query: &str, force: bool) -> Value {
     let terminals = terminals(config.as_deref());
     let durations = cache_dir.as_ref().map(|d| Durations::load(&d.join("check-durations.json"))).unwrap_or_default();
 
-    assemble(Fetched { opened, watching, merged, runs }, sessions, terminals, settings, durations, autopilot_running())
+    assemble(Fetched { opened, watching, merged, merged_watched, runs }, sessions, terminals, settings, durations, autopilot_running())
+}
+
+/// Watched PRs that are no longer open and were merged in the last `MERGED_KEEP_MINUTES`, as merged rows.
+/// Watched PRs that are closed, or merged longer ago, are forgotten.
+fn merged_watched(settings: &Settings, open_urls: &[String], now: chrono::DateTime<chrono::Utc>) -> (Vec<Value>, Vec<String>) {
+    let mut merged = Vec::new();
+    let mut forget = Vec::new();
+    for url in settings.pasted_prs.iter().filter(|u| !open_urls.iter().any(|o| same_url(o, u))) {
+        let Some((owner, name, number)) = crate::prs::pr_ref(url) else { continue };
+        let Ok(text) = crate::github::rest(&format!("repos/{owner}/{name}/pulls/{number}")) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(&text) else { continue };
+        let at = v.get("merged_at").and_then(Value::as_str).filter(|a| merged_recently(a, now));
+        match at {
+            Some(at) => merged.push(json!({
+                "repo": format!("{owner}/{name}"),
+                "number": number,
+                "title": v.get("title").and_then(Value::as_str).unwrap_or_default(),
+                "url": url,
+                "mergedAt": at,
+                "watched": true,
+            })),
+            None if v.get("state").and_then(Value::as_str) == Some("closed") => forget.push(url.clone()),
+            None => {}
+        }
+    }
+    (merged, forget)
 }
 
 /// Your manual runs and the runs you watch, one list; a run that is both counts as watched.
@@ -318,7 +349,15 @@ struct Fetched {
     opened: Result<Vec<PullRequest>>,
     watching: Result<Vec<PullRequest>>,
     merged: Result<Batch>,
+    merged_watched: Vec<Value>,
     runs: Result<Batch, String>,
+}
+
+fn act_forget(urls: &[String]) -> Result<(), String> {
+    let path = crate::settings::default_path().ok_or("no home folder for the settings")?;
+    let mut s = crate::settings::load(&path);
+    s.pasted_prs.retain(|u| !urls.iter().any(|f| same_url(f, u)));
+    crate::settings::save(&path, &s).map_err(|e| format!("{e:#}"))
 }
 
 fn assemble(
@@ -329,7 +368,7 @@ fn assemble(
     durations: Durations,
     autopilot: bool,
 ) -> Value {
-    let Fetched { opened, watching, merged, runs } = fetched;
+    let Fetched { opened, watching, merged, merged_watched, runs } = fetched;
     let mut errors = Vec::new();
     let mut open = match &opened {
         Ok(prs) => prs.iter().map(|p| (p, open_pr(p, &settings, &durations, &sessions, &terminals))).collect::<Vec<_>>(),
@@ -362,7 +401,7 @@ fn assemble(
         }
     };
     open.sort_by(|a, b| rank(a.1["ci"].as_str().unwrap_or("")).cmp(&rank(b.1["ci"].as_str().unwrap_or(""))).then(b.0.updated_at.cmp(&a.0.updated_at)));
-    let merged = match merged {
+    let mut merged: Vec<Value> = match merged {
         Ok(batch) => batch
             .runs
             .iter()
@@ -381,6 +420,11 @@ fn assemble(
             Vec::new()
         }
     };
+    merged.extend(merged_watched.into_iter().map(|mut m| {
+        m["agent"] = agent_of(m["url"].as_str().unwrap_or_default(), &sessions, &terminals);
+        m
+    }));
+    merged.sort_by(|a, b| b["mergedAt"].as_str().cmp(&a["mergedAt"].as_str()));
     json!({
         "at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         "open": open.into_iter().map(|(_, v)| v).collect::<Vec<_>>(),
