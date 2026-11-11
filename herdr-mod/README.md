@@ -15,7 +15,7 @@ service.
   has to be running to act on them, and the `⚙` strip says so when `capcom web` is not.
 
 Install: `scripts/install.sh` then `scripts/install-herdr-mod.sh`. This repo is the source of truth for every capcom
-mod (`capcom-prs`, `capcom-agents`, `capcom-board`, `capcom-tabs`) and for the `capcom` layout
+mod (`capcom-prs`, `capcom-agents`, `capcom-board`; `capcom-tabs` is Herdr's `tabs` mod plus `capcom-tabs.patch`, built at install) and for the `capcom` layout
 (`herdr-mod/layouts/capcom.json`); the script copies them into the app and switches to the layout. Edit them here, not
 in `~/.config/herdr-app`, or the next install overwrites the change.
 

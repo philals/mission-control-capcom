@@ -5,7 +5,7 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 home="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
-for name in capcom-prs capcom-agents capcom-board capcom-tabs; do
+for name in capcom-prs capcom-agents capcom-board; do
   mod="$home/mods/$name"
   mkdir -p "$mod"
   cp herdr-mod/$name/*.js herdr-mod/$name/mod.json herdr-mod/shared/*.js "$mod/"
@@ -16,6 +16,16 @@ for name in capcom-prs capcom-agents capcom-board capcom-tabs; do
   fi
   herdr-app check "$mod"
 done
+
+# capcom-tabs is Herdr's own `tabs` mod plus a Board button (herdr-mod/capcom-tabs.patch); only the patch is kept here.
+tabs="$home/mods/capcom-tabs"
+rm -rf "$tabs"
+cp -r "$home/mods/tabs" "$tabs"
+rm -f "$tabs"/gpui-kit.d.ts
+patch -s "$tabs/main.js" herdr-mod/capcom-tabs.patch
+sed -i 's#mods/tabs/#mods/capcom-tabs/#g' "$tabs/main.js"
+printf '{ "place": "none", "title": "Tabs" }\n' > "$tabs/mod.json"
+herdr-app check "$tabs"
 
 mkdir -p "$home/layouts"
 cp herdr-mod/layouts/capcom.json "$home/layouts/capcom.json"
