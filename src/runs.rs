@@ -527,7 +527,7 @@ impl RunCadence {
 
 /// Your manual runs and the runs you watch in one list. A run that is both counts as watched, and
 /// when only one of the two lookups fails the other still shows, with the failure as a warning.
-fn merge(manual: Result<Batch, String>, watching: Result<Batch, String>) -> Result<Batch, String> {
+pub fn merge(manual: Result<Batch, String>, watching: Result<Batch, String>) -> Result<Batch, String> {
     match (manual, watching) {
         (Ok(mut batch), Ok(extra)) => {
             for run in extra.runs {

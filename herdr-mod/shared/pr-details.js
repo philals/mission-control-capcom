@@ -1,4 +1,4 @@
-// Shared by capcom-prs (My PRs) and capcom-agents: the PR dot colour, the expanded details and `capcom pr-do`.
+// Shared by capcom-prs (My Watch) and capcom-agents: the PR dot colour, the expanded details and `capcom pr-do`.
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";

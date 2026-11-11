@@ -4,10 +4,10 @@
 use crate::herdr_app::{terminal_of, HerdrApp};
 use crate::durations::Durations;
 use crate::prs::{GhSource, PrSource, PullRequest, SharedSource, Cadence};
-use crate::runs::{Fetcher, GhApi, RunSource};
+use crate::runs::{Batch, Fetcher, GhApi, Run, RunSource, Watch};
 use crate::session::{Index, PrSession};
 use crate::settings::Settings;
-use crate::web::view::{autofix_on, autoreview_on, check_state, rail};
+use crate::web::view::{autofix_on, autoreview_on, check_state, rail, run_state};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -98,8 +98,45 @@ fn open_pr(pr: &PullRequest, settings: &Settings, durations: &Durations, session
         "autofix": autofix_on(settings, pr),
         "autoreview": autoreview_on(settings, pr),
         "updatedAt": pr.updated_at,
+        "mine": pr.feedback.mine,
         "agent": agent_of(&pr.url, sessions, terminals),
     })
+}
+
+/// A run for the sidebar: its state and the stages that are not passing.
+fn run_json(run: &Run) -> Value {
+    let stages: Vec<Value> = run
+        .jobs
+        .iter()
+        .filter(|j| !matches!(j.state, crate::runs::RunState::Success | crate::runs::RunState::Skipped))
+        .map(|j| json!({ "name": j.name, "state": run_state(j.state), "url": j.url }))
+        .collect();
+    json!({
+        "repo": run.repo,
+        "id": run.id,
+        "name": run.name,
+        "title": run.title,
+        "branch": run.branch,
+        "url": run.url,
+        "state": run_state(run.state),
+        "active": run.is_active(),
+        "watched": run.watched,
+        "startedAt": run.started_at,
+        "createdAt": run.created_at,
+        "updatedAt": run.updated_at,
+        "stages": stages,
+    })
+}
+
+/// Repos to look for your manual runs in: those of your open PRs and `CAPCOM_DEPLOY_REPOS`.
+fn run_repos(opened: &Result<Vec<PullRequest>>) -> Vec<String> {
+    let mut repos: Vec<String> = std::env::var("CAPCOM_DEPLOY_REPOS").unwrap_or_default().split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect();
+    if let Ok(prs) = opened {
+        repos.extend(prs.iter().map(|p| p.repo.clone()));
+    }
+    repos.sort();
+    repos.dedup();
+    repos
 }
 
 /// Live Herdr terminals, each with the Claude session it runs. Empty when the app is not running.
@@ -167,6 +204,36 @@ pub fn act(action: &str, url: &str, on: Option<bool>, query: &str) -> Result<Str
             }
             Ok(format!("{action} is {} for this PR", if on { "on" } else { "off" }))
         }
+        "watch" => {
+            let link = url.trim();
+            if crate::prs::pr_ref(link).is_some() {
+                change(&|s| {
+                    s.pasted_prs.retain(|u| !same_url(u, link));
+                    s.pasted_prs.push(link.to_string());
+                })?;
+                Ok("watching this PR".into())
+            } else if let Some((repo, id)) = crate::runs::parse_run_url(link) {
+                let added_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                change(&|s| {
+                    s.watched.retain(|w| !(w.repo == repo && w.id == id));
+                    s.watched.push(Watch { repo: repo.clone(), id, added_at: added_at.clone() });
+                })?;
+                Ok("watching this run".into())
+            } else {
+                Err("copy a link to a GitHub pull request or Actions run first".into())
+            }
+        }
+        "unwatch" => {
+            let link = url.trim();
+            let run = crate::runs::parse_run_url(link);
+            change(&|s| {
+                s.pasted_prs.retain(|u| !same_url(u, link));
+                if let Some((repo, id)) = &run {
+                    s.watched.retain(|w| !(&w.repo == repo && w.id == *id));
+                }
+            })?;
+            Ok("no longer watching it".into())
+        }
         "ready" | "draft" => {
             crate::actions::gh_pr_ready(url, action == "draft")?;
             Ok(if action == "draft" { "it is a draft again".into() } else { "it is ready for review".into() })
@@ -197,7 +264,8 @@ pub fn act(action: &str, url: &str, on: Option<bool>, query: &str) -> Result<Str
 /// The same document from invented PRs, agents and settings (`capcom prs --demo`).
 pub fn build_demo() -> Value {
     let terminals: Vec<(String, String)> = crate::demo::agent_specs().iter().filter_map(|a| Some((a.session.to_string(), crate::demo::terminal_of(a.session)?))).collect();
-    assemble(Ok(crate::demo::pull_requests()), Ok(crate::demo::merged()), crate::demo::sessions(), terminals, Settings::default(), Durations::default(), true)
+    let fetched = Fetched { opened: Ok(crate::demo::pull_requests()), watching: Ok(Vec::new()), merged: Ok(crate::demo::merged()), runs: Ok(crate::demo::runs()) };
+    assemble(fetched, crate::demo::sessions(), terminals, Settings::default(), Durations::default(), true)
 }
 
 pub fn build(query: &str, force: bool) -> Value {
@@ -209,6 +277,8 @@ pub fn build(query: &str, force: bool) -> Value {
         None => live,
     };
     let opened: Result<Vec<PullRequest>> = if force { source.fetch_forced() } else { source.fetch() };
+    let settings = load_settings();
+    let watching: Result<Vec<PullRequest>> = if settings.pasted_prs.is_empty() { Ok(Vec::new()) } else { GhSource::new(query.to_string()).fetch_pasted(&settings.pasted_prs) };
 
     let merged_live: Arc<dyn RunSource> = Arc::new(Fetcher::new(GhApi::default(), chrono::Duration::minutes(30)));
     let merged_source: Arc<dyn RunSource> = match shared() {
@@ -216,6 +286,7 @@ pub fn build(query: &str, force: bool) -> Value {
         None => merged_live,
     };
     let merged = merged_source.fetch_merged(force);
+    let runs = fetch_runs(&merged_source, &run_repos(&opened), &settings, force);
 
     let config = crate::session::config_dir();
     let mut index = cache_dir.as_ref().map(|d| d.join("prs-links.json")).map(|f| (Index::load(&f), f));
@@ -229,21 +300,36 @@ pub fn build(query: &str, force: bool) -> Value {
         _ => Vec::new(),
     };
     let terminals = terminals(config.as_deref());
-    let settings = load_settings();
     let durations = cache_dir.as_ref().map(|d| Durations::load(&d.join("check-durations.json"))).unwrap_or_default();
 
-    assemble(opened, merged, sessions, terminals, settings, durations, autopilot_running())
+    assemble(Fetched { opened, watching, merged, runs }, sessions, terminals, settings, durations, autopilot_running())
+}
+
+/// Your manual runs and the runs you watch, one list; a run that is both counts as watched.
+fn fetch_runs(source: &Arc<dyn RunSource>, repos: &[String], settings: &Settings, force: bool) -> Result<Batch, String> {
+    let manual = if repos.is_empty() { Ok(Batch::default()) } else if force { source.fetch_forced(repos) } else { source.fetch(repos) };
+    let followed: Vec<(String, u64)> = settings.watched.iter().map(|w| (w.repo.clone(), w.id)).collect();
+    let watching = if followed.is_empty() { Ok(Batch::default()) } else { source.fetch_watched(&followed, force) };
+    crate::runs::merge(manual.map_err(|e| format!("{e:#}")), watching.map_err(|e| format!("{e:#}")))
+}
+
+/// What the sidebar's lists are made from; each part can fail on its own.
+struct Fetched {
+    opened: Result<Vec<PullRequest>>,
+    watching: Result<Vec<PullRequest>>,
+    merged: Result<Batch>,
+    runs: Result<Batch, String>,
 }
 
 fn assemble(
-    opened: Result<Vec<PullRequest>>,
-    merged: Result<crate::runs::Batch>,
+    fetched: Fetched,
     sessions: Vec<(String, PrSession)>,
     terminals: Vec<(String, String)>,
     settings: Settings,
     durations: Durations,
     autopilot: bool,
 ) -> Value {
+    let Fetched { opened, watching, merged, runs } = fetched;
     let mut errors = Vec::new();
     let mut open = match &opened {
         Ok(prs) => prs.iter().map(|p| (p, open_pr(p, &settings, &durations, &sessions, &terminals))).collect::<Vec<_>>(),
@@ -256,6 +342,24 @@ fn assemble(
         "red" => 0,
         "pending" => 1,
         _ => 2,
+    };
+    let mut watch: Vec<(&PullRequest, Value)> = match &watching {
+        Ok(prs) => prs.iter().filter(|p| !open.iter().any(|(o, _)| same_url(&o.url, &p.url))).map(|p| (p, open_pr(p, &settings, &durations, &sessions, &terminals))).collect(),
+        Err(e) => {
+            errors.push(format!("watched PRs: {e:#}"));
+            Vec::new()
+        }
+    };
+    watch.sort_by(|a, b| b.0.updated_at.cmp(&a.0.updated_at));
+    let runs: Vec<Value> = match runs {
+        Ok(mut batch) => {
+            batch.runs.sort_by(|a, b| b.is_active().cmp(&a.is_active()).then(b.created_at.cmp(&a.created_at)));
+            batch.runs.iter().map(run_json).collect()
+        }
+        Err(e) => {
+            errors.push(format!("runs: {e}"));
+            Vec::new()
+        }
     };
     open.sort_by(|a, b| rank(a.1["ci"].as_str().unwrap_or("")).cmp(&rank(b.1["ci"].as_str().unwrap_or(""))).then(b.0.updated_at.cmp(&a.0.updated_at)));
     let merged = match merged {
@@ -281,6 +385,8 @@ fn assemble(
         "at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         "open": open.into_iter().map(|(_, v)| v).collect::<Vec<_>>(),
         "merged": merged,
+        "watching": watch.into_iter().map(|(_, v)| v).collect::<Vec<_>>(),
+        "runs": runs,
         "settings": { "autofix": settings.autofix, "autoreview": settings.autocopilot },
         "autopilot": autopilot,
         "errors": errors,

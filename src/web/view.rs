@@ -220,7 +220,7 @@ pub(super) fn task_view(board: &Board, task: &Task, cx: &Ctx) -> Value {
     })
 }
 
-fn run_state(state: RunState) -> &'static str {
+pub(crate) fn run_state(state: RunState) -> &'static str {
     match state {
         RunState::Queued => "queued",
         RunState::Running => "running",

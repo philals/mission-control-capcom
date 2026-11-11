@@ -248,7 +248,7 @@ export default class Agents extends View {
         .when(s.id === on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))));
   }
 
-  // `capcom pr-do` from the card, then ask My PRs to look again.
+  // `capcom pr-do` from the card, then ask My Watch to look again.
   change(cx, action, url, on) {
     cx.spawn(async (cx) => {
       await prDo(action, url, on);
@@ -257,7 +257,7 @@ export default class Agents extends View {
     });
   }
 
-  // One icon per PR this agent sent, coloured by CI (purple once merged). Hover for My PRs' details.
+  // One icon per PR this agent sent, coloured by CI (purple once merged). Hover for My Watch' details.
   prIcons(t, a) {
     const mine = [...(this.prsByAgent.get(a.address) ?? [])].sort((x, y) => x.merged - y.merged);
     const MAX = 4;

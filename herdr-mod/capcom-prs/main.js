@@ -1,4 +1,4 @@
-// Your open and recently merged PRs, from `capcom prs`: CI, automerge, and a click back to the agent.
+// My Watch, from `capcom prs`: your open and recently merged PRs, PRs of others you add with +, and the Actions runs you started or added; CI, automerge, and a click back to the agent.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -99,10 +99,72 @@ export default class CapcomPrs extends View {
     this.openUrl(pr.url);
   }
 
+  // `+`: watch the PR or run whose link is on the clipboard.
+  addFromClipboard(cx) {
+    this.message = { text: "…", ok: true };
+    cx.notify();
+    cx.spawn(async (cx) => {
+      let link = "";
+      try {
+        const cmd = '{ wl-paste -n || xclip -o -selection clipboard || xsel -b -o || pbpaste; } 2>/dev/null';
+        link = (await exec(SH[0], [...SH.slice(1), "sh", "-c", cmd], { timeout: 5000 })).stdout.trim();
+      } catch {}
+      this.message = await prDo("watch", link);
+      this.loading = false;
+      this.refresh(cx, true);
+    });
+  }
+
   hint(pr) {
     if (pr.agent?.terminal) return "Go to its agent";
     if (pr.agent?.session) return "Resume its agent in a new tab";
     return "Open on GitHub";
+  }
+
+  unwatchButton(url, t) {
+    return div()
+      .id(`uw-${url}`)
+      .text_size(12)
+      .text_color(t.dim)
+      .flex_none()
+      .px(4)
+      .tooltip("Stop watching")
+      .hover((s) => s.text_color(t.foreground))
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        this.change(cx, "unwatch", url);
+      })
+      .child("×");
+  }
+
+  runRow(run, t) {
+    const color = { running: t.ansi3, queued: t.dim, waiting: t.ansi3, success: t.ansi2, failed: t.ansi1, cancelled: t.dim };
+    const dot = run.state === "success" ? "#22c55e" : run.state === "failed" ? "#ff1f1f" : run.active ? "#ffb000" : t.dim;
+    const when = run.active ? run.state : `${run.state} ${ago(run.updatedAt, this.now)} ago`;
+    return v_flex()
+      .id(`run-${run.url}`)
+      .px(10)
+      .py(6)
+      .gap(1)
+      .cursor_pointer()
+      .tooltip("Open the run on GitHub")
+      .hover((s) => s.bg(t.hover))
+      .on_click(() => this.openUrl(run.url))
+      .child(
+        h_flex()
+          .gap(8)
+          .items_center()
+          .child(div().w(10).h(10).rounded(5).flex_none().bg(dot))
+          .child(
+            v_flex()
+              .flex_1()
+              .min_w_0()
+              .child(div().text_size(13).truncate().text_color(t.foreground).child(run.title || run.name))
+              .child(div().text_size(11).text_color(color[run.state] ?? t.muted).truncate().child([`${short(run.repo)}`, run.name, when].filter(Boolean).join(" · "))),
+          )
+          .when(run.watched, (el) => el.child(this.unwatchButton(run.url, t))),
+      )
+      .children(run.stages.slice(0, 4).map((g) => div().pl(18).text_size(11).text_color(color[g.state] ?? t.muted).truncate().child(`${g.state} · ${g.name}`)));
   }
 
   row(pr, t, merged) {
@@ -190,6 +252,7 @@ export default class CapcomPrs extends View {
           })
           .child(svg("mods/workspace-chrome/files.svg").size(13).flex_none()),
       )
+      .when(!merged && !pr.mine, (el) => el.child(this.unwatchButton(pr.url, t)))
       .child(
         div()
           .id(`gh-${pr.url}`)
@@ -227,6 +290,8 @@ export default class CapcomPrs extends View {
     const d = this.data;
     const open = d?.open ?? [];
     const merged = d?.merged ?? [];
+    const watching = d?.watching ?? [];
+    const runs = d?.runs ?? [];
     const red = open.filter((p) => p.ci === "red").length;
     return v_flex()
       .size_full()
@@ -236,10 +301,20 @@ export default class CapcomPrs extends View {
           .py(6)
           .items_center()
           .justify_between()
-          .child(div().text_size(12).font_semibold().text_color(red ? t.ansi1 : t.foreground).child(red ? `My PRs · ${red} red` : "My PRs"))
+          .child(div().text_size(12).font_semibold().text_color(red ? t.ansi1 : t.foreground).child(red ? `My Watch · ${red} red` : "My Watch"))
           .child(
             h_flex()
               .gap(8)
+              .child(
+                div()
+                  .id("add")
+                  .text_size(14)
+                  .text_color(t.dim)
+                  .tooltip("Watch the PR or Actions run whose link is on the clipboard")
+                  .hover((s) => s.text_color(t.foreground))
+                  .on_click((_e, cx) => this.addFromClipboard(cx))
+                  .child("+"),
+              )
               .child(
                 div()
                   .id("gear")
@@ -285,8 +360,10 @@ export default class CapcomPrs extends View {
           .id("pr-list")
           .flex_1()
           .overflow_y_scrollbar()
-          .when(d && !open.length && !merged.length && !this.error, (el) => el.child(div().px(10).py(6).text_size(12).text_color(t.muted).child("No open or recently merged PRs")))
+          .when(d && !open.length && !merged.length && !watching.length && !runs.length && !this.error, (el) => el.child(div().px(10).py(6).text_size(12).text_color(t.muted).child("Nothing to watch yet. Copy a PR or Actions run link and click +")))
           .when(open.length > 0, (el) => el.child(this.section("Open", open.length, t)).children(open.map((p) => this.row(p, t, false))))
+          .when(watching.length > 0, (el) => el.child(this.section("Watching", watching.length, t)).children(watching.map((p) => this.row(p, t, false))))
+          .when(runs.length > 0, (el) => el.child(this.section("Runs", runs.length, t)).children(runs.map((r) => this.runRow(r, t))))
           .when(merged.length > 0, (el) => el.child(this.section("Merged", merged.length, t)).children(merged.map((p) => this.row(p, t, true)))),
       );
   }
