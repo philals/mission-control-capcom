@@ -1107,7 +1107,7 @@ impl App {
                 label: self.workspace_label(&key),
                 tab: "break down".into(),
                 agent: herdr::agent_name(&[&key, "breakdown"]),
-                prompt: format!("/story-break-down {key}"),
+                prompt: format!("/story-plan {key}"),
                 folder: None,
                 task: None,
                 sessions: Vec::new(),
@@ -2680,7 +2680,7 @@ impl App {
         };
         let (from, title) = (task.status, task.title.clone());
         let (skill, tab, phase) = match (from, to) {
-            (Status::Todo, Status::Planning) => ("story-plan-task", "plan", "plan"),
+            (Status::Todo, Status::Planning) => ("story-plan", "plan", "plan"),
             (Status::Planned | Status::Todo, Status::Implementing) => {
                 if !rules::is_ready(board, task) {
                     let waiting = task
@@ -2952,7 +2952,7 @@ impl App {
             label: key.clone(),
             tab: "break down".into(),
             agent: herdr::agent_name(&[&key, "breakdown"]),
-            prompt: format!("/story-break-down {key}"),
+            prompt: format!("/story-plan {key}"),
             folder: None,
             task: None,
             sessions: Vec::new(),

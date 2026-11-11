@@ -215,7 +215,7 @@ pub(super) fn task_view(board: &Board, task: &Task, cx: &Ctx) -> Value {
         "working": task.agent.is_some(),
         "allMerged": all_merged,
         "jira": task.jira_subtask,
-        "plan": launch("story-plan-task"),
+        "plan": launch("story-plan"),
         "implement": launch("story-implement-task"),
     })
 }
@@ -379,7 +379,7 @@ impl Server {
                     "jiraUrl": b.story.jira_url,
                     "tasks": b.tasks.iter().map(|t| task_view(b, t, &cx)).collect::<Vec<_>>(),
                     "allFinished": !b.tasks.is_empty() && b.tasks.iter().all(|t| t.status.is_terminal()),
-                    "breakdown": new_session_link(&format!("/story-break-down {key}"), &workdir),
+                    "breakdown": new_session_link(&format!("/story-plan {key}"), &workdir),
                     "review": new_session_link(&format!("/story-review {key}"), &workdir),
                 })
             })

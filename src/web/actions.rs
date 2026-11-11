@@ -310,12 +310,12 @@ impl Server {
             return answer(false, "no Jira key found in that text");
         };
         let folder = lock(&self.eng.workdir).clone();
-        let link = new_session_link(&format!("/story-break-down {key}"), &folder);
+        let link = new_session_link(&format!("/story-plan {key}"), &folder);
         let Some(opener) = lock(&self.opener).clone() else {
             return answer(false, "no way to open the desktop app from here");
         };
         match opener.open(&link) {
-            Ok(()) => answer(true, format!("opened a session for {key}: press Enter to start the break-down")),
+            Ok(()) => answer(true, format!("opened a session for {key}: press Enter to start the plan")),
             Err(e) => answer(false, format!("could not open the desktop app: {e}")),
         }
     }
@@ -331,10 +331,10 @@ impl Server {
             return answer(false, format!("no story {key}"));
         };
         let skill = match kind {
-            "plan" => "story-plan-task",
+            "plan" => "story-plan",
             "implement" => "story-implement-task",
             "review" => "story-review",
-            "breakdown" => "story-break-down",
+            "breakdown" => "story-plan",
             _ => return answer(false, "unknown kind of session"),
         };
         let workdir = lock(&self.eng.workdir).clone();

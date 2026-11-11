@@ -101,7 +101,7 @@ If that sounds like you, great. If not, treat this as a worked example: fork it,
 | Part | What it does |
 |---|---|
 | **`capcom`** (command) | The only writer of each story's `board.json`: tasks, statuses, dependencies, PRs. Refuses illegal moves. Everything it prints is JSON. |
-| **Six Claude Code skills** | `/story-break-down`, `/story-plan-task`, `/story-implement-task`, `/story-review`, `/pr-address` (works on any PR) and `/agent-note` (an agent's TLDR of what it is doing and waiting for, shown in the agents panel). They talk to you, Jira and `git`/`gh`, and change the board only through `capcom`. |
+| **Five Claude Code skills** | `/story-plan`, `/story-implement-task`, `/story-review`, `/pr-address` (works on any PR) and `/agent-note` (an agent's TLDR of what it is doing and waiting for, shown in the agents panel). They talk to you, Jira and `git`/`gh`, and change the board only through `capcom`. |
 | **`capcom-tui`** | A live terminal board (keyboard and mouse): your stories, your open PRs with their CI stages, and the GitHub Actions runs you started by hand. It can start the skills for you and finish tasks when their PRs merge. |
 | **Herdr app mods** (optional) | `capcom-prs` (My Watch) and `capcom-agents` (SG-1 agents) panels for the Herdr desktop app; install with `scripts/install-herdr-mod.sh`. |
 | **Herdr plugin** (optional) | Opens `capcom-tui` from a keyboard shortcut in [Herdr](https://herdr.dev), and lets the board launch agents in Herdr panes. |
@@ -109,12 +109,12 @@ If that sounds like you, great. If not, treat this as a worked example: fork it,
 ## How it works
 
 ```
- story ──► break down ──► board.json (tasks, deps) ──► plan task ──► implement task ──► draft PRs
- (Jira)   /story-break-down                            /story-plan-task  /story-implement-task
+ story ──► plan story ──► story.md plan + board.json (planned tasks, deps) ──► implement task ──► draft PRs
+ (Jira)   /story-plan                                                         /story-implement-task
 ```
 
 - **Local files are the source of truth.** Each story is a folder with a `board.json`, a `story.md` and one markdown file per task. Jira is only read, unless you ask for subtasks, which are created once.
-- **Task statuses:** `todo → planning → planned → implementing → done`, plus `dropped`, and a `blocked` flag. A task can skip planning (`todo → implementing`) for spikes and manual testing. `done` means every expected PR is merged.
+- **Task statuses:** `planned → implementing → done`, plus `dropped`, and a `blocked` flag. `/story-plan` creates every task as `planned` (`todo` and `planning` remain valid statuses for older boards). `done` means every expected PR is merged.
 - **Story statuses:** `in_progress → in_review → done`, moved by `/story-review` once every task is finished.
 - **PRs are always drafts, and never stacked.** You mark them ready and merge them yourself; capcom never merges anything (it can add or remove your merge bot's automerge label, but only when you tick it and confirm).
 - **A task can need several PRs.** List a repo once per expected PR (`--repos api,api,ui` means two PRs in `api` and one in `ui`); the task cannot finish until all of them exist and are merged.
@@ -141,7 +141,7 @@ mkdir -p ~/stories
 export CAPCOM_ROOT=~/stories         # also add this to your shell profile and to `env` in ~/.claude/settings.json
 
 # make the skills visible to Claude Code
-for s in story-break-down story-plan-task story-implement-task story-review pr-address agent-note; do
+for s in story-plan story-implement-task story-review pr-address agent-note; do
   ln -s "$PWD/skills/$s" ~/.claude/skills/$s
 done
 ```
@@ -150,14 +150,13 @@ Then, in Claude Code:
 
 | Step | Command | What it does |
 |---|---|---|
-| 1 | `/story-break-down PROJ-123` | Reads the story, proposes tasks and dependencies, agrees them with you, writes `$CAPCOM_ROOT/PROJ-123/`. Creates Jira subtasks only if you ask. |
-| 2 | `/story-plan-task PROJ-123 T1` | Researches one task, asks you questions, writes the plan into the task file. Never changes code. |
-| 3 | `/story-implement-task PROJ-123 T1` | Asks main checkout or worktree, implements the plan, opens **draft** PRs titled like `feat: PROJ-124 add notice endpoint (T1)`. |
-| 4 | `/story-review PROJ-123` | When every task is done: checks the subtasks, reviews the story's acceptance criteria and intent against what was built, and tells you what it found. |
+| 1 | `/story-plan PROJ-123` (or a Jira URL) | Researches the whole story, asks you questions, writes one plan into `story.md`, splits it into tasks with dependencies, and saves them ready to implement in `$CAPCOM_ROOT/PROJ-123/`. Never changes code. Creates Jira subtasks only if you ask. |
+| 2 | `/story-implement-task PROJ-123 T1` | Asks main checkout or worktree, implements the plan, opens **draft** PRs titled like `feat: PROJ-124 add notice endpoint (T1)`. |
+| 3 | `/story-review PROJ-123` | When every task is done: checks the subtasks, reviews the story's acceptance criteria and intent against what was built, and tells you what it found. |
 
 And in another terminal, `capcom-tui` shows it all and updates as the files change.
 
-A typical run, in order: break the story down and approve the table; plan each task in dependency order; implement it; review and mark the draft PRs ready on GitHub yourself; when they merge, drag the card to DONE in the TUI (or run `capcom refresh PROJ-123`); repeat; finish with `/story-review`. More detail on resuming tasks and cleaning up worktrees is in the skills themselves (`skills/*/SKILL.md`).
+A typical run, in order: plan the story and approve the plan and task table; implement each task in dependency order; review and mark the draft PRs ready on GitHub yourself; when they merge, drag the card to DONE in the TUI (or run `capcom refresh PROJ-123`); repeat; finish with `/story-review`. More detail on resuming tasks and cleaning up worktrees is in the skills themselves (`skills/*/SKILL.md`).
 
 ## The terminal board
 

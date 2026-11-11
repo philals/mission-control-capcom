@@ -372,7 +372,7 @@ mod tests {
         add_task(&dir(&root), &mut board, "One", TaskType::Pr, vec![], vec![]).unwrap();
         add_session(&mut board, "T1", "abc", "story-implement-task", "/w/one", "t1").unwrap();
         add_session(&mut board, "T1", "abc", "story-implement-task", "/w/two", "t2").unwrap();
-        add_session(&mut board, "T1", "abc", "story-plan-task", "/w/one", "t3").unwrap();
+        add_session(&mut board, "T1", "abc", "story-plan", "/w/one", "t3").unwrap();
         let sessions = &board.tasks[0].sessions;
         assert_eq!(sessions.len(), 2);
         assert_eq!((sessions[0].cwd.as_str(), sessions[0].started_at.as_str()), ("/w/two", "t1"));
@@ -389,7 +389,7 @@ mod tests {
         set_pr_state(&mut board, "T1", "https://github.com/o/api/pull/5", PrState::Ready).unwrap();
         assert_eq!(board.tasks[0].prs[0].state, PrState::Ready);
         assert!(set_pr_state(&mut board, "T1", "https://nope", PrState::Ready).is_err());
-        set_agent(&mut board, "T1", "w1:p2", "story-plan-task", "2026-10-02T00:00:00Z").unwrap();
+        set_agent(&mut board, "T1", "w1:p2", "story-plan", "2026-10-02T00:00:00Z").unwrap();
         assert_eq!(board.tasks[0].agent.as_ref().unwrap().pane, "w1:p2");
         clear_agent(&mut board, "T1").unwrap();
         assert!(board.tasks[0].agent.is_none());

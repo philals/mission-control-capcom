@@ -38,7 +38,7 @@ function followDialog() {
 function newStoryDialog() {
   textDialog(
     "New story",
-    "Paste a Jira key or link. This opens a new Claude Code session with /story-break-down typed in; press Enter there to start the break-down.",
+    "Paste a Jira key or link. This opens a new Claude Code session with /story-plan typed in; press Enter there to start planning.",
     "PROJ-123",
     "Open the session",
     (key) => act("story.new", { key }),
@@ -137,7 +137,7 @@ function paletteItems() {
     push(`Back to the stories`, "Esc", () => (location.hash = ""));
     for (const t of story.tasks) {
       push(`Details of ${t.id}: ${t.title}`, "", () => taskSheet(story.key, t.id));
-      if (t.status === "todo") push(`Plan ${t.id} in a new session`, "", () => startSession(t.plan, `/story-plan-task ${story.key} ${t.id}`, { key: story.key, task: t.id, kind: "plan" }));
+      if (t.status === "todo") push(`Plan ${t.id} in a new session`, "", () => startSession(t.plan, `/story-plan ${story.key} ${t.id}`, { key: story.key, task: t.id, kind: "plan" }));
       if ((t.status === "todo" || t.status === "planned") && !t.waitingOn.length) push(`Implement ${t.id} in a new session`, "", () => startSession(t.implement, `/story-implement-task ${story.key} ${t.id}`, { key: story.key, task: t.id, kind: "implement" }));
       if (t.status === "implementing") push(`Finish ${t.id}`, "", () => finishTask(story, t));
     }

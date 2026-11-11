@@ -251,7 +251,7 @@ function renderHeaderNow() {
     status,
     clock,
     btn("+ follow", followDialog, "head", "follow someone else's PR or a workflow run by its link (or just paste the link)"),
-    btn("+ new story", newStoryDialog, "head", "start a Jira story's break-down in a new Claude Code session"),
+    btn("+ new story", newStoryDialog, "head", "start planning a Jira story in a new Claude Code session"),
     btn(events ? `log ${events}` : "log", eventsDialog, "head", "what capcom did by itself"),
     btn("⚙", settingsDialog, "head", "settings"),
     btn("⌘", paletteDialog, "head", "every action (Ctrl-K)"),
@@ -358,7 +358,7 @@ function finishTask(story, task) {
 function storyMenu(story, x, y) {
   openMenu(x, y, [
     ["Open", () => (location.hash = `#/story/${encodeURIComponent(story.key)}`)],
-    story.tasks.length === 0 ? ["Break it down in a new session ↗", () => startSession(story.breakdown, "/story-break-down", { key: story.key, kind: "breakdown" })] : null,
+    story.tasks.length === 0 ? ["Plan it in a new session ↗", () => startSession(story.breakdown, "/story-plan", { key: story.key, kind: "breakdown" })] : null,
     story.allFinished && story.status === "in_progress" ? ["Review it in a new session ↗", () => startSession(story.review, "/story-review", { key: story.key, kind: "review" })] : null,
     story.status === "in_review" ? ["Run the review again in a new session ↗", () => startSession(story.review, "/story-review", { key: story.key, kind: "review" })] : null,
     story.status === "in_progress" && story.allFinished ? ["Mark done…", () => markStoryDone(story)] : null,
@@ -458,7 +458,7 @@ function taskCard(story, task) {
   }
   const actions = el("div", "task-actions");
   add(actions, btn("details", () => taskSheet(story.key, task.id), "small", "its plan or description, and its file"));
-  if (task.status === "todo") add(actions, btn("plan ↗", () => startSession(task.plan, `/story-plan-task ${story.key} ${task.id}`, { key: story.key, task: task.id, kind: "plan" }), "small", "open a new Claude Code session with the planning skill typed in"));
+  if (task.status === "todo") add(actions, btn("plan ↗", () => startSession(task.plan, `/story-plan ${story.key} ${task.id}`, { key: story.key, task: task.id, kind: "plan" }), "small", "open a new Claude Code session with the planning skill typed in"));
   if ((task.status === "todo" || task.status === "planned") && task.waitingOn.length === 0 && !task.blocked) add(actions, btn("implement ↗", () => startSession(task.implement, `/story-implement-task ${story.key} ${task.id}`, { key: story.key, task: task.id, kind: "implement" }), "small", "open a new Claude Code session with the implement skill typed in"));
   if (task.status === "implementing") add(actions, btn(task.allMerged ? "finish ✓" : "finish…", () => finishTask(story, task), task.allMerged ? "small primary" : "small", "check its PRs on GitHub and finish it when they are all merged"));
   card.append(actions);
@@ -875,7 +875,7 @@ function taskSheet(storyKey, taskId) {
     add(body, el("h4", "", detail ? detail.label : "…"));
     add(body, el("pre", "doc", detail ? detail.body : "loading…"));
     const foot = [];
-    if (task.status === "todo") foot.push(btn("Plan ↗", () => startSession(task.plan, `/story-plan-task ${storyKey} ${task.id}`, { key: storyKey, task: task.id, kind: "plan" })));
+    if (task.status === "todo") foot.push(btn("Plan ↗", () => startSession(task.plan, `/story-plan ${storyKey} ${task.id}`, { key: storyKey, task: task.id, kind: "plan" })));
     if ((task.status === "todo" || task.status === "planned") && !task.waitingOn.length) foot.push(btn("Implement ↗", () => startSession(task.implement, `/story-implement-task ${storyKey} ${task.id}`, { key: storyKey, task: task.id, kind: "implement" })));
     if (task.status === "implementing") foot.push(btn("Finish…", () => finishTask(story, task)));
     foot.push(btn("Close", closeModal));

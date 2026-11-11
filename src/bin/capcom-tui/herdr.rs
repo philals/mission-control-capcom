@@ -452,7 +452,7 @@ mod tests {
             label: "PROJ-123 - Notification preferences".into(),
             tab: "T2 plan".into(),
             agent: "proj-123-t2-plan".into(),
-            prompt: "/story-plan-task PROJ-123 T2".into(),
+            prompt: "/story-plan PROJ-123 T2".into(),
             folder: None,
             task: Some("T2".into()),
             sessions: Vec::new(),
@@ -467,7 +467,7 @@ mod tests {
         assert!(calls.contains(&"workspace create --label PROJ-123 - Notification preferences --cwd /work --no-focus".to_string()), "{calls:?}");
         assert!(calls.contains(&"tab rename w9:t1 T2 plan".to_string()), "{calls:?}");
         assert!(calls.contains(&"agent start proj-123-t2-plan --kind claude --pane w9:p1".to_string()), "{calls:?}");
-        assert_eq!(calls.last().unwrap(), "agent prompt proj-123-t2-plan /story-plan-task PROJ-123 T2");
+        assert_eq!(calls.last().unwrap(), "agent prompt proj-123-t2-plan /story-plan PROJ-123 T2");
     }
 
     fn resume() -> Resume {

@@ -434,7 +434,7 @@ mod tests {
     fn agent_is_cleared_when_a_run_finishes() {
         let mut b = board(vec![t("T1", &[])]);
         transition(&mut b, "T1", Status::Planning).unwrap();
-        b.tasks[0].agent = Some(Agent { pane: "w1:p1".into(), skill: "story-plan-task".into(), started_at: "now".into() });
+        b.tasks[0].agent = Some(Agent { pane: "w1:p1".into(), skill: "story-plan".into(), started_at: "now".into() });
         transition(&mut b, "T1", Status::Planned).unwrap();
         assert!(b.tasks[0].agent.is_none());
     }

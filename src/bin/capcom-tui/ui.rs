@@ -808,7 +808,7 @@ fn draw_new_story(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
         Line::raw(""),
     ];
     if app.herdr.is_some() {
-        lines.push(Line::from(Span::styled(" Starts /story-break-down in a new Herdr workspace.", dim)));
+        lines.push(Line::from(Span::styled(" Starts /story-plan in a new Herdr workspace.", dim)));
     } else {
         lines.push(Line::from(Span::styled(" Not running inside Herdr, Orca or Claude Desktop: nothing can be started.", Style::new().fg(theme::RED))));
     }
@@ -1322,7 +1322,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("Tab", "focus: board or list, then PRs, then runs".into()),
         row("o", "open the selected pull request or run in the browser".into()),
         row("x", "runs panel: stop watching the selected run (watch one by pasting its link)".into()),
-        row("n", "new story: paste a Jira key or link to start its breakdown in Herdr".into()),
+        row("n", "new story: paste a Jira key or link to start planning it in Herdr".into()),
         row("p / i", "start planning / implementing the selected task in Herdr (or drag the card); a TODO task asks whether an agent is needed".into()),
         row("x", "finish the selected IMPLEMENTING task: checks its PRs on GitHub, done only if all merged (or drag to DONE)".into()),
         row("D", "mark the selected (or open) story DONE, skipping the review; every task must be done or dropped (or drag it from DOING to DONE)".into()),
@@ -2400,10 +2400,10 @@ mod tests {
     fn only_prs_recorded_on_a_task_get_an_agent_button_and_it_resumes_the_latest_implementing_session() {
         let (root, mut app) = with_prs();
         store::update(root.path(), "PROJ-2", |b| {
-            ops::add_session(b, "T1", "plan-1", "story-plan-task", "/w/plan", "t1")?;
+            ops::add_session(b, "T1", "plan-1", "story-plan", "/w/plan", "t1")?;
             ops::add_session(b, "T1", "impl-1", "story-implement-task", "/w/api", "t2")?;
             ops::add_session(b, "T1", "impl-2", "story-implement-task", "/w/api", "t3")?;
-            ops::add_session(b, "T1", "plan-2", "story-plan-task", "/w/plan", "t4")
+            ops::add_session(b, "T1", "plan-2", "story-plan", "/w/plan", "t4")
         })
         .unwrap();
         app.reload();
@@ -3777,7 +3777,7 @@ mod tests {
                 label: "PROJ-1 - Notices".into(),
                 tab: "T3 plan".into(),
                 agent: "proj-1-t3-plan".into(),
-                prompt: "/story-plan-task PROJ-1 T3".into(),
+                prompt: "/story-plan PROJ-1 T3".into(),
                 folder: None,
                 task: Some("T3".into()),
                 sessions: Vec::new(),
@@ -3802,7 +3802,7 @@ mod tests {
     fn only_sessions_of_the_same_skill_count_as_already_running() {
         let (root, _) = sample();
         store::update(root.path(), "PROJ-1", |b| {
-            ops::add_session(b, "T1", "s-plan", "story-plan-task", "/w", "2026-11-05T00:00:00Z")?;
+            ops::add_session(b, "T1", "s-plan", "story-plan", "/w", "2026-11-05T00:00:00Z")?;
             ops::add_session(b, "T1", "s-impl", "story-implement-task", "/w", "2026-11-05T01:00:00Z")
         })
         .unwrap();
@@ -3949,7 +3949,7 @@ mod tests {
         app.row[2] = 0;
         app.on_key(KeyCode::Char('i'), false);
         let prompts: Vec<String> = launches_after(&mut app, &fake, 2).into_iter().map(|l| l.prompt).collect();
-        assert!(prompts.contains(&"/story-plan-task PROJ-1 T3".to_string()), "{prompts:?}");
+        assert!(prompts.contains(&"/story-plan PROJ-1 T3".to_string()), "{prompts:?}");
         assert!(prompts.contains(&"/story-implement-task PROJ-1 T1".to_string()), "{prompts:?}");
         let (_root, mut plain) = sample();
         plain.col = 0;
@@ -3993,7 +3993,7 @@ mod tests {
                 label: "NEW-5".into(),
                 tab: "break down".into(),
                 agent: "new-5-breakdown".into(),
-                prompt: "/story-break-down NEW-5".into(),
+                prompt: "/story-plan NEW-5".into(),
                 folder: None,
                 task: None,
                 sessions: Vec::new(),
@@ -4531,7 +4531,7 @@ mod tests {
         drag_story(&mut app, "PROJ-1", "DOING");
         let launches = launches_after(&mut app, &fake, 1);
         assert_eq!(launches.len(), 1);
-        assert_eq!(launches[0].prompt, "/story-break-down PROJ-1");
+        assert_eq!(launches[0].prompt, "/story-plan PROJ-1");
         assert_eq!((launches[0].tab.as_str(), launches[0].agent.as_str()), ("break down", "proj-1-breakdown"));
         drag_story(&mut app, "PROJ-2", "DOING");
         assert!(app.current_notice().unwrap().contains("moves to DOING by itself"), "{:?}", app.current_notice());

@@ -23,7 +23,7 @@ const COLOR = {
   dropped: "#5c6370",
 };
 const STORY_COLOR = { in_progress: "#f0b429", in_review: "#c792ea", done: "#22c55e" };
-const SKILL = { planning: "story-plan-task", implementing: "story-implement-task" };
+const SKILL = { planning: "story-plan", implementing: "story-implement-task" };
 const STORY_DOT = { in_progress: "accent", in_review: "ansi3", done: "dim" };
 
 const store = (k, v) => {
@@ -198,7 +198,7 @@ export default class CapcomBoard extends View {
       return;
     }
     this.message = { text: `Breaking down ${key} in a new tab…`, ok: true };
-    run("tab.new", { name: `${key} breakdown`, argv: ["claude", `/story-break-down ${key}`] });
+    run("tab.new", { name: `${key} breakdown`, argv: ["claude", `/story-plan ${key}`] });
     cx.notify();
   }
 
@@ -350,7 +350,7 @@ export default class CapcomBoard extends View {
           .child(
             div().id("add-story").px(7).py(2).rounded(5).text_size(11).cursor_pointer()
               .text_color(t.accent).border(1).border_color(t.border).hover((x) => x.bg(t.hover))
-              .tooltip("Add a story: break down a Jira story into tasks")
+              .tooltip("Add a story: plan a Jira story and split it into tasks")
               .on_click((_e, cx) => this.toggleAdding(cx))
               .child(this.adding ? "× cancel" : "+ story"),
           ),

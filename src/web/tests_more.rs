@@ -323,7 +323,7 @@ fn a_new_story_opens_a_desktop_session_with_the_break_down_typed_in() {
     r.server.set_workdir("/w/code".into());
     assert_eq!(act(&r, json!({ "action": "story.new", "key": "see PROJ-123 for it" })).1["ok"], false, "only a key, not a sentence");
     assert_eq!(act(&r, json!({ "action": "story.new", "key": "proj-123" })).1["ok"], true);
-    assert_eq!(*opened.0.lock().unwrap(), vec!["claude://code/new?prompt=%2Fstory-break-down%20PROJ-123&folder=%2Fw%2Fcode".to_string()]);
+    assert_eq!(*opened.0.lock().unwrap(), vec!["claude://code/new?prompt=%2Fstory-plan%20PROJ-123&folder=%2Fw%2Fcode".to_string()]);
 }
 
 #[test]
@@ -332,8 +332,8 @@ fn the_state_offers_the_skills_as_links_and_those_links_are_openable() {
     r.server.set_workdir("/w/code".into());
     let s = state(&r);
     let story = &s["stories"][0];
-    assert_eq!(story["breakdown"], "claude://code/new?prompt=%2Fstory-break-down%20PROJ-1&folder=%2Fw%2Fcode");
-    assert_eq!(story["tasks"][0]["plan"], "claude://code/new?prompt=%2Fstory-plan-task%20PROJ-1%20T1&folder=%2Fw%2Fcode");
+    assert_eq!(story["breakdown"], "claude://code/new?prompt=%2Fstory-plan%20PROJ-1&folder=%2Fw%2Fcode");
+    assert_eq!(story["tasks"][0]["plan"], "claude://code/new?prompt=%2Fstory-plan%20PROJ-1%20T1&folder=%2Fw%2Fcode");
     assert_eq!(story["tasks"][0]["implement"], "claude://code/new?prompt=%2Fstory-implement-task%20PROJ-1%20T1&folder=%2Fw%2Fcode");
     let mut shown = std::collections::HashSet::new();
     super::view::shown_urls(&s, &mut shown);
@@ -672,7 +672,7 @@ fn a_running_planning_session_does_not_stop_implementing() {
     let r = rig();
     r.server.set_workdir("/w/code".into());
     let root = r._dir.path().join("stories");
-    store::update(&root, "PROJ-1", |b| crate::ops::add_session(b, "T1", "s-1", "story-plan-task", "/w/code", "2026-11-05T00:00:00Z").map(|_| ())).unwrap();
+    store::update(&root, "PROJ-1", |b| crate::ops::add_session(b, "T1", "s-1", "story-plan", "/w/code", "2026-11-05T00:00:00Z").map(|_| ())).unwrap();
     lock(&r.server.live).agents = vec![AgentInfo {
         pane: "claude-desktop:7:local_abc".into(), name: None, status: AgentStatus::Idle, topic: String::new(), workspace: String::new(), cwd: "/w/code".into(), session: Some("s-1".into()),
     }];

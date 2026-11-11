@@ -119,7 +119,7 @@ impl Herdr for DesktopHost {
 
 impl Herdr for OrcaHost {
     /// A task starts in its own folder, never quietly in another repo: one with no folder, or a folder
-    /// that has gone, is refused. Story-wide work (review, break-down) starts in the work folder.
+    /// that has gone, is refused. Story-wide work (review, plan) starts in the work folder.
     fn launch(&self, l: &Launch) -> Result<Outcome, String> {
         if let Some(task) = &l.task {
             capcom::orca::check_task_folder(&l.workspace, task, l.folder.as_deref())?;

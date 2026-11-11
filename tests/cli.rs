@@ -39,7 +39,7 @@ fn full_task_lifecycle() {
     assert_eq!(ok(&root, &["ready", "PROJ-1"])["ready"], serde_json::json!(["T1"]));
 
     ok(&root, &["status", "PROJ-1", "T1", "planning"]);
-    ok(&root, &["set-agent", "PROJ-1", "T1", "--pane", "w1:p1", "--skill", "story-plan-task"]);
+    ok(&root, &["set-agent", "PROJ-1", "T1", "--pane", "w1:p1", "--skill", "story-plan"]);
     let planned = ok(&root, &["status", "PROJ-1", "T1", "planned"]);
     assert!(planned.get("agent").is_none());
     ok(&root, &["status", "PROJ-1", "T1", "implementing"]);
@@ -165,9 +165,9 @@ fn set_subtask_validates_the_key() {
 fn set_and_clear_agent() {
     let root = TempDir::new().unwrap();
     story_with_tasks(&root, 1);
-    let t = ok(&root, &["set-agent", "PROJ-1", "T1", "--pane", "w1:p1", "--skill", "story-plan-task"]);
+    let t = ok(&root, &["set-agent", "PROJ-1", "T1", "--pane", "w1:p1", "--skill", "story-plan"]);
     assert_eq!(t["agent"]["pane"], "w1:p1");
-    assert_eq!(t["agent"]["skill"], "story-plan-task");
+    assert_eq!(t["agent"]["skill"], "story-plan");
     assert!(!t["agent"]["startedAt"].as_str().unwrap().is_empty());
     let t = ok(&root, &["clear-agent", "PROJ-1", "T1"]);
     assert!(t.get("agent").is_none());
