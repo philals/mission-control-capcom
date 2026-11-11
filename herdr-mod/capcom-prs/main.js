@@ -83,9 +83,8 @@ export default class CapcomPrs extends View {
     openUrl(url);
   }
 
-  copyUrl(url) {
-    const cmd = 'printf %s "$1" | { wl-copy || xclip -selection clipboard || xsel -b -i || pbcopy; } 2>/dev/null';
-    exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", url]).catch(() => {});
+  copyUrl(url, cx) {
+    cx.write_to_clipboard(url);
   }
 
   // The agent if it is live, else resume its session in a new tab, else the PR on GitHub.
@@ -248,7 +247,7 @@ export default class CapcomPrs extends View {
           .hover((s) => s.text_color(t.foreground))
           .on_click((_e, cx) => {
             cx.stop_propagation();
-            this.copyUrl(pr.url);
+            this.copyUrl(pr.url, cx);
           })
           .child(svg("mods/workspace-chrome/files.svg").size(13).flex_none()),
       )

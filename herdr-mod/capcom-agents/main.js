@@ -149,13 +149,16 @@ export default class Agents extends View {
     return c && { ...c, label: n ? `${c.name} ${n}` : c.name };
   }
 
-  // Puts the agent's Claude Code session id on the clipboard: its terminal's foreground process is the
-  // `claude` that wrote ~/.claude/sessions/<pid>.json.
-  copySession(terminal) {
+  // The agent's Claude Code session id: its terminal's foreground process is the `claude` that wrote
+  // ~/.claude/sessions/<pid>.json.
+  async sessionOf(terminal) {
     const cmd = 'pid=$(hc get "$1" | sed -n \'s/.*"foreground":{[^}]*"pid":\\([0-9]*\\).*/\\1/p\'); '
-      + 'sed -n \'s/.*"sessionId":"\\([^"]*\\)".*/\\1/p\' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions/$pid.json" | tr -d \'\\n\' '
-      + '| { wl-copy || xclip -selection clipboard || xsel -b -i || pbcopy; } 2>/dev/null';
-    return exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", terminal], { timeout: 5000 }).catch(() => {});
+      + 'sed -n \'s/.*"sessionId":"\\([^"]*\\)".*/\\1/p\' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions/$pid.json"';
+    try {
+      return (await exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", terminal], { timeout: 5000 })).stdout.trim();
+    } catch {
+      return "";
+    }
   }
 
   // The portrait (your photo, else the drawn one) inside the gate ring.
@@ -499,7 +502,9 @@ export default class Agents extends View {
         .tooltip(copied ? "Copied" : "Copy this agent's session id")
         .on_click((_e, cx) => {
           cx.stop_propagation();
-          this.copySession(a.address).then(() => {
+          this.sessionOf(a.address).then((id) => {
+            if (!id) return;
+            cx.write_to_clipboard(id);
             this.copied = a.address;
             cx.notify();
             cx.timer.after(1500, (cx) => { if (this.copied === a.address) { this.copied = null; cx.notify(); } });
