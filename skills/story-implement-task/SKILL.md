@@ -1,11 +1,22 @@
 ---
 name: story-implement-task
-description: Implement one planned task (or a todo task that skips planning, such as a spike or manual testing) from a story board and open draft PRs, working through questions with the user. Use when asked to implement or build a task. Arguments - story key and task id, for example PROJ-123 T2.
+description: Implement one planned task (or a todo task that skips planning, such as a spike or manual testing) from a story board and open draft PRs, working through questions with the user. Use when asked to implement or build a task. Arguments - story key and task id, for example PROJ-123 T2. Also supports direct mode: a Jira key or URL with no board, for small bugs and changes.
 ---
 
 # Implement a task
 
 Arguments: `<KEY> <ID>`. Board data lives in `<root>/<KEY>/` (`<root>` is the stories folder printed by `capcom root`). Valid task statuses: todo, planning, planned, implementing, done, dropped. There is no per-task review status: CI fixes and review comments are handled inside the task while it stays `implementing`; the story is reviewed as a whole later with `/story-review`.
+
+## Direct mode (no board)
+
+Use when the argument is a Jira key or URL (for example `PROJ-123` or `https://.../browse/PROJ-123`) with no task id, or the user says there is no board. Check quickly with `grep -rl <KEY> "$(capcom root | jq -r .root)"`; if no board mentions it, go direct without asking. Intended for small bugs and changes, so keep the process light:
+
+- Skip all `capcom` commands (`show`, `ready`, `status`, `set-session`, `add-pr`, `refresh`, `block`) and the task file. No `## Plan`, `## Decisions` or `## Progress` to maintain.
+- Read the Jira ticket (Atlassian MCP) for the problem and acceptance criteria. Agree a short approach with the user in a few lines in chat, then implement, test first where it fits.
+- Work where the session already is: if the current checkout is already a worktree on a non-default branch, use it as is. Otherwise follow steps 4-5 (worktree, `fix/<KEY>-<slug>` or `feat/<KEY>-<slug>` branch from the up-to-date default branch). Same exceptions apply for `flower-power-dd` and `capcom`.
+- Open the PR as in step 7: draft, title `fix: <KEY> <short description>` (or `feat:`; no task id suffix), Copilot review requested, no auto-merge. Skip the `capcom add-pr` call.
+- Finish: report the PR url, tell the user to mark it ready and merge it. Worktree cleanup (step 10) is by hand: after the PR merges, offer to remove the worktree only if the user asks, using the same safety checks (merged, clean tree, no `--force`).
+- All other Rules (draft PRs only, no stacked PRs, targeted local checks only, ask one question at a time) still apply.
 
 ## Rules
 
