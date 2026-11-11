@@ -35,6 +35,12 @@ pub(super) struct AutoState {
     /// The state of each PR that was last found wanting.
     pub fix_seen: HashMap<String, String>,
     pub behind_asked: HashMap<String, std::time::Instant>,
+    /// When an agent was asked to fix each PR (round, time), for the "has not acted" notice.
+    pub fix_sent: HashMap<String, (u32, std::time::Instant)>,
+    /// `url|state` pairs already told about as stalled.
+    pub stall_told: HashSet<String>,
+    /// PRs whose agent could not be reached, and when to try again.
+    pub fix_failed: HashMap<String, std::time::Instant>,
     /// PRs that were green and waiting for a reviewer at the last look (None until the first look).
     pub awaiting: Option<HashSet<String>>,
     /// When Copilot last reviewed each PR, as of the last look (None until the first look).
@@ -57,6 +63,8 @@ pub struct Tools {
     pub update_branch: Arc<dyn Fn(&str, u64, &str) -> Done + Send + Sync>,
     /// title, text
     pub notify: Arc<dyn Fn(&str, &str) + Send + Sync>,
+    /// Message the agent that made a PR. None where there is no way to (the PR is only marked, for you to act).
+    pub fix: Option<Arc<dyn Fn(&crate::dispatch::Ask) -> Result<crate::dispatch::Sent, String> + Send + Sync>>,
     pub lookup: Arc<dyn PrLookup + Send + Sync>,
 }
 
@@ -78,6 +86,7 @@ impl Default for Tools {
             label: Arc::new(move |_, _, _, _| no("labelling")),
             update_branch: Arc::new(move |_, _, _| no("updating a branch")),
             notify: Arc::new(|_, _| {}),
+            fix: None,
             lookup: Arc::new(Refuse),
         }
     }
@@ -99,6 +108,10 @@ impl Tools {
                     let _ = Command::new("notify-send").args(["--app-name=CAPCOM", &title, &body]).status();
                 });
             }),
+            fix: Some(Arc::new(|ask| {
+                let live = crate::session::config_dir().as_deref().map(crate::claude::live).unwrap_or_default();
+                crate::dispatch::send(&crate::herdr_app::HerdrApp::new(), &crate::herdr_app::sessions_by_pid(&live), ask)
+            })),
             lookup: Arc::new(crate::refresh::GhLookup),
         }
     }

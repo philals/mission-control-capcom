@@ -6,6 +6,7 @@ pub mod cache;
 pub mod demo;
 pub mod claude;
 pub mod desktop;
+pub mod dispatch;
 pub mod durations;
 pub mod finish;
 pub mod fixstate;

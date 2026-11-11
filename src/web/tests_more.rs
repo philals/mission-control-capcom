@@ -713,3 +713,68 @@ fn a_pr_labelled_icebox_is_never_auto_fixed_or_auto_updated() {
     p.labels = vec!["Icebox".into()];
     assert!(crate::autopilot::fix_needed(&p).is_none());
 }
+
+fn red_pr() -> PullRequest {
+    let mut p = pr(1);
+    p.is_draft = false;
+    p.checks = serde_json::from_value(json!([{ "name": "build", "workflow": null, "state": "Failed", "started_at": null, "completed_at": "2026-10-01T00:00:00Z", "url": null }])).unwrap();
+    p
+}
+
+fn with_fix(r: &Rig, answer: impl Fn() -> Result<crate::dispatch::Sent, String> + Send + Sync + 'static) -> Arc<Mutex<Vec<String>>> {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let log = asked.clone();
+    let mut tools = r.server.tools();
+    tools.fix = Some(Arc::new(move |ask| {
+        log.lock().unwrap().push(ask.prompt.clone());
+        answer()
+    }));
+    r.server.set_tools(tools);
+    act(r, json!({ "action": "settings", "key": "autofix", "value": true }));
+    act(r, json!({ "action": "settings", "key": "autoreview", "value": false }));
+    asked
+}
+
+#[test]
+fn a_red_pr_has_its_agent_asked_once_per_state_with_the_round() {
+    let r = rig();
+    let asked = with_fix(&r, || Ok(crate::dispatch::Sent::Prompted));
+    r.server.on_prs(&[red_pr()]);
+    settle(&r);
+    r.server.on_prs(&[red_pr()]);
+    settle(&r);
+    let asked = asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    assert!(asked[0].starts_with("/pr-address https://github.com/acme/widgets/pull/1 (automatic round 1 of 5: 1 failing check"), "{asked:?}");
+    assert!(state(&r)["events"][0]["text"].as_str().unwrap().contains("asked the agent to fix acme/widgets#1"));
+}
+
+#[test]
+fn a_busy_agent_is_not_counted_and_is_asked_again_at_the_next_look() {
+    let r = rig();
+    let busy = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let b = busy.clone();
+    let asked = with_fix(&r, move || Ok(if b.load(Ordering::SeqCst) { crate::dispatch::Sent::Busy } else { crate::dispatch::Sent::Prompted }));
+    r.server.on_prs(&[red_pr()]);
+    settle(&r);
+    busy.store(false, Ordering::SeqCst);
+    r.server.on_prs(&[red_pr()]);
+    settle(&r);
+    let asked = asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 2, "{asked:?}");
+    assert!(asked[1].contains("round 1 of 5"), "the busy try did not use up a round: {asked:?}");
+}
+
+#[test]
+fn an_agent_that_cannot_be_reached_is_notified_and_left_alone_for_a_while() {
+    let r = rig();
+    act(&r, json!({ "action": "settings", "key": "notify", "value": true }));
+    let asked = with_fix(&r, || Err("Herdr app: no window".to_string()));
+    r.server.on_prs(&[red_pr()]);
+    settle(&r);
+    r.server.on_prs(&[red_pr()]);
+    settle(&r);
+    assert_eq!(asked.lock().unwrap().len(), 1, "not retried inside the cooldown");
+    let notes = r.notices.lock().unwrap().clone();
+    assert!(notes.len() == 1 && notes[0].contains("could not reach its agent") && notes[0].contains("no window"), "{notes:?}");
+}

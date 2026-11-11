@@ -70,7 +70,7 @@ For the PRs you ticked (and the defaults in `⚙`), whenever the PR list changes
 
 - **auto-review:** asks Copilot to review a new PR, once.
 - **auto-fix, a branch that is only behind its base:** brings it up to date through GitHub (what the "Update branch" button does), with no agent; not while Actions run, not on a PR whose merge bot keeps it up to date, at most once every 15 minutes, and a conflict is left for you.
-- **auto-fix, anything else** (failing checks, Copilot's comments, a merge conflict): marks the PR with a banner and `fix it ↗`, and lists it under `log`. The TUI messages the agent through Herdr; Claude Code has no supported way for another program to type into a running session, so here the last step is yours.
+- **auto-fix, anything else** (failing checks, Copilot's comments, a merge conflict): sends `/pr-address <link>` to the agent that made the PR, through the Herdr app, so no TUI needs to be open. The same rules as the TUI: once per state of the PR, at most 5 rounds (a record shared with the TUI, so the two never ask twice), not while the agent is mid-turn (it tries again at the next look and that does not use up a round), and a note under `log` if the PR looks the same 10 minutes later. The agent is the running one holding the session that made the PR, else that session resumed in a new tab (in the story's space when the PR is on a task), else a fresh agent in the repo's folder under the work folder. Nothing is brought to the front. If the app has no window open or no agent can be found, the PR is marked with a banner and `fix it ↗`, you are told, and it is left alone for 10 minutes before trying again.
 
 It also tells you (under `log`, and as a desktop notification when `⚙ Desktop notifications` is on) when a PR turns green and waits for a reviewer, when Copilot finishes a review, when a PR needs fixing, and when a run you follow finishes. What it did is kept in the `log`.
 
@@ -139,7 +139,7 @@ This repository has that file in `.claude/launch.json`. Put the same file in `.c
 
 - **Layout:** the same arrangement as the TUI, with draggable edges between consoles (above) instead of the TUI's divider keys; below 1000 px it shows one console at a time.
 - **Herdr:** no workspaces, tabs or panes: skills start in new desktop sessions (above), or in Orca (below), and a Herdr agent can't be reached from the page.
-- **Auto-fix's last step:** marked on the PR with a one-click session, not sent to the agent (above).
+- **Auto-fix needs the Herdr app:** with no window open, or when the PR's session is unknown and its repo has no folder under the work folder, the PR is only marked, for you to act (above).
 - **Loading screens, the bell and the terminal clipboard:** not ported (the page has a toast, the `log` and 📋 buttons).
 
 ## The console in every session

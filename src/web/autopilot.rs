@@ -1,7 +1,8 @@
 //! What the service does by itself whenever the PR or run lists change: tell you what needs you, learn how
 //! long checks take, and, for the PRs you ticked, the parts of auto-fix and auto-review that need no agent
-//! (ask Copilot to review, bring a behind branch up to date). Fixing red CI and answering comments needs an
-//! agent, and there is no way to message one, so those are marked on the PR with a one-click new session.
+//! (ask Copilot to review, bring a behind branch up to date), and the part that needs an agent: fixing red CI,
+//! a conflict and Copilot's comments, by sending `/pr-address` to the agent that made the PR through the Herdr
+//! app. Where that cannot be done the PR is marked instead, with a one-click session, for you to act.
 use super::engine::lock;
 use super::view::{autofix_on, autoreview_on};
 use super::*;
@@ -11,6 +12,10 @@ use crate::runs::{Run, RunState};
 
 const BEHIND_COOLDOWN: Duration = Duration::from_secs(15 * 60);
 pub(super) const MAX_ROUNDS: u32 = 5;
+/// Minutes after an ask with nothing changing on the PR before it says the agent did not act.
+const STALL_MINUTES: i64 = 10;
+/// How long to leave a PR alone after its agent could not be reached.
+const UNREACHABLE_COOLDOWN: Duration = Duration::from_secs(10 * 60);
 /// A watched run stays listed this long after it finishes.
 const WATCH_KEEP_MINUTES: i64 = 30;
 
@@ -156,7 +161,12 @@ impl Server {
             }
             match fix_needed(pr) {
                 None => {
-                    let had = lock(&self.eng.auto).fix_seen.remove(&pr.url).is_some();
+                    let had = {
+                        let mut auto = lock(&self.eng.auto);
+                        auto.fix_sent.remove(&pr.url);
+                        auto.fix_failed.remove(&pr.url);
+                        auto.fix_seen.remove(&pr.url).is_some()
+                    };
                     if had {
                         let (store, url) = (store.clone(), pr.url.clone());
                         std::thread::spawn(move || store.clear(&url));
@@ -171,9 +181,14 @@ impl Server {
         {
             let mut auto = lock(&self.eng.auto);
             if auto.fix_seen.get(&pr.url) == Some(&need.fingerprint) {
+                drop(auto);
+                self.check_stalled(pr, &need.fingerprint, store);
                 return;
             }
             if need.only_behind && auto.behind_asked.get(&pr.url).is_some_and(|at| at.elapsed() < BEHIND_COOLDOWN) {
+                return;
+            }
+            if auto.fix_failed.get(&pr.url).is_some_and(|at| at.elapsed() < UNREACHABLE_COOLDOWN) {
                 return;
             }
             if need.only_behind {
@@ -184,8 +199,93 @@ impl Server {
         if need.only_behind {
             self.update_branch(pr, need, store);
         } else {
-            self.notify_if_wanted("CAPCOM: a PR needs fixing", &format!("{}: {}", name_of(pr), need.why));
+            self.ask_agent(pr, need, store);
         }
+    }
+
+    /// Ask the agent that made the PR to fix it, once per state of the PR and up to MAX_ROUNDS times. With no
+    /// way to reach an agent the PR is only marked, and you are told.
+    fn ask_agent(self: &Arc<Self>, pr: &PullRequest, need: FixNeed, store: &fixstate::Store) {
+        let Some(fix) = self.tools().fix else {
+            self.notify_if_wanted("CAPCOM: a PR needs fixing", &format!("{}: {}", name_of(pr), need.why));
+            return;
+        };
+        let (me, store, url, name) = (self.clone(), store.clone(), pr.url.clone(), name_of(pr));
+        let template = self.fix_ask(pr);
+        std::thread::spawn(move || match store.claim(&url, &need.fingerprint, MAX_ROUNDS, false) {
+            Claim::Same => {}
+            Claim::Busy => {
+                lock(&me.eng.auto).fix_seen.remove(&url);
+            }
+            Claim::GaveUp => me.notify_if_wanted("CAPCOM: giving up on a PR", &format!("{name} is still not right after {MAX_ROUNDS} rounds: over to you (untick and tick auto-fix on it to start again)")),
+            Claim::Go { round, undo } => {
+                let mut ask = template;
+                ask.prompt = format!("/pr-address {url} (automatic round {round} of {MAX_ROUNDS}: {})", need.why);
+                match fix(&ask) {
+                    Ok(crate::dispatch::Sent::Busy) => {
+                        store.undo(&url, undo);
+                        lock(&me.eng.auto).fix_seen.remove(&url);
+                    }
+                    Ok(_) => {
+                        lock(&me.eng.auto).fix_sent.insert(url, (round, std::time::Instant::now()));
+                        me.event(format!("asked the agent to fix {name} (round {round} of {MAX_ROUNDS}: {})", need.why));
+                    }
+                    Err(e) => {
+                        store.undo(&url, undo);
+                        let mut auto = lock(&me.eng.auto);
+                        auto.fix_seen.remove(&url);
+                        auto.fix_failed.insert(url, std::time::Instant::now());
+                        drop(auto);
+                        me.notify_if_wanted("CAPCOM: a PR needs fixing", &format!("{name}: {}; could not reach its agent: {e}", need.why));
+                    }
+                }
+            }
+        });
+    }
+
+    /// Who to message about a PR, less the prompt: the session that made it (from the transcripts), and the
+    /// story's space when it is a task's PR.
+    fn fix_ask(&self, pr: &PullRequest) -> crate::dispatch::Ask {
+        let name = name_of(pr);
+        let session = lock(&self.eng.sessions).iter().find(|(u, _)| same_url(u, &pr.url)).map(|(_, s)| (s.session.clone(), s.cwd.clone()));
+        let owner = store::list_keys(&self.root).unwrap_or_default().into_iter().find_map(|key| {
+            let board = store::load(&self.root, &key).ok()?;
+            let task = board.tasks.iter().find(|t| t.prs.iter().any(|p| same_url(&p.url, &pr.url)))?;
+            Some((board.story.key.clone(), agents::short_name(&board.story.title), task.id.clone()))
+        });
+        let (space, label, tab) = match owner {
+            Some((key, short, task)) => {
+                let label = if short.is_empty() { key.clone() } else { format!("{key} - {short}") };
+                (key, label, format!("{task} resume"))
+            }
+            None => (String::new(), String::new(), format!("{name} agent")),
+        };
+        crate::dispatch::Ask {
+            prompt: String::new(),
+            session,
+            space,
+            label,
+            tab,
+            repo: pr.repo.rsplit('/').next().unwrap_or_default().to_string(),
+            workdir: lock(&self.eng.workdir).clone(),
+        }
+    }
+
+    /// Tell once if the agent was asked a while ago and the PR still looks exactly the same.
+    fn check_stalled(self: &Arc<Self>, pr: &PullRequest, fingerprint: &str, store: &fixstate::Store) {
+        {
+            let mut auto = lock(&self.eng.auto);
+            let waited = auto.fix_sent.get(&pr.url).is_some_and(|(_, at)| at.elapsed() > Duration::from_secs(STALL_MINUTES as u64 * 60));
+            if !waited || !auto.stall_told.insert(format!("{}|{fingerprint}", pr.url)) {
+                return;
+            }
+        }
+        let (me, store, url, fp, name) = (self.clone(), store.clone(), pr.url.clone(), fingerprint.to_string(), name_of(pr));
+        std::thread::spawn(move || {
+            if store.stalled(&url, &fp, STALL_MINUTES) {
+                me.notify_if_wanted("CAPCOM: the agent has not acted", &format!("{name} looks the same {STALL_MINUTES} minutes after it was asked to fix it"));
+            }
+        });
     }
 
     /// A branch that is only behind its base is brought up to date by asking GitHub to merge the base in: no agent.
