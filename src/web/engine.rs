@@ -130,6 +130,8 @@ pub(super) struct Engine {
     pub durations_path: Mutex<Option<PathBuf>>,
     /// The PRs and the Claude Code session that made each.
     pub sessions: Mutex<Vec<(String, PrSession)>>,
+    /// True from `watch_sessions` starting until it has read the transcripts once: which agent made a PR is not known before.
+    pub sessions_pending: std::sync::atomic::AtomicBool,
     pub workdir: Mutex<PathBuf>,
     pub tools: Mutex<Tools>,
     pub auto: Mutex<AutoState>,
@@ -158,6 +160,7 @@ impl Default for Engine {
             durations: Mutex::new(Durations::default()),
             durations_path: Mutex::new(None),
             sessions: Mutex::new(Vec::new()),
+            sessions_pending: std::sync::atomic::AtomicBool::new(false),
             workdir: Mutex::new(std::env::current_dir().unwrap_or_default()),
             tools: Mutex::new(Tools::default()),
             auto: Mutex::new(AutoState::default()),
@@ -234,6 +237,7 @@ impl Server {
     /// Keep the index of which Claude Code session made which PR up to date while a page looks.
     pub fn watch_sessions(self: &Arc<Self>, claude_config: PathBuf, index_file: Option<PathBuf>, every: Duration, tick: Duration) {
         let me = self.clone();
+        me.eng.sessions_pending.store(true, std::sync::atomic::Ordering::SeqCst);
         std::thread::spawn(move || {
             let mut index = index_file.as_deref().map(crate::session::Index::load).unwrap_or_default();
             let mut read: Option<std::time::Instant> = None;
@@ -246,6 +250,7 @@ impl Server {
                         }
                     }
                     *lock(&me.eng.sessions) = index.sessions();
+                    me.eng.sessions_pending.store(false, std::sync::atomic::Ordering::SeqCst);
                 }
                 std::thread::sleep(tick);
             }

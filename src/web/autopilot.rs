@@ -142,6 +142,10 @@ impl Server {
         let Some(store) = lock(&self.eng.fix_store).clone() else {
             return;
         };
+        // Until the transcripts are read, which agent made a PR is unknown and a fresh agent would be started for it.
+        if self.eng.sessions_pending.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         let settings = self.settings();
         let tools = self.tools();
         for pr in items.iter().filter(|p| p.managed()) {
