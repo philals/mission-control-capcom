@@ -4,8 +4,8 @@
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, HoverCard, Avatar, AvatarImage, AvatarFallback } from "gpui-base";
 import * as fs from "fs/promises";
-import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
-import { dotColor, short, openUrl, prDo, prDetails } from "./pr-details.js";
+import { agents, terminals, panes, focused, spaces, run, exec, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
+import { SH, dotColor, short, openUrl, prDo, prDetails } from "./pr-details.js";
 import { CHARACTERS, ringFile, dimFile } from "./characters.js";
 
 function find(node, id) {
@@ -147,6 +147,15 @@ export default class Agents extends View {
     const [id, n] = (this.persona[a.address] ?? "").split("#");
     const c = CHARACTERS.find((x) => x.id === id);
     return c && { ...c, label: n ? `${c.name} ${n}` : c.name };
+  }
+
+  // Puts the agent's Claude Code session id on the clipboard: its terminal's foreground process is the
+  // `claude` that wrote ~/.claude/sessions/<pid>.json.
+  copySession(terminal) {
+    const cmd = 'pid=$(hc get "$1" | sed -n \'s/.*"foreground":{[^}]*"pid":\\([0-9]*\\).*/\\1/p\'); '
+      + 'sed -n \'s/.*"sessionId":"\\([^"]*\\)".*/\\1/p\' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions/$pid.json" | tr -d \'\\n\' '
+      + '| { wl-copy || xclip -selection clipboard || xsel -b -i || pbcopy; } 2>/dev/null';
+    return exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", terminal], { timeout: 5000 }).catch(() => {});
   }
 
   // The portrait (your photo, else the drawn one) inside the gate ring.
@@ -478,6 +487,25 @@ export default class Agents extends View {
           cx.notify();
         })
         .child(svg(`mods/workspace-chrome/${isPinned ? "pin-off" : "pin"}.svg`).size(13));
+      const copied = this.copied === a.address;
+      const copy = div()
+        .id(`copy-${a.address}`)
+        .flex_none()
+        .p(2)
+        .rounded(4)
+        .text_color(copied ? t.foreground : t.dim)
+        .cursor_pointer()
+        .hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .tooltip(copied ? "Copied" : "Copy this agent's session id")
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          this.copySession(a.address).then(() => {
+            this.copied = a.address;
+            cx.notify();
+            cx.timer.after(1500, (cx) => { if (this.copied === a.address) { this.copied = null; cx.notify(); } });
+          });
+        })
+        .child(svg(`mods/workspace-chrome/${copied ? "check" : "files"}.svg`).size(13));
       // Ends the agent and its sub-agents; a working or blocked one asks with a second click first.
       const asking = this.closing === a.address;
       const close = div()
@@ -543,6 +571,7 @@ export default class Agents extends View {
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
         .when(this.hovered === a.address || asking, el => el.child(close))
+        .when(this.hovered === a.address || copied, el => el.child(copy))
         .when(this.hovered === a.address, el => el.child(pin))
         .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
         .child(this.status(t, a, byPriority && !isPinned));

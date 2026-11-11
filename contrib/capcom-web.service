@@ -13,6 +13,8 @@ ExecStart=%h/.local/bin/capcom web --port 1969
 Environment=CAPCOM_ROOT=%h/stories
 # the folder new Claude Code sessions started from the page begin in
 Environment=CAPCOM_WORKDIR=%h/code
+# herdr-app and hc live in ~/.local/bin, which a user service does not have on its PATH
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Restart=on-failure
 RestartSec=10
 NoNewPrivileges=true
