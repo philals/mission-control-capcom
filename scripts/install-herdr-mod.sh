@@ -5,7 +5,7 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 home="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
-for name in capcom-prs capcom-agents capcom-board; do
+for name in capcom-prs capcom-agents capcom-board capcom-jira; do
   mod="$home/mods/$name"
   mkdir -p "$mod"
   cp herdr-mod/$name/*.js herdr-mod/$name/mod.json herdr-mod/shared/*.js "$mod/"
@@ -16,6 +16,10 @@ for name in capcom-prs capcom-agents capcom-board; do
   fi
   herdr-app check "$mod"
 done
+
+# capcom-jira runs this to fetch your Jira tickets through Claude's Atlassian connector.
+mkdir -p "$HOME/.local/bin"
+install -m 755 scripts/capcom-jira-me "$HOME/.local/bin/capcom-jira-me"
 
 # capcom-tabs is Herdr's own `tabs` mod plus a Board button (herdr-mod/capcom-tabs.patch); only the patch is kept here.
 tabs="$home/mods/capcom-tabs"

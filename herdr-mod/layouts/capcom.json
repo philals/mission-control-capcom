@@ -169,6 +169,25 @@
               "min": 280,
               "max": 900,
               "hidden": true
+            },
+            {
+              "id": "jira-panel",
+              "type": "column",
+              "children": [
+                {
+                  "id": "jira",
+                  "type": "block",
+                  "content": {
+                    "mod": "capcom-jira"
+                  }
+                }
+              ],
+              "size": {
+                "px": 360
+              },
+              "min": 280,
+              "max": 900,
+              "hidden": true
             }
           ],
           "padding": 8,

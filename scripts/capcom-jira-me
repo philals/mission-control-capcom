@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Writes the Jira tickets assigned to you to jira-me.json, using Claude's Atlassian connector (`claude -p`).
+# The capcom-jira board mod runs this; run it by hand to test. Prints the file's path on success.
+set -euo pipefail
+PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+
+out="${CAPCOM_JIRA_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/capcom/jira-me.json}"
+mkdir -p "$(dirname "$out")"
+exec 9>"$out.lock"
+flock -n 9 || { echo "capcom-jira-me: a fetch is already running" >&2; exit 75; }
+
+schema='{"type":"object","required":["issues"],"properties":{"issues":{"type":"array","items":{"type":"object","required":["key","summary","status","statusCategory","type","url","updated"],"properties":{"key":{"type":"string"},"summary":{"type":"string"},"status":{"type":"string"},"statusCategory":{"type":"string"},"type":{"type":"string"},"priority":{"type":"string"},"url":{"type":"string"},"updated":{"type":"string"}}}}}}'
+prompt='Use the Atlassian tools. Call getAccessibleAtlassianResources for the cloud id, then searchJiraIssuesUsingJql with JQL: assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC, maxResults 50. Return every issue found: key, summary, status (the status name), statusCategory, type (the issue type), priority (empty string if none), url (site URL + /browse/ + key) and updated (the ISO timestamp). If there are none, return an empty list.'
+
+raw="$(claude -p "$prompt" \
+  --model "${CAPCOM_JIRA_MODEL:-haiku}" \
+  --allowedTools mcp__claude_ai_Atlassian__getAccessibleAtlassianResources mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql \
+  --json-schema "$schema" \
+  --no-session-persistence \
+  --output-format json)"
+
+tmp="$(mktemp "$out.XXXXXX")"
+trap 'rm -f "$tmp"' EXIT
+printf '%s' "$raw" | jq --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+  if .is_error then error(.result // "claude failed")
+  elif (.structured_output.issues | type) != "array" then error("claude returned no issue list")
+  else {fetchedAt: $at, issues: .structured_output.issues} end' > "$tmp"
+mv "$tmp" "$out"
+trap - EXIT
+echo "$out"

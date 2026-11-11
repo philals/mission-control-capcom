@@ -15,7 +15,7 @@ service.
   has to be running to act on them, and the `⚙` strip says so when `capcom web` is not.
 
 Install: `scripts/install.sh` then `scripts/install-herdr-mod.sh`. This repo is the source of truth for every capcom
-mod (`capcom-prs`, `capcom-agents`, `capcom-board`; `capcom-tabs` is Herdr's `tabs` mod plus `capcom-tabs.patch`, built at install) and for the `capcom` layout
+mod (`capcom-prs`, `capcom-agents`, `capcom-board`, `capcom-jira`; `capcom-tabs` is Herdr's `tabs` mod plus `capcom-tabs.patch`, built at install) and for the `capcom` layout
 (`herdr-mod/layouts/capcom.json`); the script copies them into the app and switches to the layout. Edit them here, not
 in `~/.config/herdr-app`, or the next install overwrites the change.
 
@@ -30,3 +30,19 @@ No PR yet is a dark ring; merged is a full one.
 - To use real photos, save square images as `~/.config/herdr-app/mods/capcom-agents/avatars/<id>.jpg` (or `.png`), with
   `<id>` one of `oneill carter daniel tealc hammond vala`. They are picked up within 30 seconds and are not in the repo.
 - The cast is in `capcom-agents/characters.js`.
+
+## capcom-jira: your Jira tickets
+
+A Jira button in the tab bar opens a board of the tickets assigned to you, to the right of the Capcom board, grouped by
+Jira status. Tickets whose status category is Done are not fetched. Click a card to expand it.
+
+- Each card has ID and URL copy buttons, `↗` to open in Jira, and a `▶` button for the next skill: `Plan`
+  (`/story-plan KEY`) for a ticket with no board, `Do T3` / `Resume T3` for the next ready task, `Review` once every
+  task is done. The tag `Capcom 2/4` shows a ticket that already has a board.
+- The expanded card adds progress by task status, copy actions (ID, URL, `KEY: title`, branch name), open in Jira, and every
+  skill that fits: plan or re-plan, implement a task, review, or implement directly (a small bug or change with no board).
+- Data comes from `scripts/capcom-jira-me`, installed to `~/.local/bin`. It runs `claude -p` (Haiku) with the Atlassian
+  connector and writes `~/.cache/capcom/jira-me.json` (override with `CAPCOM_JIRA_FILE`; set `CAPCOM_JIRA_MODEL` for
+  another model). One run takes about 15 seconds and costs under a cent.
+- It fetches when the pane opens if the file is over 5 minutes old, then every 5 minutes while the pane is open, and
+  on `↻`. Closing the pane stops it. A second fetch never starts while one is running.
