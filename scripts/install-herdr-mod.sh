@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Installs the PR sidebar mod into the Herdr app and adds it to a `capcom` layout (a clone of `main`).
+# Installs capcom's Herdr mods and the `capcom` layout from herdr-mod/ (the source of truth) into the Herdr app.
 # Needs `capcom` on PATH (scripts/install.sh) and the Herdr app running.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 home="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
-for name in capcom-prs capcom-agents; do
+for name in capcom-prs capcom-agents capcom-board capcom-tabs; do
   mod="$home/mods/$name"
   mkdir -p "$mod"
   cp herdr-mod/$name/*.js herdr-mod/$name/mod.json herdr-mod/shared/*.js "$mod/"
+  cp herdr-mod/$name/*.svg "$mod/" 2>/dev/null || true
   if [ "$name" = capcom-agents ]; then
     node scripts/gen-avatars.mjs "$mod" >/dev/null || echo "capcom: node is needed to draw the SG-1 portraits and rings" >&2
     mkdir -p "$mod/avatars"
@@ -16,34 +17,7 @@ for name in capcom-prs capcom-agents; do
   herdr-app check "$mod"
 done
 
-if [ ! -f "$home/layouts/capcom.json" ]; then
-  herdr-app do layout.clone --name main --as capcom >/dev/null
-fi
-python3 -I - "$home/layouts/capcom.json" <<'PY'
-import json, sys
-
-path = sys.argv[1]
-layout = json.load(open(path))
-
-def find(node, id):
-    if node.get("id") == id:
-        return node
-    for child in node.get("children") or []:
-        found = find(child, id)
-        if found:
-            return found
-
-agents = find(layout, "agents")
-if agents and (agents.get("content") or {}).get("mod") == "agents":
-    agents["content"]["mod"] = "capcom-agents"
-    json.dump(layout, open(path, "w"), indent=2)
-
-lists = find(layout, "sidebar-lists")
-if lists is None:
-    sys.exit("capcom: no sidebar-lists block in the layout; add a block running the capcom-prs mod yourself")
-if not find(layout, "prs"):
-    lists["children"].append({"id": "prs", "type": "block", "size": {"weight": 1}, "min": 120, "content": {"mod": "capcom-prs"}})
-    json.dump(layout, open(path, "w"), indent=2)
-PY
+mkdir -p "$home/layouts"
+cp herdr-mod/layouts/capcom.json "$home/layouts/capcom.json"
 herdr-app do layout.switch --name capcom >/dev/null
-echo "capcom-prs installed in $home and shown in the capcom layout"
+echo "capcom mods and layout installed in $home; capcom layout is showing"

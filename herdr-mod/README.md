@@ -14,8 +14,10 @@ service.
 - Changes go through `capcom pr-do`. Auto-fix and auto-review are only settings: `capcom web` (or `capcom-tui`)
   has to be running to act on them, and the `⚙` strip says so when `capcom web` is not.
 
-Install: `scripts/install.sh` then `scripts/install-herdr-mod.sh` (copies the mod, clones the `main` layout to `capcom`
-with a `prs` block, and switches to it).
+Install: `scripts/install.sh` then `scripts/install-herdr-mod.sh`. This repo is the source of truth for every capcom
+mod (`capcom-prs`, `capcom-agents`, `capcom-board`, `capcom-tabs`) and for the `capcom` layout
+(`herdr-mod/layouts/capcom.json`); the script copies them into the app and switches to the layout. Edit them here, not
+in `~/.config/herdr-app`, or the next install overwrites the change.
 
 ## capcom-agents: SG-1 personas
 

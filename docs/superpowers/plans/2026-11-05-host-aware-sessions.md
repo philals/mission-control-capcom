@@ -35,7 +35,7 @@
 **Files:**
 - Modify: `docs/superpowers/specs/2026-11-05-host-aware-sessions-design.md` (add a "Spike results" section)
 
-- [ ] **Step 1:** Start a Claude agent from Orca (`orca agent launch --agent claude --surface terminal --worktree path:/home/PAlsford/code/capcom --json`, using the CLI path rule above). While it runs, record whether a new `~/.claude/sessions/<pid>.json` appears and its `entrypoint`; record the agent's row from `orca worktree ps --json` and the matching row of `orca terminal list --json` (how `paneKey` joins to `tabId`/`leafId` and the handle). Close it with `orca terminal close`.
+- [ ] **Step 1:** Start a Claude agent from Orca (`orca agent launch --agent claude --surface terminal --worktree path:~/code/capcom --json`, using the CLI path rule above). While it runs, record whether a new `~/.claude/sessions/<pid>.json` appears and its `entrypoint`; record the agent's row from `orca worktree ps --json` and the matching row of `orca terminal list --json` (how `paneKey` joins to `tabId`/`leafId` and the handle). Close it with `orca terminal close`.
 - [ ] **Step 2:** In Orca's built-in browser open `http://127.0.0.1:1969/` and record `navigator.userAgent` (`orca` browser eval, see `orca skills get orca-cli --reference references/browser.md`).
 - [ ] **Step 3:** In Claude Desktop's Terminal panel, record `env | grep -E '^(CLAUDE|TERM_PROGRAM)'`.
 - [ ] **Step 4:** From a shell outside Herdr, run `herdr agent list`; record whether it answers.
