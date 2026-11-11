@@ -478,6 +478,33 @@ export default class Agents extends View {
           cx.notify();
         })
         .child(svg(`mods/workspace-chrome/${isPinned ? "pin-off" : "pin"}.svg`).size(13));
+      // Ends the agent and its sub-agents; a working or blocked one asks with a second click first.
+      const asking = this.closing === a.address;
+      const close = div()
+        .id(`close-${a.address}`)
+        .flex_none()
+        .p(2)
+        .rounded(4)
+        .text_size(11)
+        .text_color(asking ? t.blocked : t.dim)
+        .when(asking, (el) => el.bg(t.blocked + "26").px(5).font_semibold())
+        .cursor_pointer()
+        .hover((s) => s.bg(t.hover).text_color(asking ? t.blocked : t.foreground))
+        .tooltip(asking ? "Click again to end this agent" : "Close this agent")
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          if ((a.status === "working" || a.status === "blocked") && !asking) {
+            this.closing = a.address;
+            cx.timer.after(3000, (cx) => { if (this.closing === a.address) { this.closing = null; cx.notify(); } });
+            cx.notify();
+            return;
+          }
+          this.closing = null;
+          this.hovered = null;
+          run("terminal.kill", { terminal: a.address });
+          cx.notify();
+        })
+        .child(asking ? "Close?" : svg("mods/workspace-chrome/x.svg").size(13));
       // Under a space header the space goes without saying; an automatic tab number says nothing.
       // Without a space header above (priority, pinned) the row names its space.
       const full = byPriority || isPinned;
@@ -515,6 +542,7 @@ export default class Agents extends View {
         .when(this.prsByAgent.has(a.address), el => el.child(this.prIcons(t, a)))
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
+        .when(this.hovered === a.address || asking, el => el.child(close))
         .when(this.hovered === a.address, el => el.child(pin))
         .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
         .child(this.status(t, a, byPriority && !isPinned));
