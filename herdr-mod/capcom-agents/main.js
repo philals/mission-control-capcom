@@ -161,7 +161,7 @@ export default class Agents extends View {
       .size(AV)
       .flex_none()
       .child(svg(`mods/capcom-agents/${dimFile(total)}`).absolute().top(0).left(0).size(AV).text_color(t.border))
-      .when(mask > 0, (el) => el.child(svg(`mods/capcom-agents/${ringFile(total, mask)}`).absolute().top(0).left(0).size(AV).text_color(c.color)))
+      .when(mask > 0, (el) => el.child(svg(`mods/capcom-agents/${ringFile(total, mask)}`).absolute().top(0).left(0).size(AV).text_color(t.foreground)))
       .child(Avatar.new().absolute().top(inset).left(inset).size(AV - inset * 2).rounded_full().overflow_hidden()
         .image(AvatarImage.new(pic).size_full())
         .fallback(AvatarFallback.new().size_full().bg(c.bg)));
@@ -441,6 +441,8 @@ export default class Agents extends View {
       const pic = icon(a.program, 16, t.foreground);
       const who = this.character(a);
       const more = detail.get(a.address);
+      // What the agent is on leads the row; the character is only a label under it.
+      const task = more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
       // An agent on another machine (`vps/t7`) says which.
       const machine = a.address.includes("/") ? a.address.split("/")[0] : null;
       if (collapsed) {
@@ -505,8 +507,8 @@ export default class Agents extends View {
           })).child(who ? this.avatar(t, a, who) : pic)))
         .child(who
           ? v_flex().flex_1().min_w(0)
-            .child(div().min_w(0).truncate().font_semibold().text_color(idle ? t.muted : who.color).child(who.label))
-            .child(div().min_w(0).truncate().text_size(11).text_color(t.dim).child([name, more && full ? more : null].filter(Boolean).join(" \u00b7 ")))
+            .child(div().min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).child(task))
+            .child(div().min_w(0).truncate().text_size(11).text_color(t.muted).child([who.label, full ? a.space_name : null].filter(Boolean).join(" \u00b7 ")))
           : h_flex().flex_1().min_w(0).gap(5).items_center()
           .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
           .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`\u00b7 ${more}`))))

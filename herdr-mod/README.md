@@ -20,7 +20,7 @@ with a `prs` block, and switches to it).
 ## capcom-agents: SG-1 personas
 
 Each agent gets a Stargate SG-1 character (O'Neill, Carter, Daniel, Teal'c, Hammond, Vala, then the cast again with a
-number), kept for as long as the agent exists. Its portrait sits in a ring of seven chevrons: one lights per step of
+number), kept for as long as the agent exists. Its portrait sits in a ring of seven chevrons: one lights per step (in plain light, not the character colour, so it reads without hue) of
 the agent's PR that is done (ready, CI, copilot, threads, approved, automerge, merge; six when the repo has no automerge).
 No PR yet is a dark ring; merged is a full one.
 
