@@ -2,9 +2,11 @@
 // A viewed done agent stays in Done until left.
 
 import { View, div, image, svg } from "gpui-kit";
-import { v_flex, h_flex, HoverCard } from "gpui-base";
+import { v_flex, h_flex, HoverCard, Avatar, AvatarImage, AvatarFallback } from "gpui-base";
+import * as fs from "fs/promises";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 import { dotColor, short, openUrl, prDo, prDetails } from "./pr-details.js";
+import { CHARACTERS, ringFile, dimFile } from "./characters.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -75,6 +77,17 @@ function icon(p, size, color) {
   return p.tint ? svg(p.icon).size(size).flex_none().text_color(color) : image(p.icon).w(size).h(size).flex_none();
 }
 
+// Seven chevrons round the portrait, one per PR rail step that is done (six when the repo has no automerge step).
+// No PR yet: a dark ring. Merged: all lit.
+function ringOf(pr, merged) {
+  const rail = pr?.rail ?? [];
+  const total = rail.length === 6 ? 6 : 7;
+  const mask = merged ? (1 << total) - 1 : rail.reduce((m, r, i) => (r.state === "done" ? m | (1 << i) : m), 0);
+  return { total, mask };
+}
+
+const AV = 34;
+
 export default class Agents extends View {
   init(_props, cx) {
     if (props()?.sortMenu) return;
@@ -84,7 +97,74 @@ export default class Agents extends View {
     this.pendingPins = JSON.parse(localStorage.getItem("pins") ?? "[]");
     if (!this.pendingPins.length) localStorage.removeItem("pins");
     this.migratingPins = new Set();
+    this.persona = JSON.parse(localStorage.getItem("persona") ?? "{}");
+    this.photos = new Map();
+    this.scanPhotos(cx);
+    cx.timer.every(30000, (cx) => { this.scanPhotos(cx); cx.notify(); });
     cx.timer.every(30000, (cx) => cx.notify());
+  }
+
+  // Photos you drop in avatars/ (<id>.jpg or .png) replace the drawn portraits.
+  scanPhotos(cx) {
+    cx.spawn(async (cx) => {
+      try {
+        const files = await fs.readdir("mods/capcom-agents/avatars");
+        const found = new Map();
+        for (const f of files) {
+          const m = /^(.+)\.(jpe?g|png)$/i.exec(f);
+          if (m) found.set(m[1].toLowerCase(), `mods/capcom-agents/avatars/${f}`);
+        }
+        const same = found.size === this.photos.size && [...found].every(([k, v]) => this.photos.get(k) === v);
+        this.photos = found;
+        if (!same) cx.notify();
+      } catch {}
+    });
+  }
+
+  // Each agent keeps one character for good: the first one nobody on screen has, in the cast's order.
+  // With more agents than characters the cast repeats with a number.
+  assign(list) {
+    const live = new Set(list.map((a) => a.address));
+    const taken = new Set(list.map((a) => this.persona[a.address]).filter(Boolean));
+    let dirty = false;
+    for (const a of list) {
+      if (this.persona[a.address]) continue;
+      let round = 1;
+      let pick;
+      while (!pick) {
+        pick = CHARACTERS.map((c) => (round === 1 ? c.id : `${c.id}#${round}`)).find((id) => !taken.has(id));
+        round++;
+      }
+      this.persona[a.address] = pick;
+      taken.add(pick);
+      dirty = true;
+    }
+    for (const k of Object.keys(this.persona)) if (!live.has(k) && !this.changed[k]) { delete this.persona[k]; dirty = true; }
+    if (dirty) localStorage.setItem("persona", JSON.stringify(this.persona));
+  }
+
+  character(a) {
+    const [id, n] = (this.persona[a.address] ?? "").split("#");
+    const c = CHARACTERS.find((x) => x.id === id);
+    return c && { ...c, label: n ? `${c.name} ${n}` : c.name };
+  }
+
+  // The portrait (your photo, else the drawn one) inside the gate ring.
+  avatar(t, a, c) {
+    const first = (this.prsByAgent.get(a.address) ?? []).sort((x, y) => x.merged - y.merged)[0];
+    const { total, mask } = ringOf(first?.pr, first?.merged);
+    const photo = this.photos.get(c.id);
+    const inset = 6;
+    const pic = photo ?? `mods/capcom-agents/portraits/${c.id}.svg`;
+    return div()
+      .relative()
+      .size(AV)
+      .flex_none()
+      .child(svg(`mods/capcom-agents/${dimFile(total)}`).absolute().top(0).left(0).size(AV).text_color(t.border))
+      .when(mask > 0, (el) => el.child(svg(`mods/capcom-agents/${ringFile(total, mask)}`).absolute().top(0).left(0).size(AV).text_color(c.color)))
+      .child(Avatar.new().absolute().top(inset).left(inset).size(AV - inset * 2).rounded_full().overflow_hidden()
+        .image(AvatarImage.new(pic).size_full())
+        .fallback(AvatarFallback.new().size_full().bg(c.bg)));
   }
 
   // Stamps agents whose state changed. Done and idle count as one: looking at a
@@ -238,7 +318,7 @@ export default class Agents extends View {
     const on = k.address === shown;
     return h_flex()
       .id(`sub-${k.address}`)
-      .pl(39)
+      .pl(AV + 14)
       .pr(8)
       .rounded(8)
       .h(26)
@@ -289,6 +369,7 @@ export default class Agents extends View {
     const now = Date.now();
     this.track(list, now);
     this.hold(list);
+    this.assign(list);
     // A kept sub-agent (one with a pane) is in agents() too: where a tree shows
     // it, it gets no row of its own, unless it's pinned.
     const nested = new Set(collapsed ? [] : list.flatMap((a) => this.tree(all, a.address).map((s) => s.t.address)));
@@ -358,6 +439,7 @@ export default class Agents extends View {
 
     const row = (a, i, subs = []) => {
       const pic = icon(a.program, 16, t.foreground);
+      const who = this.character(a);
       const more = detail.get(a.address);
       // An agent on another machine (`vps/t7`) says which.
       const machine = a.address.includes("/") ? a.address.split("/")[0] : null;
@@ -401,7 +483,7 @@ export default class Agents extends View {
       return h_flex()
         .id(`ag-${a.address}`)
         .px(8)
-        .h(30)
+        .h(who ? AV + 6 : 30)
         .flex_none()
         .rounded(8)
         .items_center()
@@ -415,13 +497,17 @@ export default class Agents extends View {
           cx.notify();
         })
         .on_click(() => run("pane.focus", { pane: a.pane }))
-        .when(Boolean(pic), el => el.child(div().id(`agent-fold-${a.address}`)
+        .when(Boolean(pic) || Boolean(who), el => el.child(div().id(`agent-fold-${a.address}`)
           .when(subs.length > 0, el => el.on_click((_e, cx) => {
             cx.stop_propagation();
             this.folded.has(a.address) ? this.folded.delete(a.address) : this.folded.add(a.address);
             cx.notify();
-          })).child(pic)))
-        .child(h_flex().flex_1().min_w(0).gap(5).items_center()
+          })).child(who ? this.avatar(t, a, who) : pic)))
+        .child(who
+          ? v_flex().flex_1().min_w(0)
+            .child(div().min_w(0).truncate().font_semibold().text_color(idle ? t.muted : who.color).child(who.label))
+            .child(div().min_w(0).truncate().text_size(11).text_color(t.dim).child([name, more && full ? more : null].filter(Boolean).join(" \u00b7 ")))
+          : h_flex().flex_1().min_w(0).gap(5).items_center()
           .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
           .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`\u00b7 ${more}`))))
         .when(this.prsByAgent.has(a.address), el => el.child(this.prIcons(t, a)))

@@ -9,6 +9,10 @@ for name in capcom-prs capcom-agents; do
   mod="$home/mods/$name"
   mkdir -p "$mod"
   cp herdr-mod/$name/*.js herdr-mod/$name/mod.json herdr-mod/shared/*.js "$mod/"
+  if [ "$name" = capcom-agents ]; then
+    node scripts/gen-avatars.mjs "$mod" >/dev/null || echo "capcom: node is needed to draw the SG-1 portraits and rings" >&2
+    mkdir -p "$mod/avatars"
+  fi
   herdr-app check "$mod"
 done
 
