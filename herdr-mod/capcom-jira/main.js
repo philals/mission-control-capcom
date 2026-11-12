@@ -4,11 +4,13 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, HoverCard } from "gpui-base";
-import { run, theme, home, readTextFile, spaces, exec, shared, setShared } from "herdr";
+import { run, theme, home, readTextFile, spaces, exec, shared, setShared, layout } from "herdr";
 import { capcom, openUrl, SH, dotColor, short, prDo, prDetails } from "./pr-details.js";
 
 const FETCH_MS = 5 * 60 * 1000;
-const TICK_MS = 30 * 1000;
+const RELOAD_MS = 30 * 1000;
+const WATCH_MS = 15 * 1000;
+const IDLE_MS = 3 * 60 * 1000;
 const COLOR = { progress: "#6cb6ff", review: "#c792ea", blocked: "#ff6b6b", todo: "#7c8493", other: "#9aa1ad" };
 const RANK = { progress: 0, review: 1, blocked: 2, todo: 3, other: 4 };
 const TASK_COLOR = { todo: "#7c8493", planning: "#6cb6ff", planned: "#c792ea", implementing: "#f0b429", done: "#22c55e", dropped: "#5c6370" };
@@ -21,6 +23,15 @@ const kindOf = (i) => {
   if (i.statusCategory === "In Progress") return "progress";
   if (i.statusCategory === "To Do") return "todo";
   return "other";
+};
+
+const findNode = (node, id) => {
+  if (node?.id === id) return node;
+  for (const child of node?.children ?? []) {
+    const found = findNode(child, id);
+    if (found) return found;
+  }
+  return null;
 };
 
 const ago = (iso) => {
@@ -40,14 +51,40 @@ export default class CapcomJira extends View {
     this.error = null;
     this.message = null;
     this.file = `${home()}/.cache/capcom/jira-me.json`;
-    cx.timer.every(FETCH_MS, (cx) => this.fetch(cx));
-    cx.timer.every(TICK_MS, (cx) => this.reload(cx));
-    cx.spawn(async (cx) => {
-      await this.readCache();
-      await this.loadBoards();
-      cx.notify();
-      if (!this.fetchedAt || Date.now() - Date.parse(this.fetchedAt) > FETCH_MS) this.fetch(cx);
-    });
+    this.lastClick = Date.now();
+    this.wasShown = false;
+    cx.timer.every(FETCH_MS, (cx) => this.shown() && this.fetch(cx));
+    cx.timer.every(RELOAD_MS, (cx) => this.shown() && this.reload(cx));
+    cx.timer.every(WATCH_MS, (cx) => this.watch(cx));
+    this.watch(cx);
+  }
+
+  shown() {
+    const node = findNode(layout(), "jira-panel");
+    return Boolean(node && !node.hidden);
+  }
+
+  touch() {
+    this.lastClick = Date.now();
+  }
+
+  // Runs while the pane is shown. Opening it reads the file and fetches if it is stale; 3 minutes without a click hides it.
+  watch(cx) {
+    const shown = this.shown();
+    if (shown && !this.wasShown) {
+      this.touch();
+      cx.spawn(async (cx) => {
+        await this.readCache();
+        await this.loadBoards();
+        cx.notify();
+        if (!this.fetchedAt || Date.now() - Date.parse(this.fetchedAt) > FETCH_MS) this.fetch(cx);
+      });
+    }
+    this.wasShown = shown;
+    if (shown && Date.now() - this.lastClick > IDLE_MS) {
+      run("layout.hide", { id: "jira-panel" });
+      this.wasShown = false;
+    }
   }
 
   async root() {
@@ -132,11 +169,13 @@ export default class CapcomJira extends View {
   }
 
   copy(cx, what, text) {
+    this.touch();
     cx.write_to_clipboard(text);
     this.say(cx, `Copied ${what}`);
   }
 
   start(cx, key, skill, task, folder) {
+    this.touch();
     const argv = ["claude", `/${skill} ${key}${task ? ` ${task.id}` : ""}`];
     const name = `${key} ${skill === "story-plan" ? "plan" : skill === "story-review" ? "review" : "impl"}`;
     const dir = task?.folder || folder;
@@ -174,6 +213,7 @@ export default class CapcomJira extends View {
   }
 
   change(cx, action, url, on) {
+    this.touch();
     cx.spawn(async (cx) => {
       await prDo(action, url, on);
       setShared("capcom.refresh", Date.now());
@@ -218,7 +258,10 @@ export default class CapcomJira extends View {
       .children(mine.slice(0, MAX).map(({ pr, merged }) => {
         const trigger = div().id(`pri-${i.key}-${pr.url}`).p(2).rounded(4).cursor_pointer()
           .hover((s) => s.bg(t.selected))
-          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_mouse_down("left", (_e, cx) => {
+            this.touch();
+            cx.stop_propagation();
+          })
           .on_click((_e, cx) => {
             cx.stop_propagation();
             openUrl(pr.url);
@@ -236,7 +279,10 @@ export default class CapcomJira extends View {
   chip(id, label, tip, onClick, t) {
     return div().id(id).flex_none().px(6).py(2).rounded(4).bg(t.hover).text_size(11).text_color(t.muted)
       .cursor_pointer().hover((s) => s.bg(t.selected).text_color(t.foreground)).tooltip(tip)
-      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_mouse_down("left", (_e, cx) => {
+        this.touch();
+        cx.stop_propagation();
+      })
       .on_click((_e, cx) => {
         cx.stop_propagation();
         onClick(cx);
@@ -247,7 +293,10 @@ export default class CapcomJira extends View {
   line(id, label, value, onClick, t, accent) {
     return h_flex().id(id).gap(10).px(8).py(5).rounded(5).items_center().cursor_pointer()
       .hover((s) => s.bg(t.hover)).text_color(accent ?? t.foreground).text_size(12)
-      .on_click((_e, cx) => onClick(cx))
+      .on_click((_e, cx) => {
+        this.touch();
+        onClick(cx);
+      })
       .child(div().flex_1().min_w(0).truncate().child(label))
       .child(div().flex_none().max_w(190).truncate().text_size(11).text_color(t.dim).child(value));
   }
@@ -289,6 +338,7 @@ export default class CapcomJira extends View {
     return v_flex().id(`jira-${i.key}`).rounded(6).bg(t.raised).border(1).border_color(open ? color : t.border)
       .hover((s) => s.bg(t.hover)).cursor_pointer()
       .on_click((_e, cx) => {
+        this.touch();
         this.open = open ? null : i.key;
         cx.notify();
       })
@@ -340,6 +390,7 @@ export default class CapcomJira extends View {
         ? div().px(10).py(4).text_size(11).text_color(this.message.ok ? "#22c55e" : "#ffb000").child(this.message.text)
         : null;
     return v_flex().id("jira-root").size_full().bg(t.surface)
+      .on_mouse_down("left", () => this.touch())
       .child(
         h_flex().gap(6).px(10).pt(10).pb(6).items_center().flex_none()
           .child(div().text_size(13).font_semibold().text_color(t.foreground).child("JIRA · ME"))
@@ -349,7 +400,10 @@ export default class CapcomJira extends View {
           .child(
             div().id("jira-refresh").px(6).py(2).rounded(4).text_size(11).text_color(t.muted).cursor_pointer()
               .hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip("Ask Jira again (about 15 seconds)")
-              .on_click((_e, cx) => this.fetch(cx)).child("↻"),
+              .on_click((_e, cx) => {
+                this.touch();
+                this.fetch(cx);
+              }).child("↻"),
           ),
       )
       .when(Boolean(status), (el) => el.child(status))

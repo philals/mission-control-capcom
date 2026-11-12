@@ -45,4 +45,4 @@ Jira status. Tickets whose status category is Done are not fetched. Click a card
   connector and writes `~/.cache/capcom/jira-me.json` (override with `CAPCOM_JIRA_FILE`; set `CAPCOM_JIRA_MODEL` for
   another model). One run takes about 15 seconds and costs under a cent.
 - It fetches when the pane opens if the file is over 5 minutes old, then every 5 minutes while the pane is open, and
-  on `↻`. Closing the pane stops it. A second fetch never starts while one is running.
+  on `↻`. Nothing is fetched while the pane is hidden. The pane hides itself after 3 minutes without a click. A second fetch never starts while one is running.
