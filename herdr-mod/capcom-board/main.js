@@ -331,7 +331,7 @@ export default class CapcomBoard extends View {
     const header = v_flex().gap(6).px(10).pt(10).pb(6).flex_none()
       .child(
         h_flex().gap(6).items_center()
-          .child(div().flex_1().text_size(13).font_semibold().text_color(t.foreground).child("CAPCOM board"))
+          .child(div().flex_1().text_size(13).font_semibold().text_color(t.foreground).child("CAPCOM Kanban"))
           .child(this.button("refresh", "↻", "Reload", () => this.load(cx), t))
           .child(this.button("show-done", this.showDone ? "☑ done" : "☐ done", "Show finished stories", () => {
             this.showDone = !this.showDone;

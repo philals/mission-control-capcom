@@ -22,10 +22,11 @@ done
 mkdir -p "$HOME/.local/bin"
 install -m 755 scripts/capcom-jira-me "$HOME/.local/bin/capcom-jira-me"
 
-# capcom-tabs is Herdr's own `tabs` mod plus a Board button (herdr-mod/capcom-tabs.patch); only the patch is kept here.
+# capcom-tabs is Herdr's own `tabs` mod plus Kanban and Jira buttons (herdr-mod/capcom-tabs.patch); only the patch is kept here.
 tabs="$home/mods/capcom-tabs"
 rm -rf "$tabs"
 cp -r "$home/mods/tabs" "$tabs"
+cp herdr-mod/capcom-tabs/*.svg "$tabs/"
 rm -f "$tabs"/gpui-kit.d.ts
 patch -s "$tabs/main.js" herdr-mod/capcom-tabs.patch
 sed -i 's#mods/tabs/#mods/capcom-tabs/#g' "$tabs/main.js"
