@@ -49,7 +49,7 @@
 | **Herdr desktop app** | The My Watch and SG-1 agents sidebar panels, and agents started in its panes |
 | **Orca** | Starts and reaches agents in Orca terminals, and works from Orca's browser |
 | **Claude Desktop** | Starts sessions with a skill typed in, and reaches them again |
-| **Desktop notifications** | `notify-send`, when a run finishes, Copilot reviews or a PR needs you |
+| **Desktop notifications** | none: Herdr handles alerts |
 | **Browser** | `capcom web`, the whole TUI as a page on `127.0.0.1:1969` |
 
 ## Screenshots
@@ -164,7 +164,7 @@ A typical run, in order: plan the story and approve the plan and task table; imp
 - **Your PRs, with CI:** every open PR from a GitHub search you control, `[DRAFT]` or `[READY]`, with the CI stages that are running, queued or failed listed one per line. A PR that is all green and only waiting for a reviewer is lit up with a green `GO · ◉ AWAITING REVIEW` block, a green bar and a tinted row, and counted in the panel title. Click to open, copy the link, or mark a draft ready (it asks first). Paste someone else's PR link to follow it the same way (auto-fix starts off for it).
 - **Back to the agent:** a PR made through a task has a `🤖` button that focuses the Claude Code session that made it in the app it runs in (Herdr, Orca or Claude Desktop), or resumes it (`claude --resume`) if the tab was closed. PRs you made outside the workflow work too: Claude Code records which session made each PR, and capcom reads that.
 - **Copilot and fixing:** each PR shows Copilot's state (`reviewing`, `✎ 3 to fix`, `✔ reviewed`) and notifies you when its review lands. Two ticks on each of your PRs, `auto-review` and `auto-fix` (both on for new PRs unless you untick the defaults), do the loop for you: Copilot is asked to review the PR, and whenever CI fails or Copilot leaves comments the agent that made the PR is asked to merge the default branch in, fix the failures and address then resolve the comments (the `/pr-address` skill), up to 5 rounds and only when something has changed. A PR labelled `icebox` is never fixed or updated automatically. Boxes on the panel set the defaults.
-- **Runs and watch:** the "Run workflow" runs you started, such as a nonprod deploy, plus any GitHub Actions run you paste a link to, and your PRs merged in the last 12 hours (in purple). Each shows its stages and a link, finished runs leave after 30 minutes, and you get a bell, a status line and (with `notify-send`) a desktop notification when one finishes.
+- **Runs and watch:** the "Run workflow" runs you started, such as a nonprod deploy, plus any GitHub Actions run you paste a link to, and your PRs merged in the last 12 hours (in purple). Each shows its stages and a link, finished runs leave after 30 minutes, and you get a bell, a status line when one finishes.
 - **Finishing tasks:** drag an IMPLEMENTING card to DONE (or press `x`) and capcom checks its PRs on GitHub, and only finishes the task if every one is merged.
 - **Resizable and remembered:** drag any divider; sizes are saved.
 - **Accessible by design:** a fixed theme with at least 4.5:1 text contrast on every screen (a test checks it), state shown with words and icons as well as colour, and focus shown by a double border.

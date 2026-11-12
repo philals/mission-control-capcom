@@ -93,7 +93,7 @@ every 10 seconds while any run is active, every 30 seconds otherwise; stages are
 active or failed runs and cached once finished. A finished run is dropped 30 minutes after it finished.
 Runs can also be watched: paste a run link into capcom-tui and it is fetched by id
 (`repos/{owner}/{repo}/actions/runs/{id}`), kept in `~/.config/capcom/tui.json`, and announced (bell,
-status line, `notify-send` if present) when it finishes. `--no-runs` disables it.
+status line) when it finishes. `--no-runs` disables it.
 
 Panel sizes (PR/runs split, bottom height, kanban column widths) are saved when you change them, in
 `$CAPCOM_TUI_SETTINGS`, else `$XDG_CONFIG_HOME/capcom/tui.json`, else

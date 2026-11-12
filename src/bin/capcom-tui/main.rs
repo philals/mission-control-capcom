@@ -138,14 +138,6 @@ fn shared_cache() -> Option<cache::Cache> {
     cache::Cache::default_dir().and_then(cache::Cache::open)
 }
 
-/// A desktop notification through `notify-send`, when it is installed; otherwise nothing happens.
-fn notify_desktop(title: &str, body: &str) {
-    let (title, body) = (title.to_string(), body.to_string());
-    std::thread::spawn(move || {
-        let _ = std::process::Command::new("notify-send").args(["--app-name=CAPCOM", &title, &body]).status();
-    });
-}
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
     if cli.find_pane {
@@ -194,7 +186,6 @@ fn main() -> Result<()> {
     if let Some(config) = capcom::session::config_dir() {
         app.start_pr_links(config, cache::Cache::default_dir().map(|d| d.join("pr-links.json")));
     }
-    app.notify = Arc::new(notify_desktop);
     app.fix_store = cache::Cache::default_dir().map(fixstate::Store::new);
     app.settings_path = settings::default_path();
     app.durations_path = cache::Cache::default_dir().map(|d| d.join("check-durations.json"));

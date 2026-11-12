@@ -49,7 +49,7 @@ const SETTINGS = [
   ["autofix", "Auto-fix by default", "PRs without a tick of their own are marked when CI or Copilot needs fixing, and a behind branch is updated for you. (A followed PR always starts off.)", (s) => s.autofix],
   ["autoreview", "Auto-review by default", "Copilot is asked to review your PRs as they appear.", (s) => s.autoreview],
   ["auto_sync", "Auto-sync", "What GitHub says about the PRs recorded on tasks is written to the boards, so a merged PR finishes its task.", (s) => s.autoSync],
-  ["notify", "Desktop notifications", "Tell me outside the page (notify-send) when a PR needs me, Copilot finishes, or a run ends. They need polling while the page is closed, which is off by default: with this on the service polls every couple of minutes even when nobody looks.", (s) => s.notify],
+  ["notify", "Desktop notifications", "Keep polling while the page is closed. Desktop notifications are gone (Herdr handles alerts), so this only keeps data fresh. It needs polling while the page is closed, which is off by default: with this on the service polls every couple of minutes even when nobody looks.", (s) => s.notify],
   ["slow_when_away", "Slow polling when nobody looks", "GitHub is asked about every 30 minutes (and at once when you come back) while no page is open. Turning this off keeps the normal pace always.", (s) => s.slowWhenAway],
 ];
 

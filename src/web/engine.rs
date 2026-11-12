@@ -93,7 +93,7 @@ impl Default for Tools {
 }
 
 impl Tools {
-    /// The real ones: `gh` and the GitHub API, and `notify-send` for desktop notifications.
+    /// The real ones: `gh` and the GitHub API.
     pub fn real() -> Tools {
         use crate::actions::*;
         Tools {
@@ -102,12 +102,7 @@ impl Tools {
             copilot: Arc::new(|url| gh_request_copilot(url)),
             label: Arc::new(|repo, number, label, on| gh_set_label(repo, number, label, on)),
             update_branch: Arc::new(|repo, number, head| gh_update_branch(repo, number, head)),
-            notify: Arc::new(|title, body| {
-                let (title, body) = (title.to_string(), body.to_string());
-                std::thread::spawn(move || {
-                    let _ = Command::new("notify-send").args(["--app-name=CAPCOM", &title, &body]).status();
-                });
-            }),
+            notify: Arc::new(|_, _| {}),
             fix: Some(Arc::new(|ask| {
                 let live = crate::session::config_dir().as_deref().map(crate::claude::live).unwrap_or_default();
                 crate::dispatch::send(&crate::herdr_app::HerdrApp::new(), &crate::herdr_app::sessions_by_pid(&live), ask)
