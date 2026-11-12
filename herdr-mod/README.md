@@ -63,7 +63,7 @@ session has its own colour (with or without a Jira ticket).
 - **Agents list** (`capcom-agents`): the row leads with the task from `capcom note --task` (else the tab or title as
   before), with the persona, ticket key and branch under it, and a bar in the session colour on the left.
 - **Pane header** (`capcom-pane`): a 34px header under the prompt (Herdr allows the top or bottom of a pane) that
-  starts with a solid name plate in the session colour (the persona), then the ticket key, task and branch, with a
+  starts with a solid name plate in the session colour (the persona's portrait and name), then the ticket key, task and branch, with a
   line in the colour. Panes that are not agents keep Herdr's normal header.
 - **Pane frame**: Herdr's focus border is one colour for every pane, so `capcom-agents` rewrites it (`layout.set`)
   whenever the focus moves: the focused agent's pane gets a 3px frame in its session colour, anything else gets

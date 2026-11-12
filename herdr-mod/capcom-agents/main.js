@@ -226,9 +226,13 @@ export default class Agents extends View {
     }
   }
 
+  pic(c) {
+    return c ? this.photos.get(c.id) ?? `mods/capcom-agents/portraits/${c.id}.svg` : null;
+  }
+
   // The portrait: your photo, else the drawn one, on the character's colour.
   avatar(t, a, c) {
-    const pic = this.photos.get(c.id) ?? `mods/capcom-agents/portraits/${c.id}.svg`;
+    const pic = this.pic(c);
     return Avatar.new().size(AV).flex_none().rounded_full().overflow_hidden().bg(c.color)
       .image(AvatarImage.new(pic).size_full())
       .fallback(AvatarFallback.new().size_full().bg(c.bg));
@@ -439,7 +443,7 @@ export default class Agents extends View {
     this.assign(list);
     this.assignColors(list);
     this.frameColor(this.hue(list.find((a) => a.focused) ?? {})?.color);
-    const persona = Object.fromEntries(list.map((a) => [a.address, { label: this.character(a)?.label ?? a.program?.name ?? "", ...this.hue(a) }]));
+    const persona = Object.fromEntries(list.map((a) => [a.address, { label: this.character(a)?.label ?? a.program?.name ?? "", pic: this.pic(this.character(a)), ...this.hue(a) }]));
     const personaText = JSON.stringify(persona);
     if (personaText !== this.personaText) {
       this.personaText = personaText;

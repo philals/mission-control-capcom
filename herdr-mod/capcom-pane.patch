@@ -1,16 +1,18 @@
 --- a/main.js
 +++ b/main.js
-@@ -6,7 +6,8 @@
+@@ -5,8 +5,9 @@
+ // this pane. Props from the app: { pane, terminal }. Click: focus the pane.
  
  import { View, div, svg, image } from "gpui-kit";
- import { h_flex } from "gpui-base";
+-import { h_flex } from "gpui-base";
 -import { panes, props, run, theme, home, layout } from "herdr";
++import { h_flex, Avatar, AvatarImage, AvatarFallback } from "gpui-base";
 +import { panes, props, run, theme, home, layout, shared } from "herdr";
 +import { who } from "./identity.js";
  
  // Match the first visible tab frame, including the active child of a stack.
  function paneFrame(node) {
-@@ -64,23 +65,33 @@
+@@ -64,23 +65,35 @@
      const pic = icon(p.program, 14, t.dim);
      const st = p.status;
      const pane = p.pane;
@@ -37,6 +39,8 @@
 -      .child(div().flex_none().truncate().max_w(260).font_medium().text_color(t.foreground).child(name))
 -      .child(div().flex_1().truncate().text_color(t.dim).child(folder(p.cwd)))
 +      .when(Boolean(id), el => el.child(h_flex().h_full().px(12).gap(6).flex_none().items_center().bg(persona.color).text_color("#10151a").font_bold()
++        .when(Boolean(persona.pic), el => el.child(Avatar.new().size(24).flex_none().rounded_full().overflow_hidden().bg("#10151a")
++          .image(AvatarImage.new(persona.pic).size_full()).fallback(AvatarFallback.new().size_full().bg("#10151a"))))
 +        .child(div().flex_none().truncate().max_w(160).child(persona.label))
 +        .when(persona.n > 1, el => el.child(div().flex_none().px(5).rounded(6).bg("#10151a").text_color(persona.color).text_size(10.5).child(`#${persona.n}`)))))
 +      .when(Boolean(pic) && !id, (el) => el.child(pic))
