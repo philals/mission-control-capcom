@@ -2699,21 +2699,35 @@ impl App {
                 }
                 ("story-implement-task", "implement", "impl")
             }
-            (Status::Implementing, Status::Done) => {
-                self.finish_task(task_id);
-                return;
-            }
             (from, to) if from == to => return,
-            (_, Status::Done) => {
-                self.set_notice(format!("{task_id} is not IMPLEMENTING, so it cannot be marked done"));
-                return;
-            }
             _ => {
-                self.set_notice("drop a TODO card on PLANNING, a TODO or PLANNED card on IMPLEMENTING, or an IMPLEMENTING card on DONE".into());
+                self.move_task(task_id, to);
                 return;
             }
         };
         self.launch_skill(task_id, skill, tab, phase);
+    }
+
+    /// A hand move: the card goes to the column whatever its PRs, dependencies or current status say.
+    fn move_task(&mut self, id: &str, to: Status) {
+        let Some(key) = self.keys.get(self.story).cloned() else {
+            return;
+        };
+        let result = store::update(&self.root, &key, |b| {
+            rules::force_status(b, id, to)?;
+            Ok(b.tasks.iter().all(|t| t.status.is_terminal()))
+        });
+        match result {
+            Ok(all_done) => {
+                let mut text = format!("{id} moved to {}", to.as_str().to_uppercase());
+                if to == Status::Done && all_done {
+                    text.push_str(&format!(". Every task is done: run /story-review {key}"));
+                }
+                self.set_notice(text);
+                self.reload();
+            }
+            Err(e) => self.set_notice(format!("could not move {id}: {e:#}")),
+        }
     }
 
     fn launch_skill(&mut self, task_id: &str, skill: &str, tab: &str, phase: &str) {

@@ -3914,14 +3914,14 @@ mod tests {
     }
 
     #[test]
-    fn other_drops_start_nothing_and_say_why() {
+    fn other_drops_move_the_card_by_hand_and_start_nothing() {
         let (_root, mut app) = sample();
         let fake = with_herdr(&mut app);
         drag_card(&mut app, "T1 Add endpoint", "TODO");
-        assert!(launches_after(&mut app, &fake, 1).is_empty());
-        assert!(app.current_notice().unwrap().contains("drop a TODO card on PLANNING"));
+        assert_eq!(status_of(&app, "T1"), Status::Todo);
         drag_card(&mut app, "T3 Spike it", "DONE");
-        assert!(app.current_notice().unwrap().contains("cannot be marked done"));
+        assert_eq!(status_of(&app, "T3"), Status::Done);
+        assert!(launches_after(&mut app, &fake, 1).is_empty());
     }
 
     #[test]
@@ -4202,23 +4202,12 @@ mod tests {
     }
 
     #[test]
-    fn dragging_an_implementing_card_to_done_checks_its_prs_and_finishes_it_when_merged() {
-        let (_root, mut app) = finishing();
-        drag_card(&mut app, "T1 Add endpoint", "DONE");
-        wait_for_notice(&mut app, "T1 is done: every PR is merged");
-        assert_eq!(status_of(&app, "T1"), Status::Done);
-        let b = store::load(&app.root, "PROJ-1").unwrap();
-        assert_eq!(b.task("T1").unwrap().prs[0].state, PrState::Merged, "the recorded PR state is updated too");
-        assert!(app.agent_ask.is_none(), "no worktrees recorded, so no cleanup question");
-    }
-
-    #[test]
-    fn an_unmerged_pr_refuses_and_says_which() {
+    fn dragging_a_card_to_done_moves_it_whatever_its_prs_say() {
         let (_root, mut app) = finishing();
         lookup_says(&mut app, PrState::Ready);
         drag_card(&mut app, "T1 Add endpoint", "DONE");
-        wait_for_notice(&mut app, "T1 is not done: #7 is still open");
-        assert_eq!(status_of(&app, "T1"), Status::Implementing);
+        assert_eq!(status_of(&app, "T1"), Status::Done);
+        assert!(app.current_notice().unwrap().contains("T1 moved to DONE"), "{:?}", app.current_notice());
     }
 
     #[test]
@@ -4360,7 +4349,7 @@ mod tests {
     }
 
     #[test]
-    fn a_task_that_still_needs_a_pr_in_another_repo_is_not_offered_as_done() {
+    fn a_task_that_still_needs_a_pr_in_another_repo_is_not_offered_as_done_but_can_still_be_dragged() {
         let (_root, mut app) = finishing();
         store::update(&app.root.clone(), "PROJ-1", |b| ops::set_repos(b, "T1", vec!["api".into(), "ui".into()])).unwrap();
         app.reload();
@@ -4369,8 +4358,7 @@ mod tests {
         assert!(!out.contains("drag to DONE"), "the ui repo has no PR yet:\n{out}");
         assert!(out.contains("needs a PR in ui"), "{out}");
         drag_card(&mut app, "T1 Add endpoint", "DONE");
-        wait_for_notice(&mut app, "waiting for PRs in: ui");
-        assert_eq!(status_of(&app, "T1"), Status::Implementing);
+        assert_eq!(status_of(&app, "T1"), Status::Done, "a hand move ignores the missing PR");
     }
 
     #[test]

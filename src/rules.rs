@@ -197,6 +197,16 @@ pub fn transition(board: &mut Board, id: &str, to: Status) -> Result<()> {
     Ok(())
 }
 
+/// Set a task's status with none of the checks `transition` makes: for a person moving a card by hand.
+pub fn force_status(board: &mut Board, id: &str, to: Status) -> Result<()> {
+    let t = board.tasks.iter_mut().find(|t| t.id == id).with_context(|| format!("no task {id}"))?;
+    t.status = to;
+    if matches!(to, Status::Todo | Status::Planned | Status::Done | Status::Dropped) {
+        t.agent = None;
+    }
+    Ok(())
+}
+
 pub fn story_transition(board: &mut Board, to: StoryStatus) -> Result<()> {
     use StoryStatus::*;
     let from = board.story.status;
