@@ -174,7 +174,7 @@ export default class Agents extends View {
       .flex_none()
       .child(svg(`mods/capcom-agents/${dimFile(total)}`).absolute().top(0).left(0).size(AV).text_color(t.border))
       .when(mask > 0, (el) => el.child(svg(`mods/capcom-agents/${ringFile(total, mask)}`).absolute().top(0).left(0).size(AV).text_color(t.foreground)))
-      .child(Avatar.new().absolute().top(inset).left(inset).size(AV - inset * 2).rounded_full().overflow_hidden()
+      .child(Avatar.new().absolute().top(inset).left(inset).size(AV - inset * 2).rounded_full().overflow_hidden().bg(c.color)
         .image(AvatarImage.new(pic).size_full())
         .fallback(AvatarFallback.new().size_full().bg(c.bg)));
   }
