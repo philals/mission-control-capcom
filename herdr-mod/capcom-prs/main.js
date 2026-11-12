@@ -198,19 +198,21 @@ export default class CapcomPrs extends View {
           : div()
               .id(`st-${pr.url}`)
               .flex_none()
-              .p(2)
-              .rounded(4)
+              .p(3)
+              .rounded(5)
+              .border(1)
+              .border_color(pr.managed ? t.border : "transparent")
               .when(!!pr.managed, (el) =>
                 el
                   .cursor_pointer()
-                  .hover((s) => s.bg(t.border))
+                  .hover((s) => s.bg(t.hover).border_color(t.muted))
                   .tooltip(pr.draft ? "Draft. Click to mark ready for review" : "Ready for review. Click to turn back into a draft")
                   .on_click((_e, cx) => {
                     cx.stop_propagation();
                     this.change(cx, pr.draft ? "ready" : "draft", pr.url);
                   }),
               )
-              .child(svg(pr.draft ? "mods/capcom-prs/pr-draft.svg" : "mods/capcom-prs/pr-ready.svg").size(14).flex_none().text_color(pr.draft ? t.dim : "#22c55e")),
+              .child(svg(pr.draft ? "mods/capcom-prs/pr-draft.svg" : "mods/capcom-prs/pr-ready.svg").size(15).flex_none().text_color(pr.draft ? t.muted : "#22c55e")),
       )
       .child(
         v_flex()

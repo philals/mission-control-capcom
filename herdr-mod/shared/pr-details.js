@@ -81,23 +81,7 @@ export function prDetails(pr, t, change, pad = true) {
         .when(pr.automerge?.available, (el) => el.child(pill(`am-${url}`, "automerge", pr.automerge.on, t, (cx) => change(cx, "automerge", url, !pr.automerge.on), "Add or remove the merge bot's automerge label")))
         .when(pr.autoupdate?.available, (el) => el.child(pill(`au-${url}`, pr.autoupdate.always ? "auto-update (always)" : "auto-update", pr.autoupdate.on || pr.autoupdate.always, t, (cx) => pr.autoupdate.always ? null : change(cx, "autoupdate", url, !pr.autoupdate.on), pr.autoupdate.always ? "The merge bot updates every PR in this repo" : "Add or remove the merge bot's autoupdate label")))
         .child(pill(`af-${url}`, "auto-fix", pr.autofix, t, (cx) => change(cx, "autofix", url, !pr.autofix), "Let capcom fix failing checks and conflicts on this PR"))
-        .child(pill(`ar-${url}`, "auto-review", pr.autoreview, t, (cx) => change(cx, "autoreview", url, !pr.autoreview), "Let capcom request and address Copilot's review on this PR"))
-        .child(
-          div()
-            .id(`dr-${url}`)
-            .px(8)
-            .py(2)
-            .rounded(10)
-            .text_size(11)
-            .cursor_pointer()
-            .border(1)
-            .border_color(t.border)
-            .text_color(t.muted)
-            .hover((s) => s.bg(t.hover))
-            .tooltip(pr.draft ? "Mark ready for review" : "Turn back into a draft")
-            .on_click((_e, cx) => change(cx, pr.draft ? "ready" : "draft", url))
-            .child(pr.draft ? "Mark ready" : "Make draft"),
-        ),
+        .child(pill(`ar-${url}`, "auto-review", pr.autoreview, t, (cx) => change(cx, "autoreview", url, !pr.autoreview), "Let capcom request and address Copilot's review on this PR")),
     );
   }
   return v_flex().gap(4).when(pad, (el) => el.pl(26).pr(10).pb(8)).children(rows);
