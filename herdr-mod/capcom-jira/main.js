@@ -9,7 +9,7 @@ import { capcom, openUrl, SH, dotColor, short, prDo, prDetails } from "./pr-deta
 
 const FETCH_MS = 5 * 60 * 1000;
 const RELOAD_MS = 30 * 1000;
-const WATCH_MS = 15 * 1000;
+const WATCH_MS = 2 * 1000;
 const IDLE_MS = 3 * 60 * 1000;
 const COLOR = { progress: "#6cb6ff", review: "#c792ea", blocked: "#ff6b6b", todo: "#7c8493", other: "#9aa1ad" };
 const RANK = { progress: 0, review: 1, blocked: 2, todo: 3, other: 4 };
@@ -48,6 +48,7 @@ export default class CapcomJira extends View {
     this.details = new Map();
     this.open = null;
     this.loading = false;
+    this.cacheRead = false;
     this.error = null;
     this.message = null;
     this.file = `${home()}/.cache/capcom/jira-me.json`;
@@ -75,6 +76,7 @@ export default class CapcomJira extends View {
       this.touch();
       cx.spawn(async (cx) => {
         await this.readCache();
+        cx.notify();
         await this.loadBoards();
         cx.notify();
         if (!this.fetchedAt || Date.now() - Date.parse(this.fetchedAt) > FETCH_MS) this.fetch(cx);
@@ -112,6 +114,7 @@ export default class CapcomJira extends View {
     } catch (_e) {
       // no file yet
     }
+    this.cacheRead = true;
   }
 
   async loadBoards() {
@@ -133,6 +136,7 @@ export default class CapcomJira extends View {
   reload(cx) {
     cx.spawn(async (cx) => {
       await this.readCache();
+      cx.notify();
       await this.loadBoards();
       cx.notify();
     });
@@ -148,6 +152,7 @@ export default class CapcomJira extends View {
         const r = await exec(SH[0], [...SH.slice(1), "capcom-jira-me"], { timeout: 180000 });
         if (r.code !== 0 && r.code !== 75) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || `capcom-jira-me exited ${r.code}`);
         await this.readCache();
+        cx.notify();
         await this.loadBoards();
       } catch (e) {
         this.error = String(e?.message ?? e);
@@ -419,7 +424,7 @@ export default class CapcomJira extends View {
         v_flex().id("jira-sections").flex_1().min_h(0).gap(4).px(6).pb(10).overflow_y_scrollbar().children(
           ordered.length
             ? ordered.map(([name, g]) => this.section(name, g.kind, g.issues, t))
-            : [div().px(10).py(8).text_size(12).text_color(t.muted).child(this.loading ? "Asking Jira…" : this.fetchedAt ? "No open tickets assigned to you" : "Nothing yet. Press ↻ to fetch your tickets.")],
+            : [div().px(10).py(8).text_size(12).text_color(t.muted).child(this.loading ? "Asking Jira…" : !this.cacheRead ? "Loading…" : this.fetchedAt ? "No open tickets assigned to you" : "Nothing yet. Press ↻ to fetch your tickets.")],
         ),
       );
   }
