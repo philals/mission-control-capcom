@@ -14,9 +14,13 @@ capcom note --task "<what you were asked>" --progress "<where you are>" \
 
 The session is found from `$CLAUDE_CODE_SESSION_ID`; no other setup is needed. Leave an option out to keep what the note says now; pass an empty text (`--waiting ""`) to clear it. Each field is one line (400 characters at most), so write for someone who has forgotten everything.
 
+A hook (`capcom-note-hook`, installed by `scripts/install-herdr-mod.sh`) already saves the user's first prompt, cut to 140
+characters, as the task when a session has none. It is a rough first draft, often a pasted block or a question: replace it
+with a proper `--task` as soon as you know what the work is.
+
 ## When to update
 
-- **At the start**: `--task` in the user's words, shortened, plus a first `--progress`. For a side quest or a sub-agent you start, say that it is one and what for. When you start a sub-agent, tell it to use this skill too.
+- **At the start**: replace the hook's draft with `--task` in the user's words, shortened, plus a first `--progress`. For a side quest or a sub-agent you start, say that it is one and what for. When you start a sub-agent, tell it to use this skill too.
 - **When you learn or decide something that changes the picture**: `--progress` only.
 - **Whenever you stop to wait for the user** (a question, an approval, a decision, a manual step): `--waiting` with what for, `--needs-you true`, and `--next` with the one thing they should do, for example "reply A or B", "approve the plan in T2", "run the migration by hand".
 - **When you are waiting on something that is not the user** (CI, a review, another agent, a deploy): `--waiting "CI on PR 123"`, `--needs-you false`, `--next ""`.

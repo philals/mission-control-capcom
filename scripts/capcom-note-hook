@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Claude Code UserPromptSubmit hook: a session's first prompt becomes its note's task (`capcom note --task`), so the
+# Herdr panels say what the session is about from the start. Sessions that already have a task are left alone, and
+# the agent-note skill rewrites it into a better line. Never blocks or adds anything to the prompt.
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+input=$(cat)
+session=$(jq -r '.session_id // empty' <<<"$input" 2>/dev/null)
+[ -n "$session" ] || exit 0
+file="${CAPCOM_NOTES_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/capcom/notes}/$session.json"
+if [ -f "$file" ] && [ -n "$(jq -r '.task // empty' "$file" 2>/dev/null)" ]; then exit 0; fi
+task=$(jq -r '.prompt // empty' <<<"$input" 2>/dev/null | tr '\n\t' '  ' | tr -s ' ' | cut -c1-140)
+[ -n "$task" ] || exit 0
+capcom note --session "$session" --task "$task" >/dev/null 2>&1
+exit 0

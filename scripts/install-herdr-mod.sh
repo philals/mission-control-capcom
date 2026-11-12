@@ -22,6 +22,9 @@ done
 mkdir -p "$HOME/.local/bin"
 install -m 755 scripts/capcom-jira-me "$HOME/.local/bin/capcom-jira-me"
 
+# Claude Code's UserPromptSubmit hook that saves a session's first prompt as its note's task (see the agent-note skill).
+install -m 755 scripts/capcom-note-hook "$HOME/.local/bin/capcom-note-hook"
+
 # capcom-tabs is Herdr's own `tabs` mod plus Kanban and Jira buttons (herdr-mod/capcom-tabs.patch); only the patch is kept here.
 tabs="$home/mods/capcom-tabs"
 rm -rf "$tabs"
