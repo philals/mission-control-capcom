@@ -181,7 +181,8 @@ export default class CapcomJira extends View {
     });
   }
 
-  // Every PR of the ticket's tasks, from My Watch's data when it has the PR, else from the board.
+  // Every PR of the ticket's tasks (from My Watch's data when it has the PR, else from the board), plus any My Watch
+  // PR whose title or branch names the ticket, which covers tickets worked without a board.
   prsOf(i) {
     const known = new Map();
     const watch = shared("capcom.prs");
@@ -197,6 +198,13 @@ export default class CapcomJira extends View {
           merged,
           pr: { url: p.url, repo: p.repo, number: p.url.split("/").pop(), title: `${task.id}: ${task.title}`, draft: p.state === "draft", ci: "none", rail: [], checks: [] },
         });
+      }
+    }
+    const mentions = new RegExp(`(^|[^A-Za-z0-9])${i.key}([^0-9]|$)`, "i");
+    for (const [url, entry] of known) {
+      if (!seen.has(url) && (mentions.test(entry.pr.title ?? "") || mentions.test(entry.pr.branch ?? ""))) {
+        seen.add(url);
+        out.push(entry);
       }
     }
     return out.sort((x, y) => x.merged - y.merged);

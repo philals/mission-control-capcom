@@ -38,7 +38,7 @@ Jira status. Tickets whose status category is Done are not fetched. Click a card
 
 - Each card has ID and URL copy buttons, `↗` to open in Jira, and a `▶` button for the next skill: `Plan`
   (`/story-plan KEY`) for a ticket with no board, `Do T3` / `Resume T3` for the next ready task, `Review` once every
-  task is done. The tag `Capcom 2/4` shows a ticket that already has a board, followed by one PR icon per PR on its tasks (coloured by CI, purple once merged). Hover one for the same card as an agent's PR icon; click it to open the PR.
+  task is done. The tag `Capcom 2/4` shows a ticket that already has a board, followed by one PR icon per PR on its tasks (coloured by CI, purple once merged). Hover one for the same card as an agent's PR icon; click it to open the PR. A PR in My Watch whose title or branch names the ticket also gets an icon, so a ticket with no board still shows its PRs.
 - The expanded card adds progress by task status, copy actions (ID, URL, `KEY: title`), open in Jira, and every
   skill that fits: plan or re-plan, implement a task, review, or implement directly (a small bug or change with no board).
 - Data comes from `scripts/capcom-jira-me`, installed to `~/.local/bin`. It runs `claude -p` (Haiku) with the Atlassian
