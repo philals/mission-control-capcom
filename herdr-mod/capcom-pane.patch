@@ -1,0 +1,47 @@
+--- a/main.js
++++ b/main.js
+@@ -6,7 +6,8 @@
+ 
+ import { View, div, svg, image } from "gpui-kit";
+ import { h_flex } from "gpui-base";
+-import { panes, props, run, theme, home, layout } from "herdr";
++import { panes, props, run, theme, home, layout, shared } from "herdr";
++import { who } from "./identity.js";
+ 
+ // Match the first visible tab frame, including the active child of a stack.
+ function paneFrame(node) {
+@@ -64,6 +65,9 @@
+     const pic = icon(p.program, 14, t.dim);
+     const st = p.status;
+     const pane = p.pane;
++    const note = shared("capcom.notes")?.[p.terminal];
++    const persona = shared("capcom.persona")?.[p.terminal];
++    const id = persona ? who({ task: note?.task, branch: p.branch, tab: "", space: "" }) : null;
+     const bottom = paneFrame(layout())?.header?.position === "bottom";
+     return h_flex()
+       .id(`pane-head-${pane}`)
+@@ -71,16 +75,20 @@
+       .px(10)
+       .gap(8)
+       .items_center()
+-      .bg(t.background)
++      .bg(id?.color ? id.color + "1f" : t.background)
+       .when(bottom, el => el.border_t(1))
+       .when(!bottom, el => el.border_b(1))
+-      .border_color(t.border)
++      .border_color(id?.color ?? t.border)
+       .text_size(12)
+       .on_hover((hovered, cx) => { this.hovered = hovered; cx.notify(); })
+       .on_click(() => run("pane.focus", { pane }))
+       .when(Boolean(pic), (el) => el.child(pic))
+-      .child(div().flex_none().truncate().max_w(260).font_medium().text_color(t.foreground).child(name))
+-      .child(div().flex_1().truncate().text_color(t.dim).child(folder(p.cwd)))
++      .when(Boolean(id?.color), el => el.child(div().size(8).flex_none().rounded(4).bg(id.color)))
++      .child(div().flex_none().truncate().max_w(260).font_medium().text_color(t.foreground).child(persona?.label ?? name))
++      .when(Boolean(id?.key), el => el.child(div().flex_none().font_semibold().text_color(id.color ?? t.foreground).child(id.key)))
++      .when(Boolean(note?.task), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(note.task)))
++      .when(Boolean(id?.branch), el => el.child(div().flex_none().max_w(220).truncate().text_color(t.dim).child(id.branch)))
++      .when(!note?.task, el => el.child(div().flex_1().truncate().text_color(t.dim).child(folder(p.cwd))))
+       .when(st === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
+       .when(st === "blocked", el => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).child("Needs you")))
+       .when(st === "done", el => el.child(div().size(7).flex_none().rounded(4).bg(t.done)))

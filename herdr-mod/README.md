@@ -15,7 +15,7 @@ service.
   has to be running to act on them, and the `⚙` strip says so when `capcom web` is not.
 
 Install: `scripts/install.sh` then `scripts/install-herdr-mod.sh`. This repo is the source of truth for every capcom
-mod (`capcom-prs`, `capcom-agents`, `capcom-board`, `capcom-jira`, `capcom-plan`; `capcom-tabs` is Herdr's `tabs` mod plus `capcom-tabs.patch`, built at install) and for the `capcom` layout
+mod (`capcom-prs`, `capcom-agents`, `capcom-board`, `capcom-jira`, `capcom-plan`; `capcom-tabs` and `capcom-pane` are Herdr's `tabs` and `pane` mods plus `capcom-tabs.patch` and `capcom-pane.patch`, built at install) and for the `capcom` layout
 (`herdr-mod/layouts/capcom.json`); the script copies them into the app and switches to the layout. Edit them here, not
 in `~/.config/herdr-app`, or the next install overwrites the change.
 
@@ -51,3 +51,18 @@ Jira status. Tickets whose status category is Done are not fetched. Click a card
   another model). One run takes about 15 seconds and costs under a cent.
 - It fetches when the pane opens if the file is over 5 minutes old, then every 5 minutes while the pane is open, and
   on `↻`. Nothing is fetched while the pane is hidden. The pane hides itself after 3 minutes without a click. A second fetch never starts while one is running.
+
+## Session identity: which agent am I typing into?
+
+So a prompt does not land in the wrong session, every agent says what it is about in three places. The ticket key
+comes from the note's task, the git branch, or the tab and space names (`ABC-123`). A session with a ticket, or a
+feature branch, gets a colour from that key; sessions on `main`, `master` or `develop` get none.
+
+- **Agents list** (`capcom-agents`): the row leads with the task from `capcom note --task` (else the tab or title as
+  before), with the persona, ticket key (in its colour) and branch under it, and a colour bar on the left.
+- **Pane header** (`capcom-pane`): a strip above the prompt with the persona, ticket key, task and branch, tinted in
+  the ticket colour. Panes that are not agents keep Herdr's normal header.
+- **Tabs** (`capcom-tabs`): a dot in the ticket colour, and the active tab's border takes it too.
+
+`capcom-agents` reads each agent's note every 10 seconds and shares it as `capcom.notes` (terminal to note) and
+`capcom.persona`; the pane and tab mods read those. The key and colour logic is in `shared/identity.js`.

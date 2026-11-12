@@ -7,6 +7,7 @@ import * as fs from "fs/promises";
 import { appHome, agents, terminals, panes, focused, spaces, run, exec, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 import { SH, dotColor, short, openUrl, prDo, prDetails } from "./pr-details.js";
 import { CHARACTERS } from "./characters.js";
+import { who as whoIs } from "./identity.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -93,6 +94,36 @@ export default class Agents extends View {
     this.scanPhotos(cx);
     cx.timer.every(30000, (cx) => { this.scanPhotos(cx); cx.notify(); });
     cx.timer.every(30000, (cx) => cx.notify());
+    this.refreshNotes(cx);
+    cx.timer.every(10000, (cx) => this.refreshNotes(cx));
+  }
+
+  // Each agent's note (`capcom note`), shared as `capcom.notes` so the pane header and tabs can show the task too.
+  refreshNotes(cx) {
+    cx.spawn(async () => {
+      const found = {};
+      await Promise.all(agents().map(async (a) => {
+        const note = await this.noteOf(a.address);
+        if (note?.task || note?.progress) found[a.address] = { task: note.task, progress: note.progress, waiting: note.waiting, needs_you: note.needs_you };
+      }));
+      const text = JSON.stringify(found);
+      if (text !== this.notesText) {
+        this.notesText = text;
+        setShared("capcom.notes", found);
+      }
+    });
+  }
+
+  // The note file of the agent's Claude Code session (see sessionOf), or null.
+  async noteOf(terminal) {
+    const cmd = 'pid=$(hc get "$1" | sed -n \'s/.*"foreground":{[^}]*"pid":\\([0-9]*\\).*/\\1/p\'); '
+      + 's=$(sed -n \'s/.*"sessionId":"\\([^"]*\\)".*/\\1/p\' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions/$pid.json"); '
+      + '[ -n "$s" ] && cat "${CAPCOM_NOTES_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/capcom/notes}/$s.json" 2>/dev/null';
+    try {
+      return JSON.parse((await exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", terminal], { timeout: 5000 })).stdout);
+    } catch {
+      return null;
+    }
   }
 
   // Photos you drop in avatars/ (<id>.jpg or .png) replace the drawn portraits.
@@ -363,6 +394,14 @@ export default class Agents extends View {
     this.track(list, now);
     this.hold(list);
     this.assign(list);
+    const persona = Object.fromEntries(list.flatMap((a) => { const c = this.character(a); return c ? [[a.address, { label: c.label, color: c.color }]] : []; }));
+    const personaText = JSON.stringify(persona);
+    if (personaText !== this.personaText) {
+      this.personaText = personaText;
+      setShared("capcom.persona", persona);
+    }
+    const notes = shared("capcom.notes") ?? {};
+    const paneOf = new Map(panes().map((p) => [p.pane, p]));
     // A kept sub-agent (one with a pane) is in agents() too: where a tree shows
     // it, it gets no row of its own, unless it's pinned.
     const nested = new Set(collapsed ? [] : list.flatMap((a) => this.tree(all, a.address).map((s) => s.t.address)));
@@ -435,7 +474,9 @@ export default class Agents extends View {
       const who = this.character(a);
       const more = detail.get(a.address);
       // What the agent is on leads the row; the character is only a label under it.
-      const task = more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
+      const note = notes[a.address];
+      const task = note?.task || (more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a)));
+      const id = whoIs({ task: note?.task, branch: paneOf.get(a.pane)?.branch, tab: a.tab_name, space: a.space_name });
       // An agent on another machine (`vps/t7`) says which.
       const machine = a.address.includes("/") ? a.address.split("/")[0] : null;
       if (collapsed) {
@@ -540,6 +581,7 @@ export default class Agents extends View {
           cx.notify();
         })
         .on_click(() => run("pane.focus", { pane: a.pane }))
+        .child(div().w(3).h(AV - 8).flex_none().rounded(2).bg(id.color ?? "#00000000"))
         .when(Boolean(pic) || Boolean(who), el => el.child(div().id(`agent-fold-${a.address}`)
           .when(subs.length > 0, el => el.on_click((_e, cx) => {
             cx.stop_propagation();
@@ -549,7 +591,10 @@ export default class Agents extends View {
         .child(who
           ? v_flex().flex_1().min_w(0)
             .child(div().min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).child(task))
-            .child(div().min_w(0).truncate().text_size(11).text_color(t.muted).child([who.label, full ? a.space_name : null].filter(Boolean).join(" \u00b7 ")))
+            .child(h_flex().min_w(0).gap(5).text_size(11).text_color(t.muted)
+              .child(div().flex_none().child([who.label, full ? a.space_name : null].filter(Boolean).join(" \u00b7 ")))
+              .when(Boolean(id.key), el => el.child(div().flex_none().font_semibold().text_color(id.color ?? t.muted).child(id.key)))
+              .when(Boolean(id.branch), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(id.branch))))
           : h_flex().flex_1().min_w(0).gap(5).items_center()
           .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
           .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`\u00b7 ${more}`))))

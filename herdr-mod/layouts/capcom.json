@@ -109,7 +109,7 @@
                 "pane": {
                   "header": {
                     "content": {
-                      "mod": "pane"
+                      "mod": "capcom-pane"
                     },
                     "reveal": "always",
                     "height": 30,

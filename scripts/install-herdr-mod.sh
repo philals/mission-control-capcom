@@ -27,11 +27,23 @@ tabs="$home/mods/capcom-tabs"
 rm -rf "$tabs"
 cp -r "$home/mods/tabs" "$tabs"
 cp herdr-mod/capcom-tabs/*.svg "$tabs/"
+cp herdr-mod/shared/identity.js "$tabs/"
 rm -f "$tabs"/gpui-kit.d.ts
 patch -s "$tabs/main.js" herdr-mod/capcom-tabs.patch
 sed -i 's#mods/tabs/#mods/capcom-tabs/#g' "$tabs/main.js"
 printf '{ "place": "none", "title": "Tabs" }\n' > "$tabs/mod.json"
 herdr-app check "$tabs"
+
+# capcom-pane is Herdr's own `pane` header plus the session's persona, ticket, task and branch in its ticket colour (herdr-mod/capcom-pane.patch).
+pane="$home/mods/capcom-pane"
+rm -rf "$pane"
+cp -r "$home/mods/pane" "$pane"
+cp herdr-mod/shared/identity.js "$pane/"
+rm -f "$pane"/gpui-kit.d.ts
+patch -s "$pane/main.js" herdr-mod/capcom-pane.patch
+sed -i 's#mods/pane/#mods/capcom-pane/#g' "$pane/main.js"
+printf '{ "place": "none", "title": "Pane header" }\n' > "$pane/mod.json"
+herdr-app check "$pane"
 
 mkdir -p "$home/layouts"
 cp herdr-mod/layouts/capcom.json "$home/layouts/capcom.json"
