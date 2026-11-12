@@ -4,7 +4,7 @@
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, HoverCard, Avatar, AvatarImage, AvatarFallback } from "gpui-base";
 import * as fs from "fs/promises";
-import { agents, terminals, panes, focused, spaces, run, exec, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
+import { appHome, agents, terminals, panes, focused, spaces, run, exec, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 import { SH, dotColor, short, openUrl, prDo, prDetails } from "./pr-details.js";
 import { CHARACTERS, ringFile, dimFile } from "./characters.js";
 
@@ -108,7 +108,7 @@ export default class Agents extends View {
   scanPhotos(cx) {
     cx.spawn(async (cx) => {
       try {
-        const files = await fs.readdir("mods/capcom-agents/avatars");
+        const files = await fs.readdir(`${appHome()}/mods/capcom-agents/avatars`);
         const found = new Map();
         for (const f of files) {
           const m = /^(.+)\.(jpe?g|png)$/i.exec(f);
