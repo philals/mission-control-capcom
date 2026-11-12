@@ -247,15 +247,23 @@ export default class CapcomJira extends View {
         out.push(entry);
       }
     }
-    return out.sort((x, y) => x.merged - y.merged);
+    for (const p of i.prs ?? []) {
+      if (seen.has(p.url)) continue;
+      seen.add(p.url);
+      const merged = p.state === "merged";
+      out.push(known.get(p.url) ?? {
+        merged,
+        pr: { url: p.url, repo: p.repo, number: p.number, title: p.title, draft: p.draft && p.state === "open", closed: p.state === "closed", ci: "none", rail: [], checks: [] },
+      });
+    }
+    const rank = ({ pr, merged }) => (merged ? 1 : pr.closed ? 2 : 0);
+    return out.sort((x, y) => rank(x) - rank(y));
   }
 
   // One icon per PR, coloured by CI (purple once merged). Hover shows the same card as an agent's PR icon.
-  prIcons(i, t) {
-    const mine = this.prsOf(i);
-    const MAX = 5;
-    return h_flex().gap(2).flex_none().items_center()
-      .children(mine.slice(0, MAX).map(({ pr, merged }) => {
+  prIcons(i, t, mine) {
+    return h_flex().gap(2).flex_wrap().items_center()
+      .children(mine.map(({ pr, merged }) => {
         const trigger = div().id(`pri-${i.key}-${pr.url}`).p(2).rounded(4).cursor_pointer()
           .hover((s) => s.bg(t.selected))
           .on_mouse_down("left", (_e, cx) => {
@@ -269,11 +277,10 @@ export default class CapcomJira extends View {
           .child(svg("mods/workspace-chrome/git-compare.svg").size(13).flex_none().text_color(dotColor(pr, merged, t)));
         const card = v_flex().w(300).gap(4).p(10).rounded(8).bg(t.popover).border(1).border_color(t.border).text_size(12)
           .child(div().font_semibold().text_color(t.foreground).child(pr.title))
-          .child(div().text_size(11).text_color(t.muted).child(`${short(pr.repo)}#${pr.number}${pr.draft ? " · draft" : merged ? " · merged" : ""}`))
-          .when(!merged, (el) => el.child(prDetails(pr, t, (cx, action, url, on) => this.change(cx, action, url, on), false)));
+          .child(div().text_size(11).text_color(t.muted).child(`${short(pr.repo)}#${pr.number}${pr.draft ? " · draft" : merged ? " · merged" : pr.closed ? " · closed" : ""}`))
+          .when(!merged && !pr.closed, (el) => el.child(prDetails(pr, t, (cx, action, url, on) => this.change(cx, action, url, on), false)));
         return HoverCard.new(`prc-${i.key}-${pr.url}`).open_delay(150).trigger(trigger).content(card);
-      }))
-      .when(mine.length > MAX, (el) => el.child(div().text_size(10).text_color(t.dim).child(`+${mine.length - MAX}`)));
+      }));
   }
 
   chip(id, label, tip, onClick, t) {
@@ -335,6 +342,7 @@ export default class CapcomJira extends View {
     const tasks = d?.board?.tasks ?? [];
     const done = tasks.filter((x) => x.status === "done").length;
     const main = this.actions(i).find((a) => !a.minor);
+    const prs = this.prsOf(i);
     return v_flex().id(`jira-${i.key}`).rounded(6).bg(t.raised).border(1).border_color(open ? color : t.border)
       .hover((s) => s.bg(t.hover)).cursor_pointer()
       .on_click((_e, cx) => {
@@ -353,13 +361,13 @@ export default class CapcomJira extends View {
             h_flex().gap(6).items_center().text_size(11).text_color(t.muted)
               .child(div().child(i.type))
               .when(Boolean(story), (el) => el.child(div().px(5).rounded(4).border(1).border_color(t.border).text_color(BOARD).child(tasks.length ? `Capcom ${done}/${tasks.length}` : "Capcom")))
-              .child(this.prIcons(i, t))
               .child(div().flex_1())
               .child(this.chip(`id-${i.key}`, "ID", "Copy the ticket ID", (cx) => this.copy(cx, i.key, i.key), t))
               .child(this.chip(`url-${i.key}`, "URL", "Copy the ticket URL", (cx) => this.copy(cx, "the URL", i.url), t))
               .child(this.chip(`web-${i.key}`, "↗", "Open in Jira", () => openUrl(i.url), t))
               .when(Boolean(main), (el) => el.child(this.chip(`main-${i.key}`, `▶ ${main.label}`, `${main.full}: ${main.cmd}`, main.go, t))),
-          ),
+          )
+          .when(prs.length > 0, (el) => el.child(this.prIcons(i, t, prs))),
       )
       .when(open, (el) => el.child(this.details_panel(i, t)));
   }

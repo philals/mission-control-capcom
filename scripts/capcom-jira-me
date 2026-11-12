@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Writes the Jira tickets assigned to you to jira-me.json, using Claude's Atlassian connector (`claude -p`).
+# Also lists each ticket's PRs from GitHub (needs `gh` logged in; without it the PR lists are empty).
 # The capcom-jira board mod runs this; run it by hand to test. Prints the file's path on success.
 set -euo pipefail
 PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
@@ -20,11 +21,18 @@ raw="$(claude -p "$prompt" \
   --output-format json)"
 
 tmp="$(mktemp "$out.XXXXXX")"
-trap 'rm -f "$tmp"' EXIT
+trap 'rm -f "$tmp" "$tmp.2"' EXIT
 printf '%s' "$raw" | jq --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
   if .is_error then error(.result // "claude failed")
   elif (.structured_output.issues | type) != "array" then error("claude returned no issue list")
   else {fetchedAt: $at, issues: .structured_output.issues} end' > "$tmp"
+# Every PR (open, merged or closed) whose title names the ticket. GitHub search is fuzzy, so keep exact keys only.
+for key in $(jq -r '.issues[].key' "$tmp"); do
+  prs="$(gh search prs "$key" --match title --json url,title,number,repository,state,isDraft --limit 50 2>/dev/null \
+    | jq -c --arg k "$key" '[.[] | select(.title | test("(^|[^A-Za-z0-9])" + $k + "([^0-9]|$)"; "i")) | {url, title, number, repo: .repository.nameWithOwner, state, draft: .isDraft}]' 2>/dev/null)" || prs=""
+  jq --arg k "$key" --argjson p "${prs:-[]}" '(.issues[] | select(.key == $k)).prs = $p' "$tmp" > "$tmp.2" && mv "$tmp.2" "$tmp"
+done
+
 mv "$tmp" "$out"
 trap - EXIT
 echo "$out"
