@@ -80,6 +80,9 @@ function icon(p, size, color) {
 
 const AV = 44;
 
+// Session colours: each live session has its own, the first free one, kept until it ends.
+const COLORS = ["#e8a24a", "#4aa3e8", "#b878f2", "#4fcf8e", "#ef6f9a", "#3fd0c4", "#e8d24a", "#7c8cff", "#ef7a4a", "#9bd44a", "#d65ad6", "#5ab0a0"];
+
 export default class Agents extends View {
   init(_props, cx) {
     if (props()?.sortMenu) return;
@@ -90,6 +93,7 @@ export default class Agents extends View {
     if (!this.pendingPins.length) localStorage.removeItem("pins");
     this.migratingPins = new Set();
     this.persona = JSON.parse(localStorage.getItem("persona") ?? "{}");
+    this.hues = JSON.parse(localStorage.getItem("hues") ?? "{}");
     this.photos = new Map();
     this.scanPhotos(cx);
     cx.timer.every(30000, (cx) => { this.scanPhotos(cx); cx.notify(); });
@@ -163,6 +167,32 @@ export default class Agents extends View {
     }
     for (const k of Object.keys(this.persona)) if (!live.has(k) && !this.changed[k]) { delete this.persona[k]; dirty = true; }
     if (dirty) localStorage.setItem("persona", JSON.stringify(this.persona));
+  }
+
+  // Past twelve sessions a colour repeats with a number (2nd use of colour 1 is "1#2"), so a clash shows.
+  assignColors(list) {
+    const live = new Set(list.map((a) => a.address));
+    const taken = new Set(list.map((a) => this.hues[a.address]).filter(Boolean));
+    let dirty = false;
+    for (const a of list) {
+      if (this.hues[a.address]) continue;
+      let round = 1;
+      let pick;
+      while (!pick) {
+        pick = COLORS.map((_, i) => (round === 1 ? String(i) : `${i}#${round}`)).find((id) => !taken.has(id));
+        round++;
+      }
+      this.hues[a.address] = pick;
+      taken.add(pick);
+      dirty = true;
+    }
+    for (const k of Object.keys(this.hues)) if (!live.has(k) && !this.changed[k]) { delete this.hues[k]; dirty = true; }
+    if (dirty) localStorage.setItem("hues", JSON.stringify(this.hues));
+  }
+
+  hue(a) {
+    const [i, n] = (this.hues[a.address] ?? "").split("#");
+    return COLORS[Number(i)] ? { color: COLORS[Number(i)], n: n ? Number(n) : 0 } : null;
   }
 
   character(a) {
@@ -394,7 +424,8 @@ export default class Agents extends View {
     this.track(list, now);
     this.hold(list);
     this.assign(list);
-    const persona = Object.fromEntries(list.flatMap((a) => { const c = this.character(a); return c ? [[a.address, { label: c.label, color: c.color }]] : []; }));
+    this.assignColors(list);
+    const persona = Object.fromEntries(list.map((a) => [a.address, { label: this.character(a)?.label ?? a.program?.name ?? "", ...this.hue(a) }]));
     const personaText = JSON.stringify(persona);
     if (personaText !== this.personaText) {
       this.personaText = personaText;
@@ -581,7 +612,7 @@ export default class Agents extends View {
           cx.notify();
         })
         .on_click(() => run("pane.focus", { pane: a.pane }))
-        .child(div().w(3).h(AV - 8).flex_none().rounded(2).bg(id.color ?? "#00000000"))
+        .child(div().w(3).h(AV - 8).flex_none().rounded(2).bg(this.hue(a)?.color ?? "#00000000"))
         .when(Boolean(pic) || Boolean(who), el => el.child(div().id(`agent-fold-${a.address}`)
           .when(subs.length > 0, el => el.on_click((_e, cx) => {
             cx.stop_propagation();
@@ -593,7 +624,7 @@ export default class Agents extends View {
             .child(div().min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).child(task))
             .child(h_flex().min_w(0).gap(5).text_size(11).text_color(t.muted)
               .child(div().flex_none().child([who.label, full ? a.space_name : null].filter(Boolean).join(" \u00b7 ")))
-              .when(Boolean(id.key), el => el.child(div().flex_none().font_semibold().text_color(id.color ?? t.muted).child(id.key)))
+              .when(Boolean(id.key), el => el.child(div().flex_none().font_semibold().text_color(t.muted).child(id.key)))
               .when(Boolean(id.branch), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(id.branch))))
           : h_flex().flex_1().min_w(0).gap(5).items_center()
           .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))

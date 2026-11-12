@@ -1,37 +1,31 @@
 --- a/main.js
 +++ b/main.js
-@@ -1,6 +1,7 @@
- import { View, div, svg, image } from "gpui-kit";
- import { h_flex, ScrollHandle } from "gpui-base";
- import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings } from "herdr";
-+import { who } from "./identity.js";
- 
- function find(node, id) {
-   if (node?.id === id) return node;
-@@ -62,11 +63,13 @@
+@@ -61,12 +61,14 @@
+     const button = (id, label, action) => div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground))
        .on_mouse_down("left", stop).on_click(action).child(label);
      const item = (c, i) => {
-       const program = panes().find(p => p.tab === c.id && p.program?.agent)?.program ?? panes().find(p => p.tab === c.id)?.program;
+-      const program = panes().find(p => p.tab === c.id && p.program?.agent)?.program ?? panes().find(p => p.tab === c.id)?.program;
 +      const lead = panes().find(p => p.tab === c.id && p.program?.agent);
-+      const id = lead ? who({ task: shared("capcom.notes")?.[lead.terminal]?.task, branch: lead.branch, tab: c.name, space: space.name }) : null;
++      const program = lead?.program ?? panes().find(p => p.tab === c.id)?.program;
++      const color = lead ? shared("capcom.persona")?.[lead.terminal]?.color : null;
        const name = /^tb\d+$/.test(c.name) ? program?.name ?? "Terminal" : c.name;
        return h_flex().id(`tab-${c.id}`).h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(12.8)
          // A rename or status dot on this or an earlier tab can push the active one out.
          .when(i <= active, el => el.on_size_change((_size, cx) => { this.scroll.scroll_to_item(active); cx.notify(); }))
 -        .border(1).border_color(c.active ? t.border : t.chrome).bg(c.active ? t.raised : t.chrome).text_color(c.active ? t.foreground : t.muted)
-+        .border(1).border_color(c.active ? (id?.color ?? t.border) : t.chrome).bg(c.active ? t.raised : t.chrome).text_color(c.active ? t.foreground : t.muted)
++        .border(1).border_color(c.active ? (color ?? t.border) : t.chrome).bg(c.active ? t.raised : t.chrome).text_color(c.active ? t.foreground : t.muted)
          .hover(s => s.bg(t.hover))
          .on_mouse_down("left", (e, cx) => { cx.stop_propagation(); this.pressed = i; if (e.click_count === 2) run("tab.rename", { id: c.id }); })
          .on_mouse_up("left", () => {
-@@ -75,6 +78,7 @@
+@@ -75,6 +77,7 @@
            else run("tab.select", { id: c.id });
          })
          .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "menu", kind: "popup", width: 200, props: { tab: "tab", target: { id: c.id, space: space.id } } }); })
-+        .when(Boolean(id?.color), el => el.child(div().size(7).flex_none().rounded(4).bg(id.color)))
++        .when(Boolean(color), el => el.child(div().size(8).flex_none().rounded(4).bg(color)))
          .when(Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(14).text_color(t.muted) : image(program.icon).size(14)))
          .child(div().max_w(170).truncate().child(c.zoomed ? `${name} Z` : name))
          .when(c.status === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
-@@ -87,6 +91,7 @@
+@@ -87,6 +90,7 @@
        ? Math.max(10, (root.traffic_lights[0] + 64) / settings().zoom - (sidebar?.hidden ? 0 : sidebar?.size?.px ?? 0))
        : 10;
      const panel = find(root, "panel"), body = find(root, "panel-body");
@@ -39,7 +33,7 @@
      const enabled = shared("workspace.panels") ?? ["files", "changes"];
      this.syncPanel(space, panel, body, enabled);
      const panelButton = (id, label, icon) => {
-@@ -108,6 +113,8 @@
+@@ -108,6 +112,8 @@
        .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
        .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
        .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))

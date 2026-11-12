@@ -54,15 +54,18 @@ Jira status. Tickets whose status category is Done are not fetched. Click a card
 
 ## Session identity: which agent am I typing into?
 
-So a prompt does not land in the wrong session, every agent says what it is about in three places. The ticket key
-comes from the note's task, the git branch, or the tab and space names (`ABC-123`). A session with a ticket, or a
-feature branch, gets a colour from that key; sessions on `main`, `master` or `develop` get none.
+So a prompt does not land in the wrong session, every agent says what it is about in three places, and every live
+session has its own colour (with or without a Jira ticket).
 
+- **Colour**: `capcom-agents` gives each live session the first free colour of twelve and keeps it until the session
+  ends. Past twelve sessions a colour repeats with a number badge (`#2`). The ticket key (`ABC-123`, found in the
+  note's task, the branch, or the tab and space names) is shown as text and does not decide the colour.
 - **Agents list** (`capcom-agents`): the row leads with the task from `capcom note --task` (else the tab or title as
-  before), with the persona, ticket key (in its colour) and branch under it, and a colour bar on the left.
-- **Pane header** (`capcom-pane`): a strip above the prompt with the persona, ticket key, task and branch, tinted in
-  the ticket colour. Panes that are not agents keep Herdr's normal header.
-- **Tabs** (`capcom-tabs`): a dot in the ticket colour, and the active tab's border takes it too.
+  before), with the persona, ticket key and branch under it, and a bar in the session colour on the left.
+- **Pane header** (`capcom-pane`): a 34px header that starts with a solid name plate in the session colour (the
+  persona), then the ticket key, task and branch, with a bottom line in the colour. Panes that are not agents keep
+  Herdr's normal header. Herdr only allows a pane header at the top or bottom, so this stands in for a side rail.
+- **Tabs** (`capcom-tabs`): a dot in the session colour, and the active tab's border takes it too.
 
-`capcom-agents` reads each agent's note every 10 seconds and shares it as `capcom.notes` (terminal to note) and
-`capcom.persona`; the pane and tab mods read those. The key and colour logic is in `shared/identity.js`.
+`capcom-agents` reads each agent's note every 10 seconds and shares it as `capcom.notes` (terminal to note), and
+shares `capcom.persona` (terminal to name, colour and badge number); the pane and tab mods read those.
