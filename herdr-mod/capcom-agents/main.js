@@ -6,7 +6,7 @@ import { v_flex, h_flex, HoverCard, Avatar, AvatarImage, AvatarFallback } from "
 import * as fs from "fs/promises";
 import { appHome, agents, terminals, panes, focused, spaces, run, exec, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 import { SH, dotColor, short, openUrl, prDo, prDetails } from "./pr-details.js";
-import { CHARACTERS, ringFile, dimFile } from "./characters.js";
+import { CHARACTERS } from "./characters.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -77,16 +77,7 @@ function icon(p, size, color) {
   return p.tint ? svg(p.icon).size(size).flex_none().text_color(color) : image(p.icon).w(size).h(size).flex_none();
 }
 
-// Seven chevrons round the portrait, one per PR rail step that is done (six when the repo has no automerge step).
-// No PR yet: a dark ring. Merged: all lit.
-function ringOf(pr, merged) {
-  const rail = pr?.rail ?? [];
-  const total = rail.length === 6 ? 6 : 7;
-  const mask = merged ? (1 << total) - 1 : rail.reduce((m, r, i) => (r.state === "done" ? m | (1 << i) : m), 0);
-  return { total, mask };
-}
-
-const AV = 34;
+const AV = 44;
 
 export default class Agents extends View {
   init(_props, cx) {
@@ -161,22 +152,12 @@ export default class Agents extends View {
     }
   }
 
-  // The portrait (your photo, else the drawn one) inside the gate ring.
+  // The portrait: your photo, else the drawn one, on the character's colour.
   avatar(t, a, c) {
-    const first = (this.prsByAgent.get(a.address) ?? []).sort((x, y) => x.merged - y.merged)[0];
-    const { total, mask } = ringOf(first?.pr, first?.merged);
-    const photo = this.photos.get(c.id);
-    const inset = 6;
-    const pic = photo ?? `mods/capcom-agents/portraits/${c.id}.svg`;
-    return div()
-      .relative()
-      .size(AV)
-      .flex_none()
-      .child(svg(`mods/capcom-agents/${dimFile(total)}`).absolute().top(0).left(0).size(AV).text_color(t.border))
-      .when(mask > 0, (el) => el.child(svg(`mods/capcom-agents/${ringFile(total, mask)}`).absolute().top(0).left(0).size(AV).text_color(t.foreground)))
-      .child(Avatar.new().absolute().top(inset).left(inset).size(AV - inset * 2).rounded_full().overflow_hidden().bg(c.color)
-        .image(AvatarImage.new(pic).size_full())
-        .fallback(AvatarFallback.new().size_full().bg(c.bg)));
+    const pic = this.photos.get(c.id) ?? `mods/capcom-agents/portraits/${c.id}.svg`;
+    return Avatar.new().size(AV).flex_none().rounded_full().overflow_hidden().bg(c.color)
+      .image(AvatarImage.new(pic).size_full())
+      .fallback(AvatarFallback.new().size_full().bg(c.bg));
   }
 
   // Stamps agents whose state changed. Done and idle count as one: looking at a
