@@ -362,12 +362,8 @@ export default class CapcomBoard extends View {
           ),
       )
       .when(Boolean(story) && this.storyMenu, (el) => {
-        const finished = tasks.length > 0 && tasks.every((x) => x.status === "done" || x.status === "dropped") && tasks.some((x) => x.status === "done");
-        const moves = {
-          in_progress: [["in_review", "Move to review", finished ? null : "needs every task done or dropped"]],
-          in_review: [["done", "Mark done", null], ["in_progress", "Reopen", null]],
-          done: [["in_progress", "Reopen", null]],
-        }[story.status] ?? [];
+        const labels = { in_progress: "Move to doing", in_review: "Move to review", done: "Mark done" };
+        const moves = ["in_progress", "in_review", "done"].filter((x) => x !== story.status).map((x) => [x, labels[x], null]);
         return el.child(
           h_flex().gap(6).flex_wrap().items_center()
             .children(

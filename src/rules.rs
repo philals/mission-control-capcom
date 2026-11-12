@@ -207,29 +207,8 @@ pub fn force_status(board: &mut Board, id: &str, to: Status) -> Result<()> {
     Ok(())
 }
 
+/// Set a story's status: any status to any other, with no checks.
 pub fn story_transition(board: &mut Board, to: StoryStatus) -> Result<()> {
-    use StoryStatus::*;
-    let from = board.story.status;
-    if from == to {
-        bail!("story is already {}", to.as_str());
-    }
-    if !matches!((from, to), (InProgress, InReview) | (InReview, Done) | (InReview, InProgress) | (Done, InProgress)) {
-        bail!("illegal story transition: {} -> {}", from.as_str(), to.as_str());
-    }
-    if matches!(to, InReview | Done) {
-        let open: Vec<String> = board
-            .tasks
-            .iter()
-            .filter(|t| !matches!(t.status, Status::Done | Status::Dropped))
-            .map(|t| format!("{} is {}", t.id, t.status.as_str()))
-            .collect();
-        if !open.is_empty() {
-            bail!("story has unfinished tasks: {}", open.join(", "));
-        }
-        if !board.tasks.iter().any(|t| t.status == Status::Done) {
-            bail!("story has no tasks that are done");
-        }
-    }
     board.story.status = to;
     Ok(())
 }
@@ -448,55 +427,15 @@ mod tests {
         transition(&mut b, "T1", Status::Planned).unwrap();
         assert!(b.tasks[0].agent.is_none());
     }
-    fn done_task(id: &str) -> Task {
-        let mut t = t(id, &[]);
-        t.kind = TaskType::Spike;
-        t.status = Status::Done;
-        t
-    }
 
     #[test]
-    fn story_review_needs_at_least_one_task() {
-        let mut b = board(vec![]);
-        assert!(err(story_transition(&mut b, StoryStatus::InReview)).contains("no tasks"));
-    }
-
-    #[test]
-    fn story_review_needs_every_task_done_and_ignores_dropped() {
-        let mut dropped = t("T3", &[]);
-        dropped.status = Status::Dropped;
-        let mut b = board(vec![done_task("T1"), t("T2", &[]), dropped]);
-        let e = err(story_transition(&mut b, StoryStatus::InReview));
-        assert!(e.contains("T2 is todo"), "{e}");
-        assert!(!e.contains("T3"), "{e}");
-        b.tasks[1].status = Status::Dropped;
-        story_transition(&mut b, StoryStatus::InReview).unwrap();
-        assert_eq!(b.story.status, StoryStatus::InReview);
-    }
-
-    #[test]
-    fn story_done_only_follows_review() {
-        let mut b = board(vec![done_task("T1")]);
-        assert!(err(story_transition(&mut b, StoryStatus::Done)).contains("illegal story transition"));
-        story_transition(&mut b, StoryStatus::InReview).unwrap();
-        story_transition(&mut b, StoryStatus::Done).unwrap();
-        assert!(err(story_transition(&mut b, StoryStatus::InReview)).contains("illegal story transition"));
-    }
-
-    #[test]
-    fn story_can_be_reopened_from_review_and_from_done() {
-        let mut b = board(vec![done_task("T1")]);
-        story_transition(&mut b, StoryStatus::InReview).unwrap();
-        story_transition(&mut b, StoryStatus::InProgress).unwrap();
-        story_transition(&mut b, StoryStatus::InReview).unwrap();
-        story_transition(&mut b, StoryStatus::Done).unwrap();
-        story_transition(&mut b, StoryStatus::InProgress).unwrap();
-        assert_eq!(b.story.status, StoryStatus::InProgress);
-    }
-
-    #[test]
-    fn story_status_change_to_the_same_value_is_refused() {
-        let mut b = board(vec![done_task("T1")]);
-        assert!(err(story_transition(&mut b, StoryStatus::InProgress)).contains("already"));
+    fn a_story_moves_to_any_status_whatever_its_tasks_say() {
+        let mut b = board(vec![t("T1", &[])]);
+        for to in [StoryStatus::Done, StoryStatus::InReview, StoryStatus::InProgress, StoryStatus::InProgress, StoryStatus::Done] {
+            story_transition(&mut b, to).unwrap();
+            assert_eq!(b.story.status, to);
+        }
+        let mut empty = board(vec![]);
+        story_transition(&mut empty, StoryStatus::Done).unwrap();
     }
 }

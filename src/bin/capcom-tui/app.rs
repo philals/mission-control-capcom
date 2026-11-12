@@ -979,14 +979,9 @@ impl App {
         self.stories.iter().find(|s| s.key == key).map_or_else(|| key.to_string(), |s| herdr::workspace_label(key, &s.title))
     }
 
-    /// Start the review skill for a story whose tasks are all finished, in a new Herdr tab.
+    /// Start the review skill for a story, in a new Herdr tab.
     pub fn review_story(&mut self, key: &str) {
-        let checked = store::load(&self.root, key).and_then(|mut board| match board.story.status {
-            StoryStatus::InReview => Ok(()),
-            StoryStatus::Done => anyhow::bail!("it is done; drag it back to DOING first to review it again"),
-            StoryStatus::InProgress => rules::story_transition(&mut board, StoryStatus::InReview),
-        });
-        if let Err(e) = checked {
+        if let Err(e) = store::load(&self.root, key) {
             self.set_notice(format!("{key} is not ready for review: {e:#}"));
             return;
         }
@@ -1118,8 +1113,9 @@ impl App {
             (ListCol::Review | ListCol::Done, ListCol::Doing) => self.set_story_status(&key, StoryStatus::InProgress, "is back in DOING"),
             (ListCol::Review, ListCol::Done) => self.set_story_status(&key, StoryStatus::Done, "is done"),
             (ListCol::Doing, ListCol::Done) => self.finish_story(&key),
-            (ListCol::Todo, _) => self.set_notice(format!("{key} has tasks that are not finished yet")),
-            _ => self.set_notice(format!("{key} cannot move from {} to {}", from.label(), to.label())),
+            (ListCol::Todo, ListCol::Review) => self.review_story(&key),
+            (ListCol::Todo, ListCol::Done) => self.finish_story(&key),
+            _ => {}
         }
     }
 
@@ -2682,17 +2678,6 @@ impl App {
         let (skill, tab, phase) = match (from, to) {
             (Status::Todo, Status::Planning) => ("story-plan", "plan", "plan"),
             (Status::Planned | Status::Todo, Status::Implementing) => {
-                if !rules::is_ready(board, task) {
-                    let waiting = task
-                        .depends_on
-                        .iter()
-                        .filter(|d| board.task(d).map_or(true, |t| t.status != Status::Done))
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    self.set_notice(format!("{task_id} waits for {waiting} to be done"));
-                    return;
-                }
                 if from == Status::Todo {
                     self.agent_ask = Some(AgentAsk { id: task_id.to_string(), title, kind: AskKind::Implement });
                     return;
@@ -2764,7 +2749,7 @@ impl App {
         let Some(key) = self.keys.get(self.story).cloned() else {
             return;
         };
-        match store::update(&self.root, &key, |b| rules::transition(b, &ask.id, Status::Implementing)) {
+        match store::update(&self.root, &key, |b| rules::force_status(b, &ask.id, Status::Implementing)) {
             Ok(()) => {
                 self.reload();
                 self.set_notice(format!("{} moved to implementing, no agent started", ask.id));

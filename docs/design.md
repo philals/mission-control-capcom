@@ -25,7 +25,7 @@ Success: for any story, you can see every task, its status, its dependencies and
 
 ## Story review (added 2026-10-05)
 
-The story has its own status on the board: `in_progress` (default), `in_review`, `done`, changed with `capcom story-status`. `in_review` needs every task `done` or `dropped` (and at least one `done`); `done` follows `in_review`; moving back to `in_progress` reopens the story. Adding a task moves an `in_review` story back to `in_progress` and is refused on a `done` story until it is reopened.
+The story has its own status on the board: `in_progress` (default), `in_review`, `done`, changed with `capcom story-status`. A story moves from any status to any other with no checks (straight to `done` needs no review). Adding a task moves an `in_review` story back to `in_progress` and is refused on a `done` story until it is reopened.
 
 The `story-review` skill (`/story-review PROJ-123`) checks the subtasks are complete, reads the Jira story's acceptance criteria and intent, the task files and the merged PRs, reviews each criterion against the evidence, and gives feedback to the user. It writes nothing to Jira. Boards written before this change read an `in_review` task as `implementing`.
 

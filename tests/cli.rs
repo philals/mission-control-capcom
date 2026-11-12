@@ -284,9 +284,11 @@ fn story_review_flow() {
     let root = TempDir::new().unwrap();
     ok(&root, &["init", "PROJ-1", "--title", "A story"]);
     assert_eq!(ok(&root, &["show", "PROJ-1"])["story"]["status"], "in_progress");
-    assert!(fails(&root, &["story-status", "PROJ-1", "in_review"]).contains("no tasks"));
+    ok(&root, &["story-status", "PROJ-1", "in_review"]);
+    ok(&root, &["story-status", "PROJ-1", "in_progress"]);
     ok(&root, &["add-task", "PROJ-1", "--title", "Look into it", "--type", "spike"]);
-    assert!(fails(&root, &["story-status", "PROJ-1", "in_review"]).contains("T1 is todo"));
+    ok(&root, &["story-status", "PROJ-1", "done"]);
+    ok(&root, &["story-status", "PROJ-1", "in_progress"]);
     for s in ["planning", "planned", "implementing", "done"] {
         ok(&root, &["status", "PROJ-1", "T1", s]);
     }

@@ -180,8 +180,7 @@ enum Cmd {
     },
     /// Move the story itself between in_progress, in_review and done
     ///
-    /// in_review needs every task done or dropped (and at least one done). done only follows
-    /// in_review. Moving back to in_progress reopens the story.
+    /// Any status to any other, with no checks.
     StoryStatus {
         /// Jira story key
         key: String,

@@ -1316,7 +1316,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
     let lines = vec![
         row("↑ ↓  j k", "move between stories or cards".into()),
         row("← →  h l", "move between columns (on the story board and on a story's board)".into()),
-        row("v", "start the review of the selected story in Herdr (it must have every task finished); or drag it from DOING to IN REVIEW".into()),
+        row("v", "start the review of the selected story in Herdr (whatever its tasks say); or drag it from DOING to IN REVIEW".into()),
         row("Enter", "open a story, or open a card's detail".into()),
         row("[ ]", "switch story on the board".into()),
         row("Tab", "focus: board or list, then PRs, then runs".into()),
@@ -3814,7 +3814,7 @@ mod tests {
     }
 
     #[test]
-    fn a_todo_card_can_go_straight_to_implementing_and_still_waits_for_its_dependencies() {
+    fn a_todo_card_can_go_straight_to_implementing_whatever_its_dependencies_say() {
         let (_root, mut app) = sample();
         let fake = with_herdr(&mut app);
         drag_card(&mut app, "T3 Spike it", "IMPLEMENTING");
@@ -3834,7 +3834,7 @@ mod tests {
         app.reload();
         drag_card(&mut app, "T2 Wire UI", "IMPLEMENTING");
         assert!(launches_after(&mut app, &fake, 1).is_empty());
-        assert!(app.current_notice().unwrap().contains("waits for T1"));
+        assert!(app.agent_ask.is_some(), "unfinished dependencies do not stop it: it asks whether an agent is needed");
     }
 
     fn task_status(app: &App, id: &str) -> Status {
@@ -3905,12 +3905,11 @@ mod tests {
     }
 
     #[test]
-    fn a_card_whose_dependencies_are_not_done_is_not_started() {
+    fn a_card_whose_dependencies_are_not_done_is_started_all_the_same() {
         let (_root, mut app) = sample();
         let fake = with_herdr(&mut app);
         drag_card(&mut app, "T2 Wire UI", "IMPLEMENTING");
-        assert!(launches_after(&mut app, &fake, 1).is_empty());
-        assert!(app.current_notice().unwrap().contains("waits for T1"), "{:?}", app.current_notice());
+        assert_eq!(launches_after(&mut app, &fake, 1).len(), 1);
     }
 
     #[test]
@@ -4484,13 +4483,11 @@ mod tests {
     }
 
     #[test]
-    fn a_story_with_unfinished_tasks_is_not_ready_for_review() {
+    fn a_story_with_unfinished_tasks_can_still_be_reviewed() {
         let (_root, mut app) = story_columns();
         let fake = with_herdr(&mut app);
         drag_story(&mut app, "PROJ-3", "IN REVIEW");
-        assert!(launches_after(&mut app, &fake, 1).is_empty());
-        let notice = app.current_notice().unwrap().to_string();
-        assert!(notice.contains("PROJ-3 is not ready for review") && notice.contains("unfinished tasks"), "{notice}");
+        assert_eq!(launches_after(&mut app, &fake, 1).len(), 1);
     }
 
     #[test]
@@ -4509,7 +4506,7 @@ mod tests {
         app.list_sel = 5;
         assert_eq!(app.visible_stories()[5].key, "PROJ-6");
         app.on_key(KeyCode::Char('v'), false);
-        assert!(app.current_notice().unwrap().contains("it is done"), "{:?}", app.current_notice());
+        assert_eq!(launches_after(&mut app, &fake, 3).len(), 3, "a done story can be reviewed again too");
     }
 
     #[test]
@@ -4538,7 +4535,7 @@ mod tests {
     }
 
     #[test]
-    fn a_finished_story_can_go_straight_to_done_by_drag_by_key_or_from_the_palette_but_not_with_open_tasks() {
+    fn a_finished_story_can_go_straight_to_done_by_drag_by_key_or_from_the_palette__even_with_open_tasks() {
         let (_root, mut app) = story_columns();
         app.hide_done = false;
         drag_story(&mut app, "PROJ-4", "DONE");
@@ -4548,8 +4545,7 @@ mod tests {
         app.hide_done = false;
         app.list_sel = app.visible_stories().iter().position(|s| s.key == "PROJ-3").unwrap();
         app.on_key(KeyCode::Char('D'), false);
-        assert!(app.current_notice().unwrap().contains("could not mark PROJ-3 done") && app.current_notice().unwrap().contains("T1 is implementing"), "{:?}", app.current_notice());
-        assert_eq!(story_status_of(&app, "PROJ-3"), StoryStatus::InProgress);
+        assert_eq!(story_status_of(&app, "PROJ-3"), StoryStatus::Done);
         app.list_sel = app.visible_stories().iter().position(|s| s.key == "PROJ-4").unwrap();
         open_palette_with(&mut app, "done");
         assert!(render(&app, 170, 44).contains("Mark PROJ-4 done (skips the review)"));

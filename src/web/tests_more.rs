@@ -252,24 +252,16 @@ fn a_story_is_deleted_only_when_confirmed_and_then_gone_from_disk_and_the_page()
 }
 
 #[test]
-fn a_story_is_marked_done_or_reopened_through_the_same_rules_as_the_tui() {
+fn a_story_is_marked_done_or_reopened_with_no_checks() {
     let r = rig();
     let key = "PROJ-1";
-    let (_, answer) = act(&r, json!({ "action": "story.done", "key": key, "confirm": true }));
-    assert_eq!(answer["ok"], false, "{answer}");
-    assert!(answer["message"].as_str().unwrap().contains("unfinished"), "{answer}");
-    store::update(&r.server.root, key, |b| {
-        b.tasks[0].status = crate::model::Status::Done;
-        Ok(())
-    })
-    .unwrap();
     let (_, answer) = act(&r, json!({ "action": "story.done", "key": key, "confirm": true }));
     assert_eq!(answer["ok"], true, "{answer}");
     assert!(answer["message"].as_str().unwrap().contains("review was skipped"));
     assert_eq!(state(&r)["stories"][0]["status"], "done");
     assert_eq!(act(&r, json!({ "action": "story.reopen", "key": key, "confirm": true })).1["ok"], true);
     assert_eq!(state(&r)["stories"][0]["status"], "in_progress");
-    assert_eq!(act(&r, json!({ "action": "story.reopen", "key": key, "confirm": true })).1["ok"], false, "already open");
+    assert_eq!(act(&r, json!({ "action": "story.reopen", "key": key, "confirm": true })).1["ok"], true, "reopening an open story is harmless");
 }
 
 #[test]
