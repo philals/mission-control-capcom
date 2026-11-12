@@ -7,7 +7,6 @@ export const CHARACTERS = [
   { id: "daniel", name: "Daniel", color: "#9ad07a", bg: "#3d4a3a", skin: "#ecc7a6", hair: "#6b4a33", style: "short", glasses: true, uni: "#6a6e50" },
   { id: "tealc", name: "Teal'c", color: "#e0a63a", bg: "#2d3340", skin: "#8b5a3c", hair: null, style: "bald", mark: true, uni: "#2a2f38" },
   { id: "hammond", name: "Hammond", color: "#b48ee0", bg: "#2f3350", skin: "#e0b896", hair: "#aab0b8", style: "fringe", uni: "#27406b", stars: true },
-  { id: "vala", name: "Vala", color: "#ef6b5b", bg: "#4a2f36", skin: "#e6b99a", hair: "#2a1c18", style: "long", uni: "#1c1c22" },
 ];
 
 // Seven chevrons round the portrait; the ring file for a task with `total` steps (6 or 7) and the steps `mask` done.

@@ -13,6 +13,7 @@ for name in capcom-prs capcom-agents capcom-board capcom-jira capcom-plan; do
   if [ "$name" = capcom-agents ]; then
     node scripts/gen-avatars.mjs "$mod" >/dev/null || echo "capcom: node is needed to draw the SG-1 portraits and rings" >&2
     mkdir -p "$mod/avatars"
+    cp herdr-mod/capcom-agents/avatars/*.png "$mod/avatars/"
   fi
   herdr-app check "$mod"
 done

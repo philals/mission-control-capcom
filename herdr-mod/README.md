@@ -27,14 +27,15 @@ the file changes, and shows a hint if the story has no plan yet. Close it like a
 
 ## capcom-agents: SG-1 personas
 
-Each agent gets a Stargate SG-1 character (O'Neill, Carter, Daniel, Teal'c, Hammond, Vala, then the cast again with a
+Each agent gets a Stargate SG-1 character (O'Neill, Carter, Daniel, Teal'c, Hammond, then the cast again with a
 number), kept for as long as the agent exists. Its portrait sits in a ring of seven chevrons: one lights per step (in plain light, not the character colour, so it reads without hue) of
 the agent's PR that is done (ready, CI, copilot, threads, approved, automerge, merge; six when the repo has no automerge).
 No PR yet is a dark ring; merged is a full one.
 
 - The portraits and rings are drawn by `scripts/gen-avatars.mjs` (needs `node`) when you run `scripts/install-herdr-mod.sh`.
-- To use real photos, save square images as `~/.config/herdr-app/mods/capcom-agents/avatars/<id>.jpg` (or `.png`), with
-  `<id>` one of `oneill carter daniel tealc hammond vala`. They are picked up within 30 seconds and are not in the repo.
+- The photos are `herdr-mod/capcom-agents/avatars/<id>.png`, with `<id>` one of `oneill carter daniel tealc hammond`;
+  `scripts/install-herdr-mod.sh` copies them into the mod's `avatars/` folder, and they are picked up within 30 seconds.
+  A `.jpg` dropped in that installed folder works too.
 - The cast is in `capcom-agents/characters.js`.
 
 ## capcom-jira: your Jira tickets
