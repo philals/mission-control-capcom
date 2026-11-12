@@ -172,7 +172,6 @@ export default class CapcomPrs extends View {
     const ready = !merged && !pr.draft;
     const bits = [];
     if (!merged) {
-      if (pr.draft) bits.push("draft");
       if (pr.ci === "red") bits.push(pr.conflict && !pr.failing?.length ? "conflict" : `${pr.counts.failed} failing`);
       else if (pr.ci === "pending") bits.push(`${pr.counts.running + pr.counts.queued} running`);
       else if (pr.blocker) bits.push(pr.blocker);
@@ -186,14 +185,18 @@ export default class CapcomPrs extends View {
       .py(6)
       .items_center()
       .cursor_pointer()
-      .tooltip(merged ? this.hint(pr) : [pr.blocker ? `Blocked: ${pr.blocker}` : "Nothing in the way", "Click for details"].join(" · "))
+      .tooltip(merged ? this.hint(pr) : [pr.draft ? "Draft" : "Ready for review", pr.blocker ? `Blocked: ${pr.blocker}` : "Nothing in the way", "Click for details"].join(" · "))
       .hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => {
         if (merged) return this.go(pr);
         this.expanded = this.expanded === pr.url ? null : pr.url;
         cx.notify();
       })
-      .child(div().w(10).h(10).rounded(5).flex_none().bg(dot))
+      .child(
+        merged
+          ? div().w(10).h(10).rounded(5).flex_none().bg(dot)
+          : svg(pr.draft ? "mods/capcom-prs/pr-draft.svg" : "mods/capcom-prs/pr-ready.svg").size(14).flex_none().text_color(pr.draft ? t.dim : "#22c55e"),
+      )
       .child(
         v_flex()
           .flex_1()
@@ -204,10 +207,7 @@ export default class CapcomPrs extends View {
               div()
                 .text_size(13)
                 .truncate()
-                .rounded(3)
-                .px(ready ? 4 : 0)
-                .when(ready, (el) => el.bg(t.ansi2).text_color(t.background))
-                .when(!ready, (el) => el.text_color(t.foreground))
+                .text_color(merged || ready ? t.foreground : t.muted)
                 .child(pr.title),
             ),
           )
