@@ -2,10 +2,10 @@
 // (it asks Claude's Atlassian connector). Fetches when the pane opens (if the file is over 5 minutes old) and every
 // 5 minutes while it is open, so closing the pane stops it.
 
-import { View, div } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
-import { run, theme, home, readTextFile, spaces, exec } from "herdr";
-import { capcom, openUrl, SH } from "./pr-details.js";
+import { View, div, svg } from "gpui-kit";
+import { v_flex, h_flex, HoverCard } from "gpui-base";
+import { run, theme, home, readTextFile, spaces, exec, shared, setShared } from "herdr";
+import { capcom, openUrl, SH, dotColor, short, prDo, prDetails } from "./pr-details.js";
 
 const FETCH_MS = 5 * 60 * 1000;
 const TICK_MS = 30 * 1000;
@@ -21,11 +21,6 @@ const kindOf = (i) => {
   if (i.statusCategory === "In Progress") return "progress";
   if (i.statusCategory === "To Do") return "todo";
   return "other";
-};
-
-const branchOf = (i) => {
-  const slug = i.summary.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").split("-").slice(0, 6).join("-");
-  return `${i.type === "Bug" ? "fix" : "feat"}/${i.key}-${slug}`;
 };
 
 const ago = (iso) => {
@@ -178,6 +173,58 @@ export default class CapcomJira extends View {
     return out;
   }
 
+  change(cx, action, url, on) {
+    cx.spawn(async (cx) => {
+      await prDo(action, url, on);
+      setShared("capcom.refresh", Date.now());
+      cx.notify();
+    });
+  }
+
+  // Every PR of the ticket's tasks, from My Watch's data when it has the PR, else from the board.
+  prsOf(i) {
+    const known = new Map();
+    const watch = shared("capcom.prs");
+    for (const [merged, group] of [[false, watch?.open ?? []], [true, watch?.merged ?? []]]) for (const pr of group) known.set(pr.url, { pr, merged });
+    const seen = new Set();
+    const out = [];
+    for (const task of this.details.get(i.key)?.board?.tasks ?? []) {
+      for (const p of task.prs ?? []) {
+        if (seen.has(p.url)) continue;
+        seen.add(p.url);
+        const merged = p.state === "merged";
+        out.push(known.get(p.url) ?? {
+          merged,
+          pr: { url: p.url, repo: p.repo, number: p.url.split("/").pop(), title: `${task.id}: ${task.title}`, draft: p.state === "draft", ci: "none", rail: [], checks: [] },
+        });
+      }
+    }
+    return out.sort((x, y) => x.merged - y.merged);
+  }
+
+  // One icon per PR, coloured by CI (purple once merged). Hover shows the same card as an agent's PR icon.
+  prIcons(i, t) {
+    const mine = this.prsOf(i);
+    const MAX = 5;
+    return h_flex().gap(2).flex_none().items_center()
+      .children(mine.slice(0, MAX).map(({ pr, merged }) => {
+        const trigger = div().id(`pri-${i.key}-${pr.url}`).p(2).rounded(4).cursor_pointer()
+          .hover((s) => s.bg(t.selected))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => {
+            cx.stop_propagation();
+            openUrl(pr.url);
+          })
+          .child(svg("mods/workspace-chrome/git-compare.svg").size(13).flex_none().text_color(dotColor(pr, merged, t)));
+        const card = v_flex().w(300).gap(4).p(10).rounded(8).bg(t.popover).border(1).border_color(t.border).text_size(12)
+          .child(div().font_semibold().text_color(t.foreground).child(pr.title))
+          .child(div().text_size(11).text_color(t.muted).child(`${short(pr.repo)}#${pr.number}${pr.draft ? " · draft" : merged ? " · merged" : ""}`))
+          .when(!merged, (el) => el.child(prDetails(pr, t, (cx, action, url, on) => this.change(cx, action, url, on), false)));
+        return HoverCard.new(`prc-${i.key}-${pr.url}`).open_delay(150).trigger(trigger).content(card);
+      }))
+      .when(mine.length > MAX, (el) => el.child(div().text_size(10).text_color(t.dim).child(`+${mine.length - MAX}`)));
+  }
+
   chip(id, label, tip, onClick, t) {
     return div().id(id).flex_none().px(6).py(2).rounded(4).bg(t.hover).text_size(11).text_color(t.muted)
       .cursor_pointer().hover((s) => s.bg(t.selected).text_color(t.foreground)).tooltip(tip)
@@ -218,7 +265,6 @@ export default class CapcomJira extends View {
       .child(this.line(`cp-id-${i.key}`, "Copy ID", i.key, (cx) => this.copy(cx, i.key, i.key), t))
       .child(this.line(`cp-url-${i.key}`, "Copy URL", i.url.replace(/^https?:\/\//, ""), (cx) => this.copy(cx, "the URL", i.url), t))
       .child(this.line(`cp-title-${i.key}`, "Copy ID and title", `${i.key}: ${i.summary}`, (cx) => this.copy(cx, "ID and title", `${i.key}: ${i.summary}`), t))
-      .child(this.line(`cp-branch-${i.key}`, "Copy branch name", branchOf(i), (cx) => this.copy(cx, "the branch name", branchOf(i)), t))
       .child(this.heading("OPEN", t))
       .child(this.line(`open-${i.key}`, "Open in Jira", "↗", () => openUrl(i.url), t))
       .child(this.heading("START IN A NEW TAB", t))
@@ -249,6 +295,7 @@ export default class CapcomJira extends View {
             h_flex().gap(6).items_center().text_size(11).text_color(t.muted)
               .child(div().child(i.type))
               .when(Boolean(story), (el) => el.child(div().px(5).rounded(4).border(1).border_color(t.border).text_color(BOARD).child(tasks.length ? `Capcom ${done}/${tasks.length}` : "Capcom")))
+              .child(this.prIcons(i, t))
               .child(div().flex_1())
               .child(this.chip(`id-${i.key}`, "ID", "Copy the ticket ID", (cx) => this.copy(cx, i.key, i.key), t))
               .child(this.chip(`url-${i.key}`, "URL", "Copy the ticket URL", (cx) => this.copy(cx, "the URL", i.url), t))
