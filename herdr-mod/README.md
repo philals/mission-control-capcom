@@ -15,9 +15,15 @@ service.
   has to be running to act on them, and the `⚙` strip says so when `capcom web` is not.
 
 Install: `scripts/install.sh` then `scripts/install-herdr-mod.sh`. This repo is the source of truth for every capcom
-mod (`capcom-prs`, `capcom-agents`, `capcom-board`, `capcom-jira`; `capcom-tabs` is Herdr's `tabs` mod plus `capcom-tabs.patch`, built at install) and for the `capcom` layout
+mod (`capcom-prs`, `capcom-agents`, `capcom-board`, `capcom-jira`, `capcom-plan`; `capcom-tabs` is Herdr's `tabs` mod plus `capcom-tabs.patch`, built at install) and for the `capcom` layout
 (`herdr-mod/layouts/capcom.json`); the script copies them into the app and switches to the layout. Edit them here, not
 in `~/.config/herdr-app`, or the next install overwrites the change.
+
+## capcom-plan: a story's plan
+
+The **PLAN** button in the board's story header opens `<capcom root>/<KEY>/story.md` as rendered markdown in a pane
+split to the right of the board (Herdr has no markdown viewer of its own, so this mod is one). The pane reloads when
+the file changes, and shows a hint if the story has no plan yet. Close it like any pane.
 
 ## capcom-agents: SG-1 personas
 

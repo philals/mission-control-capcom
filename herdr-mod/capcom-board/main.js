@@ -157,6 +157,21 @@ export default class CapcomBoard extends View {
     }
   }
 
+  async openPlan(cx) {
+    const key = this.key;
+    try {
+      let root = await this.root();
+      if (!root) {
+        const r = await capcom(["root"], { timeout: 10000 });
+        root = JSON.parse(r.stdout).root;
+      }
+      run("pane.split", { direction: "right", mod: "capcom-plan", props: { file: `${root}/${key}/story.md`, title: `${key} plan` } });
+    } catch (e) {
+      this.message = { text: `Cannot open the plan: ${String(e?.message ?? e)}`, ok: false };
+      cx.notify();
+    }
+  }
+
   setStoryStatus(cx, status) {
     const key = this.key;
     this.storyMenu = false;
@@ -402,6 +417,13 @@ export default class CapcomBoard extends View {
                     .tooltip("Move this story to another status")
                     .on_click((_e, cx) => { this.storyMenu = !this.storyMenu; cx.notify(); })
                     .child(`${story.status.replace("_", " ").toUpperCase()} ▾`),
+                )
+                .child(
+                  div().id("story-plan").px(7).py(1).rounded(9).text_size(10).font_semibold().cursor_pointer()
+                    .bg(t.raised).text_color(t.accent).border(1).border_color(t.border).hover((x) => x.bg(t.hover))
+                    .tooltip("Open this story's plan beside the board")
+                    .on_click((_e, cx) => this.openPlan(cx))
+                    .child("PLAN"),
                 )
                 .child(`${done}/${tasks.length} done`)
                 .child(

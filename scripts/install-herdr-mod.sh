@@ -5,7 +5,7 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 home="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
-for name in capcom-prs capcom-agents capcom-board capcom-jira; do
+for name in capcom-prs capcom-agents capcom-board capcom-jira capcom-plan; do
   mod="$home/mods/$name"
   mkdir -p "$mod"
   cp herdr-mod/$name/*.js herdr-mod/$name/mod.json herdr-mod/shared/*.js "$mod/"
