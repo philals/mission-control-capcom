@@ -113,7 +113,7 @@
                     },
                     "reveal": "always",
                     "height": 34,
-                    "position": "top"
+                    "position": "bottom"
                   },
                   "background": "background",
                   "border": {

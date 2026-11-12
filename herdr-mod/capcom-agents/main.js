@@ -190,6 +190,19 @@ export default class Agents extends View {
     if (dirty) localStorage.setItem("hues", JSON.stringify(this.hues));
   }
 
+  // The focused pane's frame takes its session's colour (the layout's `focus` border is one colour for every pane,
+  // so it is rewritten when the focus moves). A shell or a non-agent pane gets the layout's own colour back.
+  frameColor(color) {
+    const root = layout();
+    const pane = find(root, "main")?.content?.pane;
+    if (!pane) return;
+    const want = color ?? "accent";
+    if (pane.focus?.color === want) return;
+    const next = JSON.parse(JSON.stringify(root));
+    find(next, "main").content.pane.focus = { width: color ? 3 : 1, color: want };
+    run("layout.set", { layout: next });
+  }
+
   hue(a) {
     const [i, n] = (this.hues[a.address] ?? "").split("#");
     return COLORS[Number(i)] ? { color: COLORS[Number(i)], n: n ? Number(n) : 0 } : null;
@@ -425,6 +438,7 @@ export default class Agents extends View {
     this.hold(list);
     this.assign(list);
     this.assignColors(list);
+    this.frameColor(this.hue(list.find((a) => a.focused) ?? {})?.color);
     const persona = Object.fromEntries(list.map((a) => [a.address, { label: this.character(a)?.label ?? a.program?.name ?? "", ...this.hue(a) }]));
     const personaText = JSON.stringify(persona);
     if (personaText !== this.personaText) {

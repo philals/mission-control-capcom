@@ -62,9 +62,12 @@ session has its own colour (with or without a Jira ticket).
   note's task, the branch, or the tab and space names) is shown as text and does not decide the colour.
 - **Agents list** (`capcom-agents`): the row leads with the task from `capcom note --task` (else the tab or title as
   before), with the persona, ticket key and branch under it, and a bar in the session colour on the left.
-- **Pane header** (`capcom-pane`): a 34px header that starts with a solid name plate in the session colour (the
-  persona), then the ticket key, task and branch, with a bottom line in the colour. Panes that are not agents keep
-  Herdr's normal header. Herdr only allows a pane header at the top or bottom, so this stands in for a side rail.
+- **Pane header** (`capcom-pane`): a 34px header under the prompt (Herdr allows the top or bottom of a pane) that
+  starts with a solid name plate in the session colour (the persona), then the ticket key, task and branch, with a
+  line in the colour. Panes that are not agents keep Herdr's normal header.
+- **Pane frame**: Herdr's focus border is one colour for every pane, so `capcom-agents` rewrites it (`layout.set`)
+  whenever the focus moves: the focused agent's pane gets a 3px frame in its session colour, anything else gets
+  the layout's normal one back. This rewrites `layouts/capcom.json` in the app; `install-herdr-mod.sh` resets it.
 - **Tabs** (`capcom-tabs`): a dot in the session colour, and the active tab's border takes it too.
 
 `capcom-agents` reads each agent's note every 10 seconds and shares it as `capcom.notes` (terminal to note), and
