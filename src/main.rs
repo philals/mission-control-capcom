@@ -174,6 +174,9 @@ enum Cmd {
         id: String,
         /// New status: todo, planning, planned, implementing, done or dropped
         status: String,
+        /// Move it whatever its PRs, dependencies or current status say
+        #[arg(long)]
+        force: bool,
     },
     /// Move the story itself between in_progress, in_review and done
     ///
@@ -435,10 +438,14 @@ fn main() -> Result<()> {
             ops::set_folder(b, &id, folder.as_deref())?;
             task_json(b, &id)
         }),
-        Cmd::Status { key, id, status } => {
+        Cmd::Status { key, id, status, force } => {
             let to = parse_status(&status)?;
             mutate(root, &key, |b, _| {
-                rules::transition(b, &id, to)?;
+                if force {
+                    rules::force_status(b, &id, to)?;
+                } else {
+                    rules::transition(b, &id, to)?;
+                }
                 task_json(b, &id)
             })
         }

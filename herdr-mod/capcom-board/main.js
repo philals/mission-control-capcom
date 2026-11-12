@@ -115,21 +115,12 @@ export default class CapcomBoard extends View {
     cx.spawn(async (cx) => {
       try {
         const key = this.key;
-        if (status === "done") {
-          const r = await this.capcom(["refresh", key], { timeout: 120000 });
-          if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").pop());
-          const after = (await this.json(["show", key])).tasks.find((x) => x.id === task.id);
-          this.message = after?.status === "done"
-            ? { text: `${task.id} done`, ok: true }
-            : { text: `${task.id} stays ${after?.status}: every PR must be merged first`, ok: false };
-        } else {
-          const r = await this.capcom(["status", key, task.id, status]);
-          if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").pop());
-          this.message = { text: `${task.id} → ${status}`, ok: true };
-          if (SKILL[status]) {
-            this.launch(task, status);
-            this.message = { text: `${task.id} → ${status}, agent starting in a new tab`, ok: true };
-          }
+        const r = await this.capcom(["status", key, task.id, status, "--force"]);
+        if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").pop());
+        this.message = { text: `${task.id} → ${status}`, ok: true };
+        if (SKILL[status]) {
+          this.launch(task, status);
+          this.message = { text: `${task.id} → ${status}, agent starting in a new tab`, ok: true };
         }
       } catch (e) {
         this.message = { text: String(e?.message ?? e), ok: false };
