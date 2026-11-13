@@ -1,8 +1,8 @@
 // A story's plan (story.md) rendered as markdown. Opened beside the board with props { file, title }.
 
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
-import { props, theme, readTextFile } from "herdr";
+import { props, theme, readTextFile, run, focused, panes } from "herdr";
 
 const EVERY_MS = 3000;
 
@@ -36,13 +36,24 @@ export default class CapcomPlan extends View {
     cx.notify();
   }
 
+  close() {
+    const pane = props()?.pane ?? focused()?.pane ?? panes().find((p) => p.focused)?.pane;
+    if (pane) run("pane.close", { pane });
+  }
+
   render(_cx) {
     const t = theme();
     return v_flex().id("plan-root").size_full().bg(t.surface)
       .child(
         h_flex().px(10).py(6).flex_none().gap(6).items_center()
           .child(div().text_size(12).font_semibold().text_color(t.foreground).child(this.title))
-          .child(div().flex_1().min_w(0).text_size(10).text_color(t.dim).child(this.file ?? "")),
+          .child(div().flex_1().min_w(0).text_size(10).text_color(t.dim).child(this.file ?? ""))
+          .child(
+            div().id("plan-close").flex_none().p(3).rounded(4).cursor_pointer().text_color(t.dim)
+              .hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip("Close the plan")
+              .on_click(() => this.close())
+              .child(svg("mods/pane/close.svg").size(13)),
+          ),
       )
       .child(
         div().id("plan-body").flex_1().min_h(0).px(12).pb(12).overflow_y_scrollbar().text_color(t.foreground)
