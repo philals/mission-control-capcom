@@ -11,6 +11,8 @@ export default class CapcomPlan extends View {
     const p = props() ?? {};
     this.file = p.file ?? null;
     this.title = p.title ?? "Plan";
+    this.handle = cx.focus_handle();
+    this.handle.focus();
     this.text = null;
     this.error = this.file ? null : "No plan file was given";
     if (this.file) {
@@ -43,7 +45,9 @@ export default class CapcomPlan extends View {
 
   render(_cx) {
     const t = theme();
-    return v_flex().id("plan-root").size_full().bg(t.surface)
+    return v_flex().id("plan-root").track_focus(this.handle).size_full().bg(t.surface)
+      .on_mouse_down("left", () => this.handle.focus())
+      .on_key_down((e) => { if (e.key === "escape") this.close(); })
       .child(
         h_flex().px(10).py(6).flex_none().gap(6).items_center()
           .child(div().text_size(12).font_semibold().text_color(t.foreground).child(this.title))
