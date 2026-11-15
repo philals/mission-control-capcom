@@ -187,6 +187,7 @@ export default class CapcomPrs extends View {
       .cursor_pointer()
       .tooltip(merged ? this.hint(pr) : [pr.draft ? "Draft" : "Ready for review", pr.blocker ? `Blocked: ${pr.blocker}` : "Nothing in the way", "Click for details"].join(" · "))
       .hover((s) => s.bg(t.hover))
+      .when(merged, (el) => el.border_l(3).border_color(t.ansi5))
       .on_click((_e, cx) => {
         if (merged) return this.go(pr);
         this.expanded = this.expanded === pr.url ? null : pr.url;
@@ -224,7 +225,7 @@ export default class CapcomPrs extends View {
               div()
                 .text_size(13)
                 .truncate()
-                .text_color(merged || ready ? t.foreground : t.muted)
+                .text_color(merged ? t.ansi5 : ready ? t.foreground : t.muted)
                 .child(pr.title),
             ),
           )
@@ -292,8 +293,8 @@ export default class CapcomPrs extends View {
     return prDetails(pr, t, (cx, action, url, on) => this.change(cx, action, url, on));
   }
 
-  section(label, count, t) {
-    return div().px(10).pt(8).pb(2).text_size(11).font_semibold().text_color(t.dim).child(`${label} · ${count}`);
+  section(label, count, t, color) {
+    return div().px(10).pt(8).pb(2).text_size(11).font_semibold().text_color(color ?? t.dim).child(`${label} · ${count}`);
   }
 
   render(cx) {
@@ -380,7 +381,17 @@ export default class CapcomPrs extends View {
           .when(open.length > 0, (el) => el.child(this.section("Open", open.length, t)).children(open.map((p) => this.row(p, t, false))))
           .when(watching.length > 0, (el) => el.child(this.section("Watching", watching.length, t)).children(watching.map((p) => this.row(p, t, false))))
           .when(runs.length > 0, (el) => el.child(this.section("Runs", runs.length, t)).children(runs.map((r) => this.runRow(r, t))))
-          .when(merged.length > 0, (el) => el.child(this.section("Merged", merged.length, t)).children(merged.map((p) => this.row(p, t, true)))),
+          .when(merged.length > 0, (el) =>
+            el.child(
+              v_flex()
+                .mt(18)
+                .pb(6)
+                .border_t(2)
+                .border_color(t.ansi5)
+                .child(this.section("Merged", merged.length, t, t.ansi5))
+                .children(merged.map((p) => this.row(p, t, true))),
+            ),
+          ),
       );
   }
 }
