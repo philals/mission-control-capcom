@@ -177,7 +177,19 @@
                     "weight": 2
                   },
                   "min": 140
-                },
+                }
+              ],
+              "size": {
+                "px": 400
+              },
+              "min": 280,
+              "max": 900,
+              "hidden": true
+            },
+            {
+              "id": "watch-panel",
+              "type": "column",
+              "children": [
                 {
                   "id": "prs",
                   "type": "block",
@@ -185,13 +197,23 @@
                     "mod": "capcom-prs"
                   },
                   "size": {
-                    "weight": 2
+                    "weight": 1
                   },
                   "min": 140
+                },
+                {
+                  "id": "daily",
+                  "type": "block",
+                  "content": {
+                    "mod": "capcom-daily"
+                  },
+                  "size": {
+                    "px": 150
+                  }
                 }
               ],
               "size": {
-                "px": 400
+                "px": 380
               },
               "min": 280,
               "max": 900,

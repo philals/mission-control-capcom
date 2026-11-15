@@ -1,8 +1,8 @@
-# capcom-prs: My Watch, in the Capcom panel of the Herdr app
+# capcom-prs: My Watch, a panel of its own in the Herdr app
 
-A Herdr app mod (`~/.config/herdr-app/mods/capcom-prs`) that lists your open and recently merged PRs at the bottom of the
-Capcom panel (the right-hand panel opened by the **Capcom** button in the tab bar), in every tab. The panel stacks the
-Kanban board, your Jira tickets and My Watch, so the left sidebar keeps its room for spaces and agents. It runs `capcom prs` every 30 seconds, so it needs `capcom` on your PATH and no web
+A Herdr app mod (`~/.config/herdr-app/mods/capcom-prs`) that lists your open and recently merged PRs in the **My Watch** panel on the right (the **My Watch** button in the tab bar),
+in every tab. Under the PRs sits the Daily section (see below). The **Capcom** button opens a separate panel with the
+Kanban board and your Jira tickets, so the left sidebar keeps its room for spaces and agents. It runs `capcom prs` every 30 seconds, so it needs `capcom` on your PATH and no web
 service.
 
 - Dot: red (failing check or conflict), amber (checks running), green, purple (merged). `auto` means automerge is on.
@@ -16,9 +16,23 @@ service.
   has to be running to act on them, and the `⚙` strip says so when `capcom web` is not.
 
 Install: `scripts/install.sh` then `scripts/install-herdr-mod.sh`. This repo is the source of truth for every capcom
-mod (`capcom-prs`, `capcom-agents`, `capcom-board`, `capcom-jira`, `capcom-plan`; `capcom-tabs` and `capcom-pane` are Herdr's `tabs` and `pane` mods plus `capcom-tabs.patch` and `capcom-pane.patch`, built at install) and for the `capcom` layout
+mod (`capcom-prs`, `capcom-agents`, `capcom-board`, `capcom-jira`, `capcom-plan`, `capcom-daily`; `capcom-tabs` and `capcom-pane` are Herdr's `tabs` and `pane` mods plus `capcom-tabs.patch` and `capcom-pane.patch`, built at install) and for the `capcom` layout
 (`herdr-mod/layouts/capcom.json`); the script copies them into the app and switches to the layout. Edit them here, not
 in `~/.config/herdr-app`, or the next install overwrites the change.
+
+## capcom-daily: the daily scripts
+
+The **Daily** section at the bottom of the My Watch panel is `phildaily`, `db` and `dbpg` from `~/code/.dotfiles` as buttons.
+Nothing runs until you press one.
+
+- **▶ Run daily** signs in to AWS SSO (`linz-step-titles-preprod`, in the browser, only if not already signed in), then
+  writes a fresh CodeArtifact token to `~/.gradle/gradle.properties` and logs Docker in to ECR, side by side. **▶** on a
+  row runs just that step. **↻** checks whether AWS is signed in.
+- The CodeArtifact and ECR rows count down from 12 hours after they last ran, and go red when expired.
+- **Informix** and **Postgres** restart the `informix-db` and `db-postgres` containers (Postgres also runs its migrations).
+- The work is done by `scripts/capcom-daily` (installed to `~/.local/bin`), which records each step in
+  `~/.cache/capcom/daily/<step>`. Tokens stay in shell variables and pipes, never in arguments, output or those files.
+  Override the AWS profile with `CAPCOM_DAILY_PROFILE`.
 
 ## capcom-plan: a story's plan
 
@@ -39,7 +53,7 @@ number), kept for as long as the agent exists. Its portrait sits on the characte
 
 ## capcom-jira: your Jira tickets
 
-The tickets assigned to you, grouped by Jira status, in the middle of the Capcom panel. Tickets whose status category is Done are not fetched. Click a card to expand it.
+The tickets assigned to you, grouped by Jira status, under the Kanban in the Capcom panel. Tickets whose status category is Done are not fetched. Click a card to expand it.
 
 - Each card has ID and URL copy buttons, `↗` to open in Jira, and a `▶` button for the next skill: `Plan`
   (`/story-plan KEY`) for a ticket with no board, `Do T3` / `Resume T3` for the next ready task, `Review` once every

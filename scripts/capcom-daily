@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# The daily scripts behind the Daily section of My Watch (the `phildaily`, `db` and `dbpg` functions of ~/code/.dotfiles).
+#   capcom-daily sso|codeartifact|ecr|all|db|dbpg|check
+# Each step records "<epoch> <ok|fail> <message>" in ~/.cache/capcom/daily/<step>, which the panel reads. Secrets stay
+# in shell variables and pipes: never in output, in the status files or in a process's arguments.
+set -uo pipefail
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/usr/local/bin:$PATH"
+
+profile="${CAPCOM_DAILY_PROFILE:-linz-step-titles-preprod}"
+region=ap-southeast-2
+account=725496895483
+registry="$account.dkr.ecr.$region.amazonaws.com"
+props="${CAPCOM_DAILY_GRADLE_PROPS:-$HOME/.gradle/gradle.properties}"
+dir="${CAPCOM_DAILY_DIR:-$HOME/.cache/capcom/daily}"
+mkdir -p "$dir"
+
+record() { printf '%s %s %s\n' "$(date +%s)" "$2" "$3" >"$dir/$1"; }
+fail() { record "$1" fail "$2"; echo "$2" >&2; return 1; }
+
+signed_in() { aws sts get-caller-identity --profile "$profile" >/dev/null 2>&1; }
+
+sso() {
+  if signed_in; then record sso ok "signed in"; return 0; fi
+  aws sso login --profile "$profile" >/dev/null 2>&1 || { fail sso "AWS sign-in failed or was closed"; return 1; }
+  record sso ok "signed in"
+}
+
+codeartifact() {
+  local token
+  token=$(aws codeartifact get-authorization-token --domain linz --domain-owner "$account" \
+    --query authorizationToken --output text --profile "$profile" --region "$region" 2>/dev/null) \
+    || { fail codeartifact "No CodeArtifact token (is AWS signed in?)"; return 1; }
+  [ -n "$token" ] || { fail codeartifact "Empty CodeArtifact token"; return 1; }
+  mkdir -p "$(dirname "$props")"
+  local tmp
+  tmp=$(mktemp "$props.XXXXXX") || { fail codeartifact "Cannot write $props"; return 1; }
+  chmod 600 "$tmp"
+  { grep -v '^CODEARTIFACT_AUTH_TOKEN=' "$props" 2>/dev/null || true; printf 'CODEARTIFACT_AUTH_TOKEN=%s\n' "$token"; } >"$tmp" \
+    && mv "$tmp" "$props" || { rm -f "$tmp"; fail codeartifact "Cannot write $props"; return 1; }
+  record codeartifact ok "token written to gradle.properties"
+}
+
+ecr() {
+  local password
+  password=$(aws ecr get-login-password --region "$region" --profile "$profile" 2>/dev/null) \
+    || { fail ecr "No ECR password (is AWS signed in?)"; return 1; }
+  printf '%s' "$password" | docker login --username AWS --password-stdin "$registry" >/dev/null 2>&1 \
+    || { fail ecr "Docker login to ECR failed"; return 1; }
+  record ecr ok "Docker signed in to ECR"
+}
+
+all() {
+  sso || return 1
+  local bad=0
+  codeartifact & p1=$!
+  ecr & p2=$!
+  wait "$p1" || bad=1
+  wait "$p2" || bad=1
+  return "$bad"
+}
+
+db() {
+  docker rm -f informix-db >/dev/null 2>&1 || true
+  docker run -d --name informix-db -p 9088:9088 -e TZ=Pacific/Auckland \
+    "$registry/step/landonline-dev-db@sha256:abda5d574198cccec64d53e6a76874f450fbbf876b299f9bd9616fd642198b04" >/dev/null 2>&1 \
+    || { fail db "Informix did not start (is Docker signed in to ECR?)"; return 1; }
+  record db ok "informix-db running on 9088"
+}
+
+dbpg() {
+  docker rm -f db-postgres >/dev/null 2>&1 || true
+  docker run -d --name db-postgres -p 5433:5432 --user postgres --add-host host.docker.internal:host-gateway \
+    --health-cmd 'pg_isready | grep -c "accepting connections" > /dev/null' --health-interval 10s --health-timeout 5s --health-retries 5 \
+    "$registry/step/database/landonline-dev-db-pg:${LOL_DB_IMAGE_TAG:-latest}" >/dev/null 2>&1 \
+    || { fail dbpg "Postgres did not start (is Docker signed in to ECR?)"; return 1; }
+  local waited=0
+  until [ "$(docker inspect -f '{{.State.Health.Status}}' db-postgres 2>/dev/null)" = healthy ]; do
+    sleep 2; waited=$((waited + 2))
+    [ "$waited" -lt 120 ] || { fail dbpg "Postgres never became healthy"; return 1; }
+  done
+  docker exec db-postgres bash -c '
+    for f in /data-at-run-time/migrations/V*.sql; do
+      [ -f "$f" ] || continue
+      psql -d landonline_dev -f "$f"
+    done' >/dev/null 2>&1 || { fail dbpg "Postgres is up but a migration failed"; return 1; }
+  record dbpg ok "db-postgres running on 5433, migrated"
+}
+
+check() {
+  if signed_in; then record sso ok "signed in"; else record sso fail "not signed in"; fi
+}
+
+case "${1:-}" in
+  sso | codeartifact | ecr | all | db | dbpg | check) "$1" ;;
+  *) echo "usage: capcom-daily sso|codeartifact|ecr|all|db|dbpg|check" >&2; exit 2 ;;
+esac
