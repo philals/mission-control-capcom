@@ -1,7 +1,8 @@
-# capcom-prs: the PR sidebar for the Herdr app
+# capcom-prs: My Watch, in the Capcom panel of the Herdr app
 
-A Herdr app mod (`~/.config/herdr-app/mods/capcom-prs`) that lists your open and recently merged PRs under the
-Agents list, in every tab. It runs `capcom prs` every 30 seconds, so it needs `capcom` on your PATH and no web
+A Herdr app mod (`~/.config/herdr-app/mods/capcom-prs`) that lists your open and recently merged PRs at the bottom of the
+Capcom panel (the right-hand panel opened by the **Capcom** button in the tab bar), in every tab. The panel stacks the
+Kanban board, your Jira tickets and My Watch, so the left sidebar keeps its room for spaces and agents. It runs `capcom prs` every 30 seconds, so it needs `capcom` on your PATH and no web
 service.
 
 - Dot: red (failing check or conflict), amber (checks running), green, purple (merged). `auto` means automerge is on.
@@ -38,8 +39,7 @@ number), kept for as long as the agent exists. Its portrait sits on the characte
 
 ## capcom-jira: your Jira tickets
 
-A Jira button in the tab bar opens a board of the tickets assigned to you, to the right of the Capcom board, grouped by
-Jira status. Tickets whose status category is Done are not fetched. Click a card to expand it.
+The tickets assigned to you, grouped by Jira status, in the middle of the Capcom panel. Tickets whose status category is Done are not fetched. Click a card to expand it.
 
 - Each card has ID and URL copy buttons, `↗` to open in Jira, and a `▶` button for the next skill: `Plan`
   (`/story-plan KEY`) for a ticket with no board, `Do T3` / `Resume T3` for the next ready task, `Review` once every
@@ -49,8 +49,8 @@ Jira status. Tickets whose status category is Done are not fetched. Click a card
 - Data comes from `scripts/capcom-jira-me`, installed to `~/.local/bin`. It runs `claude -p` (Haiku) with the Atlassian
   connector and writes `~/.cache/capcom/jira-me.json` (override with `CAPCOM_JIRA_FILE`; set `CAPCOM_JIRA_MODEL` for
   another model). One run takes about 15 seconds and costs under a cent.
-- It fetches when the pane opens if the file is over 5 minutes old, then every 5 minutes while the pane is open, and
-  on `↻`. Nothing is fetched while the pane is hidden. The pane hides itself after 3 minutes without a click. A second fetch never starts while one is running.
+- It fetches when the Capcom panel opens if the file is over 5 minutes old, then every 5 minutes while the panel is open, and
+  on `↻`. Nothing is fetched while the panel is hidden, or after 3 minutes without a click on Jira (the next click fetches again if the file is stale). A second fetch never starts while one is running.
 
 ## Session identity: which agent am I typing into?
 

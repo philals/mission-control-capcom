@@ -54,25 +54,30 @@ export default class CapcomJira extends View {
     this.file = `${home()}/.cache/capcom/jira-me.json`;
     this.lastClick = Date.now();
     this.wasShown = false;
-    cx.timer.every(FETCH_MS, (cx) => this.shown() && this.fetch(cx));
-    cx.timer.every(RELOAD_MS, (cx) => this.shown() && this.reload(cx));
+    cx.timer.every(FETCH_MS, (cx) => this.live() && this.fetch(cx));
+    cx.timer.every(RELOAD_MS, (cx) => this.live() && this.reload(cx));
     cx.timer.every(WATCH_MS, (cx) => this.watch(cx));
     this.watch(cx);
   }
 
   shown() {
-    const node = findNode(layout(), "jira-panel");
+    const node = findNode(layout(), "capcom-panel");
     return Boolean(node && !node.hidden);
+  }
+
+  // The Capcom panel also holds the Kanban and My Watch, so Jira pauses its fetching when idle instead of hiding the panel.
+  live() {
+    return this.shown() && Date.now() - this.lastClick <= IDLE_MS;
   }
 
   touch() {
     this.lastClick = Date.now();
   }
 
-  // Runs while the pane is shown. Opening it reads the file and fetches if it is stale; 3 minutes without a click hides it.
+  // Opening the panel, or a click after 3 idle minutes, reads the file and fetches if it is stale; idle, nothing is fetched.
   watch(cx) {
-    const shown = this.shown();
-    if (shown && !this.wasShown) {
+    const live = this.live();
+    if (live && !this.wasShown) {
       this.touch();
       cx.spawn(async (cx) => {
         await this.readCache();
@@ -82,11 +87,7 @@ export default class CapcomJira extends View {
         if (!this.fetchedAt || Date.now() - Date.parse(this.fetchedAt) > FETCH_MS) this.fetch(cx);
       });
     }
-    this.wasShown = shown;
-    if (shown && Date.now() - this.lastClick > IDLE_MS) {
-      run("layout.hide", { id: "jira-panel" });
-      this.wasShown = false;
-    }
+    this.wasShown = live;
   }
 
   async root() {
