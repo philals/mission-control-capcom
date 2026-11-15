@@ -16,7 +16,7 @@ service.
   has to be running to act on them, and the `⚙` strip says so when `capcom web` is not.
 
 Install: `scripts/install.sh` then `scripts/install-herdr-mod.sh`. This repo is the source of truth for every capcom
-mod (`capcom-prs`, `capcom-agents`, `capcom-board`, `capcom-jira`, `capcom-plan`, `capcom-daily`; `capcom-tabs` and `capcom-pane` are Herdr's `tabs` and `pane` mods plus `capcom-tabs.patch` and `capcom-pane.patch`, built at install) and for the `capcom` layout
+mod (`capcom-prs`, `capcom-agents`, `capcom-board`, `capcom-jira`, `capcom-plan`, `capcom-daily`, `capcom-usage`; `capcom-tabs` and `capcom-pane` are Herdr's `tabs` and `pane` mods plus `capcom-tabs.patch` and `capcom-pane.patch`, built at install) and for the `capcom` layout
 (`herdr-mod/layouts/capcom.json`); the script copies them into the app and switches to the layout. Edit them here, not
 in `~/.config/herdr-app`, or the next install overwrites the change.
 
@@ -28,11 +28,23 @@ Nothing runs until you press one.
 - **▶ Run daily** signs in to AWS SSO (`linz-step-titles-preprod`, in the browser, only if not already signed in), then
   writes a fresh CodeArtifact token to `~/.gradle/gradle.properties` and logs Docker in to ECR, side by side. **▶** on a
   row runs just that step. **↻** checks whether AWS is signed in.
+- Click the **Daily** title to fold it to one line (three dots show where each step stands). It opens by itself when a step
+  newly needs running: AWS not signed in (checked on start and every 5 minutes) or a token expired. What you choose stays until then.
 - The CodeArtifact and ECR rows count down from 12 hours after they last ran, and go red when expired.
 - **Informix** and **Postgres** restart the `informix-db` and `db-postgres` containers (Postgres also runs its migrations).
 - The work is done by `scripts/capcom-daily` (installed to `~/.local/bin`), which records each step in
   `~/.cache/capcom/daily/<step>`. Tokens stay in shell variables and pipes, never in arguments, output or those files.
   Override the AWS profile with `CAPCOM_DAILY_PROFILE`.
+
+## capcom-usage: Claude usage
+
+Under the PRs in My Watch: the account Claude Code is signed in with (email, organization, plan) and its plan limits as
+`/usage` shows them: the five-hour session, the week across all models, and a model's own weekly limit, each as a bar with
+its percentage and when it resets. Amber from 80%, red at 100%.
+
+- It asks Claude Code itself (`claude -p` with its `get_usage` request, and `claude auth status`). No prompt is sent, so no
+  model runs and it costs nothing, and this mod never touches your login. Idea from Mansour's HERMES.
+- It checks when the panel opens with figures over 10 minutes old, every 10 minutes while the panel is shown, and on `↻`.
 
 ## capcom-plan: a story's plan
 

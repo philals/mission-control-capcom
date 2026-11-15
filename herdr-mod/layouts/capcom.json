@@ -202,6 +202,16 @@
                   "min": 140
                 },
                 {
+                  "id": "usage",
+                  "type": "block",
+                  "content": {
+                    "mod": "capcom-usage"
+                  },
+                  "size": {
+                    "px": 150
+                  }
+                },
+                {
                   "id": "daily",
                   "type": "block",
                   "content": {
