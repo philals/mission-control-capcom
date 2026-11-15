@@ -44,13 +44,11 @@ The `story-review` skill (`/story-review PROJ-123`) checks the subtasks are comp
 
 ## Statuses
 
-`todo → planning → planned → implementing → done`, plus a `dropped` terminal state and a `blocked` flag. (Updated 2026-11-12: `story-plan` creates every task as `planned`, passing through `planning`, so `todo` and `planning` are only seen on older boards.) (Updated 2026-10-09: `todo → implementing` is allowed too, for spikes and manual testing that need no plan.) (Updated 2026-10-05: the per-task `in_review` status was removed. Review is a story-level activity, see Story review above.)
+`todo → implementing → done`, plus a `dropped` terminal state and a `blocked` flag. (Updated 2026-11-16: the `planning` and `planned` statuses were removed, because the whole story is planned at once by `story-plan`; boards that still hold them read them as `todo`.) (Updated 2026-11-12: `story-plan` creates every task as `planned`, passing through `planning`, so `todo` and `planning` are only seen on older boards.) (Updated 2026-10-09: `todo → implementing` is allowed too, for spikes and manual testing that need no plan.) (Updated 2026-10-05: the per-task `in_review` status was removed. Review is a story-level activity, see Story review above.)
 
 | Status | Meaning | Entered by |
 |---|---|---|
-| `todo` | Task exists, not planned | older boards |
-| `planning` | Passed through while story-plan saves a task | story-plan |
-| `planned` | Story plan approved, task ready to implement | story-plan |
+| `todo` | Task exists in the story plan, ready to implement once its dependencies are done | story-plan |
 | `implementing` | Work in progress, draft PRs may exist | implement-task start |
 | `done` | All PRs merged; a spike or decision with no PR finishes here directly | board refresh, or implement-task for PR-less tasks |
 | `dropped` | Cancelled | user |
@@ -58,7 +56,7 @@ The `story-review` skill (`/story-review PROJ-123`) checks the subtasks are comp
 - CI fixes and review comments happen inside the task while it stays `implementing`. `done` means every PR is merged.
 - `blocked` is a flag with a reason, valid in any non-terminal status.
 - A task is **ready** when every task in `dependsOn` is `done`. Readiness is computed, never stored.
-- Implement-task refuses to start on a task that is not `planned` and ready, and asks the user instead.
+- Implement-task refuses to start on a task that is not `todo` and ready, and asks the user instead.
 
 ## board.json
 
@@ -86,7 +84,7 @@ One file per story, with a JSON Schema at `schemas/board.schema.json` in the too
 
 - `type`: `pr`, `spike` or `decision`. Spikes and decisions need no PR, and their result is written into the task file.
 - `prs[].state`: `draft`, `ready`, `merged`, `closed`.
-- `agent` records the live agent run, kept apart from `status`. A task in `planning` with no live agent is shown as stale.
+- `agent` records the live agent run, kept apart from `status`. A task in `implementing` with no live agent is shown as stale.
 - Task ids are never reused, including after a task is dropped.
 
 ## Board tool
@@ -108,7 +106,7 @@ Input: a Jira story key or URL.
 2. Work through open questions with the user, recording every answer under **Decisions** in `story.md`.
 3. Draft one plan for the whole story: affected repos, approach, files, tests, risks, and per task the slice it covers, its expected PRs per repo and their merge order. Propose the tasks (`pr`, `spike` or `decision`) with dependencies and a critical-path note; unknowns get a spike first, with dependants marked provisional.
 4. Consult the user on every split, merge and dependency until the plan and the task table are approved together.
-5. Write `story.md` (summary, criteria, decisions, plan), `board.json` and one short task file per task pointing into the plan, and move every task to `planned`.
+5. Write `story.md` (summary, criteria, decisions, plan), `board.json` and one short task file per task pointing into the plan, with every task left as `todo`.
 6. Do not create Jira subtasks unless the user asks. If asked, create them and store the keys in `jiraSubtask`. Never touch them again.
 7. Re-running on an existing board proposes plan changes and task adds, splits and drops, and applies only what the user approves.
 
@@ -116,7 +114,7 @@ Input: a Jira story key or URL.
 
 Input: story key and task id.
 
-1. Read the story plan and check the gate: status `planned`, all dependencies `done`. Otherwise stop and ask.
+1. Read the story plan and check the gate: status `todo`, all dependencies `done`. Otherwise stop and ask.
 2. Set status `implementing`. Ask the user whether to work in the main repo checkout or a git worktree. Then create a branch per repo from the up-to-date default branch, since there are no stacked PRs.
 3. Follow the plan, stopping to update the plan with the user if it proves wrong. Record new answers under **Decisions**.
 4. Commit and open each PR as a **draft** through the user's commit-and-push helper (or plain `git` and `gh`), supplying the task's `jiraSubtask` key (or the story key if there is none) so the title follows `feat: TICKET-1234 <description>`. Draft means that agent skips auto-merge and labelling.
@@ -129,8 +127,8 @@ Herdr plugins are a directory with `herdr-plugin.toml` declaring panes and actio
 
 The plugin provides:
 
-- A board pane showing `board.json` as columns (`todo`, `planning`, `planned`, `implementing`, `done`), with dependency, blocked, stale-agent and PR-state indicators.
-- Next-action launching per task: `todo` runs story-plan, `planned` and ready runs implement-task, `implementing` offers resume. It opens a Herdr pane, starts a Claude agent with the skill command, records the pane in `agent`, and lets the user answer the skill's questions in that pane.
+- A board pane showing `board.json` as columns (`todo`, `implementing`, `done`), with dependency, blocked, stale-agent and PR-state indicators.
+- Next-action launching per task: `todo` and ready runs implement-task, `implementing` offers resume. It opens a Herdr pane, starts a Claude agent with the skill command, records the pane in `agent`, and lets the user answer the skill's questions in that pane.
 - Jump to a task's agent pane, and timed and on-demand `refresh`.
 - Read-only for anything the skills own. All writes go through the board tool.
 

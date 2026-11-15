@@ -166,13 +166,13 @@ enum Cmd {
         /// Absolute path, usually the checkout of the repo the task changes
         folder: Option<String>,
     },
-    /// Move a task to a status: todo, planning, planned, implementing, done or dropped
+    /// Move a task to a status: todo, implementing, done or dropped
     Status {
         /// Jira story key
         key: String,
         /// Task id, for example T2
         id: String,
-        /// New status: todo, planning, planned, implementing, done or dropped
+        /// New status: todo, implementing, done or dropped
         status: String,
         /// Move it whatever its PRs, dependencies or current status say
         #[arg(long)]

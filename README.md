@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 <p align="center">
-  <img src="docs/img/board.svg" alt="capcom-tui showing a story board with tasks in the TODO, PLANNING, PLANNED, IMPLEMENTING and DONE columns, above panels of open pull requests with their CI stages and of manual workflow runs" width="100%">
+  <img src="docs/img/board.svg" alt="capcom-tui showing a story board with tasks in the TODO, IMPLEMENTING and DONE columns, above panels of open pull requests with their CI stages and of manual workflow runs" width="100%">
 </p>
 
 > Every picture in this README is drawn from invented demo data (`acme/web`, `DEMO-101`). Try it yourself with no setup: `capcom-tui --demo` or `capcom web --demo`.
@@ -15,7 +15,7 @@
 
 **Plan the work**
 - Break a Jira story into PR-sized tasks with dependencies, agreed with you, and kept as plain local files (`board.json`, `story.md`, one markdown file per task).
-- Task statuses `todo → planning → planned → implementing → done` (plus `dropped` and a `blocked` flag), with rules that refuse illegal moves.
+- Task statuses `todo → implementing → done` (plus `dropped` and a `blocked` flag), with rules that refuse illegal moves.
 - A task can need several PRs, in several repos; it only finishes when every one is merged.
 - Stories move `in_progress → in_review → done`, reviewed against their acceptance criteria by `/story-review`.
 
@@ -73,7 +73,7 @@ The command palette (`Ctrl+P`) lists every action that fits where you are, each 
 </p>
 
 <p align="center">
-  <img src="docs/img/web-story.png" alt="CapCom web showing one story as a board of tasks in TO DO, PLANNING, PLANNED, IMPLEMENTING and DONE columns" width="100%">
+  <img src="docs/img/web-story.png" alt="CapCom web showing one story as a board of tasks in TO DO, IMPLEMENTING and DONE columns" width="100%">
 </p>
 
 ### In the Herdr desktop app: My Watch, the CapCom panel and SG-1 agents
@@ -109,12 +109,12 @@ If that sounds like you, great. If not, treat this as a worked example: fork it,
 ## How it works
 
 ```
- story ──► plan story ──► story.md plan + board.json (planned tasks, deps) ──► implement task ──► draft PRs
+ story ──► plan story ──► story.md plan + board.json (todo tasks, deps) ──► implement task ──► draft PRs
  (Jira)   /story-plan                                                         /story-implement-task
 ```
 
 - **Local files are the source of truth.** Each story is a folder with a `board.json`, a `story.md` and one markdown file per task. Jira is only read, unless you ask for subtasks, which are created once.
-- **Task statuses:** `planned → implementing → done`, plus `dropped`, and a `blocked` flag. `/story-plan` creates every task as `planned` (`todo` and `planning` remain valid statuses for older boards). `done` means every expected PR is merged.
+- **Task statuses:** `todo → implementing → done`, plus `dropped`, and a `blocked` flag. `/story-plan` plans the whole story and creates every task as `todo` (boards that still hold the retired `planning` and `planned` statuses read them as `todo`). `done` means every expected PR is merged.
 - **Story statuses:** `in_progress → in_review → done`, moved by `/story-review` once every task is finished.
 - **PRs are always drafts, and never stacked.** You mark them ready and merge them yourself; CapCom never merges anything (it can add or remove your merge bot's automerge label, but only when you tick it and confirm).
 - **A task can need several PRs.** List a repo once per expected PR (`--repos api,api,ui` means two PRs in `api` and one in `ui`); the task cannot finish until all of them exist and are merged.
@@ -198,7 +198,7 @@ or from a shell, `claude plugin install capcom --marketplace philals/mission-con
 
 New sessions open in the app you are using when you start them: `capcom-tui` in a Herdr pane opens them in Herdr, in a pane of the Herdr desktop app in that app, in an Orca terminal in Orca, and in Claude Desktop's terminal panel in Claude Desktop; the web page opens them in Claude Desktop, or in Orca when opened in Orca's browser as `http://127.0.0.1:1969/?host=orca`. Clicking an agent takes you to it in whichever app it runs in. See [docs/tui.md](docs/tui.md#starting-agents-herdr-the-herdr-app-orca-or-claude-desktop).
 
-If you use [Herdr](https://herdr.dev), `capcom-tui` run inside a Herdr pane can start the skills for you: paste a Jira key to start a breakdown, or drag a card onto PLANNING or IMPLEMENTING. The repo is also a Herdr plugin with an `open` action, so a key such as `prefix+y` opens the board as an overlay. Install it with `herdr plugin install philals/mission-control-capcom` (it builds the binaries, so it needs Rust; read [Herdr's trust note](https://herdr.dev/docs/plugins/#trust-and-security) first, since a plugin is ordinary code), then bind a key as described in [docs/tui.md](docs/tui.md#herdr-plugin). Nothing here needs Herdr; outside it those features are simply off.
+If you use [Herdr](https://herdr.dev), `capcom-tui` run inside a Herdr pane can start the skills for you: paste a Jira key to start a breakdown, or drag a card onto IMPLEMENTING. The repo is also a Herdr plugin with an `open` action, so a key such as `prefix+y` opens the board as an overlay. Install it with `herdr plugin install philals/mission-control-capcom` (it builds the binaries, so it needs Rust; read [Herdr's trust note](https://herdr.dev/docs/plugins/#trust-and-security) first, since a plugin is ordinary code), then bind a key as described in [docs/tui.md](docs/tui.md#herdr-plugin). Nothing here needs Herdr; outside it those features are simply off.
 
 ## Privacy and security
 

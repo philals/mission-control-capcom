@@ -391,7 +391,7 @@ impl Server {
             std::fs::read_to_string(self.root.join(&key).join(file)).ok()
         };
         let summary = match &doc {
-            Some(doc) => crate::taskdoc::summary(doc, task.status),
+            Some(doc) => crate::taskdoc::summary(doc),
             None => crate::taskdoc::Summary { label: "Description", body: "The task file could not be read.".to_string() },
         };
         let worktrees = doc.as_deref().is_some_and(crate::finish::mentions_worktrees);

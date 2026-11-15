@@ -29,7 +29,7 @@
         "id": { "$ref": "#/$defs/taskId" },
         "title": { "type": "string", "minLength": 1 },
         "type": { "enum": ["pr", "spike", "decision"] },
-        "status": { "enum": ["todo", "planning", "planned", "implementing", "done", "dropped"] },
+        "status": { "$comment": "planning and planned are retired: older boards still validate, and CapCom reads them as todo", "enum": ["todo", "planning", "planned", "implementing", "done", "dropped"] },
         "blocked": {
           "type": ["object", "null"],
           "additionalProperties": false,

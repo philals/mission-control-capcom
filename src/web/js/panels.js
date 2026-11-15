@@ -288,8 +288,6 @@ function jumpToRed() {
 
 const TASK_COLUMNS = [
   ["todo", "TO DO"],
-  ["planning", "PLANNING"],
-  ["planned", "PLANNED"],
   ["implementing", "IMPLEMENTING"],
   ["done", "DONE"],
   ["dropped", "DROPPED"],
@@ -380,7 +378,7 @@ function storyRow(story, col) {
     ev.preventDefault();
     storyMenu(story, ev.clientX, ev.clientY);
   });
-  const parts = ["todo", "planning", "planned", "implementing", "done"].filter((s) => c[s]).map((s) => `${c[s]} ${s}`);
+  const parts = ["todo", "implementing", "done"].filter((s) => c[s]).map((s) => `${c[s]} ${s}`);
   const mid = el("span");
   add(mid, el("div", "ttl", story.title), el("div", "meta", total ? `${done}/${total} done · ${parts.join(" · ")}` : "not broken down yet"));
   const bar = el("span");
@@ -416,13 +414,8 @@ function prChip(task) {
 
 function taskStatus(task) {
   if (task.blocked) return [`✖ blocked: ${task.blocked}`, "red"];
-  const waits = task.waitingOn.length ? `after ${task.waitingOn.join(", ")}` : "";
   switch (task.status) {
     case "todo":
-      return [waits ? `· todo · ${waits}` : "· todo", "muted"];
-    case "planning":
-      return ["◌ planning", "orange"];
-    case "planned":
       return waits ? [`◷ waits ${task.waitingOn.join(", ")}`, "orange"] : ["▶ ready to implement", "green"];
     case "implementing": {
       if (task.prs.length === 0) return ["● implementing", "cyan"];
@@ -458,8 +451,7 @@ function taskCard(story, task) {
   }
   const actions = el("div", "task-actions");
   add(actions, btn("details", () => taskSheet(story.key, task.id), "small", "its plan or description, and its file"));
-  if (task.status === "todo") add(actions, btn("plan ↗", () => startSession(task.plan, `/story-plan ${story.key} ${task.id}`, { key: story.key, task: task.id, kind: "plan" }), "small", "open a new Claude Code session with the planning skill typed in"));
-  if ((task.status === "todo" || task.status === "planned") && task.waitingOn.length === 0 && !task.blocked) add(actions, btn("implement ↗", () => startSession(task.implement, `/story-implement-task ${story.key} ${task.id}`, { key: story.key, task: task.id, kind: "implement" }), "small", "open a new Claude Code session with the implement skill typed in"));
+  if (task.status === "todo" && task.waitingOn.length === 0 && !task.blocked) add(actions, btn("implement ↗", () => startSession(task.implement, `/story-implement-task ${story.key} ${task.id}`, { key: story.key, task: task.id, kind: "implement" }), "small", "open a new Claude Code session with the implement skill typed in"));
   if (task.status === "implementing") add(actions, btn(task.allMerged ? "finish ✓" : "finish…", () => finishTask(story, task), task.allMerged ? "small primary" : "small", "check its PRs on GitHub and finish it when they are all merged"));
   card.append(actions);
   return card;
@@ -875,8 +867,7 @@ function taskSheet(storyKey, taskId) {
     add(body, el("h4", "", detail ? detail.label : "…"));
     add(body, el("pre", "doc", detail ? detail.body : "loading…"));
     const foot = [];
-    if (task.status === "todo") foot.push(btn("Plan ↗", () => startSession(task.plan, `/story-plan ${storyKey} ${task.id}`, { key: storyKey, task: task.id, kind: "plan" })));
-    if ((task.status === "todo" || task.status === "planned") && !task.waitingOn.length) foot.push(btn("Implement ↗", () => startSession(task.implement, `/story-implement-task ${storyKey} ${task.id}`, { key: storyKey, task: task.id, kind: "implement" })));
+    if (task.status === "todo" && !task.waitingOn.length) foot.push(btn("Implement ↗", () => startSession(task.implement, `/story-implement-task ${storyKey} ${task.id}`, { key: storyKey, task: task.id, kind: "implement" })));
     if (task.status === "implementing") foot.push(btn("Finish…", () => finishTask(story, task)));
     foot.push(btn("Close", closeModal));
     return { body, foot };

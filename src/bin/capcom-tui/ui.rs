@@ -240,8 +240,6 @@ fn draw_tabs(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
 fn label(status: Status) -> &'static str {
     match status {
         Status::Todo => "TODO",
-        Status::Planning => "PLANNING",
-        Status::Planned => "PLANNED",
         Status::Implementing => "IMPLEMENTING",
         Status::Done => "DONE",
         Status::Dropped => "DROPPED",
@@ -355,7 +353,7 @@ fn draw_list_header(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
 }
 
 fn counts_text(s: &StorySummary) -> String {
-    let names = ["todo", "planning", "planned", "implementing", "done", "dropped"];
+    let names = ["todo", "implementing", "done", "dropped"];
     STATUS_ORDER
         .iter()
         .enumerate()
@@ -1092,14 +1090,8 @@ fn status_line(task: &Task, board: &Board, known: &HashMap<String, PrState>) -> 
     }
     let waiting = unfinished_deps(task, board);
     match task.status {
-        Status::Todo if waiting.is_empty() => ("· todo".into(), theme::MUTED),
-        Status::Todo => (format!("· todo · after {}", waiting.join(", ")), theme::MUTED),
-        Status::Planning => match &task.agent {
-            Some(a) => (format!("◌ planning · {}", a.pane), theme::YELLOW),
-            None => ("◌ planning".into(), theme::YELLOW),
-        },
-        Status::Planned if waiting.is_empty() => ("▶ ready to implement".into(), theme::GREEN),
-        Status::Planned => (format!("◷ waits {}", waiting.join(", ")), theme::YELLOW),
+        Status::Todo if waiting.is_empty() => ("▶ ready to implement".into(), theme::GREEN),
+        Status::Todo => (format!("◷ waits {}", waiting.join(", ")), theme::YELLOW),
         Status::Implementing if task.prs.is_empty() => ("● implementing".into(), theme::CYAN),
         Status::Implementing => {
             let state = |p: &capcom::model::Pr| known.get(&p.url).copied().unwrap_or(p.state);
@@ -1143,14 +1135,14 @@ fn pr_chip(task: &Task, prs: &[PullRequest]) -> Option<(&'static str, Color)> {
 
 fn draw_card(f: &mut Frame, area: Rect, task: &Task, board: &Board, known: &HashMap<String, PrState>, prs: &[PullRequest], selected: bool) {
     let (status, tone) = status_line(task, board, known);
-    let ready_planned = task.status == Status::Planned && rules::is_ready(board, task);
+    let ready_todo = task.status == Status::Todo && rules::is_ready(board, task);
     let border = if selected {
         Style::new().fg(theme::FG).add_modifier(Modifier::BOLD)
     } else if task.blocked.is_some() {
         Style::new().fg(theme::RED)
     } else if task.status == Status::Done {
         Style::new().fg(theme::GREEN)
-    } else if ready_planned {
+    } else if ready_todo {
         Style::new().fg(theme::YELLOW)
     } else {
         Style::new().fg(theme::DIM)
@@ -1268,7 +1260,7 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &App, hits: &mut Hits) {
     let head_height = (lines.len() as u16).min(inner.height);
     let summary = app.task_doc(task).map_or_else(
         || taskdoc::Summary { label: "Description", body: "The task file could not be read.".to_string() },
-        |doc| taskdoc::summary(&doc, task.status),
+        |doc| taskdoc::summary(&doc),
     );
     lines.push(Line::from(Span::styled(summary.label, Style::new().fg(theme::DIM))));
     let head_height = (head_height + 1).min(inner.height);
@@ -1323,7 +1315,7 @@ fn draw_help(f: &mut Frame, area: Rect, hits: &mut Hits) {
         row("o", "open the selected pull request or run in the browser".into()),
         row("x", "runs panel: stop watching the selected run (watch one by pasting its link)".into()),
         row("n", "new story: paste a Jira key or link to start planning it in Herdr".into()),
-        row("p / i", "start planning / implementing the selected task in Herdr (or drag the card); a TODO task asks whether an agent is needed".into()),
+        row("i", "start implementing the selected task in Herdr (or drag the card); a TODO task asks whether an agent is needed".into()),
         row("x", "finish the selected IMPLEMENTING task: checks its PRs on GitHub, done only if all merged (or drag to DONE)".into()),
         row("D", "mark the selected (or open) story DONE, skipping the review; every task must be done or dropped (or drag it from DOING to DONE)".into()),
         row("R", "sync the open story's PR states from GitHub (like capcom refresh); merged tasks finish".into()),
@@ -1384,10 +1376,6 @@ mod tests {
             ops::add_task(&dir, b, "Wire UI", TaskType::Pr, vec!["T1".into()], vec!["ui".into()])?;
             ops::add_task(&dir, b, "Spike it", TaskType::Spike, vec![], vec![])?;
             ops::add_task(&dir, b, "Fix schema", TaskType::Pr, vec![], vec!["api".into()])?;
-            for id in ["T1", "T2", "T4"] {
-                rules::transition(b, id, Status::Planning)?;
-                rules::transition(b, id, Status::Planned)?;
-            }
             rules::transition(b, "T4", Status::Implementing)?;
             ops::add_pr(b, "T4", "api", "https://github.com/o/api/pull/7", capcom::model::PrState::Draft)?;
             ops::block(b, "T4", "waiting on design")?;
@@ -1414,7 +1402,7 @@ mod tests {
         let out = render(&app, 200, 30);
         for want in [
             "PROJ-1", "Notices", "0/4 done", "[ in_progress ]",
-            "TODO · 1", "PLANNING · 0", "PLANNED · 2", "IMPLEMENTING · 1", "DONE · 0",
+            "TODO · 3", "IMPLEMENTING · 1", "DONE · 0",
             "T1 Add endpoint", "ready to implement", "T2 Wire UI", "waits T1",
             "T3 Spike it", "T4 Fix schema", "blocked: waiting on design",
             "q quit", "updated",
@@ -1430,24 +1418,24 @@ mod tests {
         let out = render(&app, 50, 24);
         assert!(out.contains("⇄"), "{out}");
         assert!(out.contains("TODO"), "{out}");
-        assert!(out.contains("T3 Spike it"), "{out}");
+        assert!(out.contains("T1 Add endpoint"), "{out}");
         assert!(!out.contains("IMPLEMENTING"), "{out}");
     }
 
     #[test]
     fn the_detail_sheet_lists_dependencies_prs_and_the_task_file() {
         let (_root, mut app) = sample();
-        app.col = 2;
-        app.row[2] = 1;
+        app.col = 0;
+        app.row[0] = 1;
         app.detail = true;
         let out = render(&app, 120, 40);
         assert!(out.contains("T2 · Wire UI"), "{out}");
         assert!(out.contains("Depends on"), "{out}");
-        assert!(out.contains("T1 (planned)"), "{out}");
+        assert!(out.contains("T1 (todo)"), "{out}");
         assert!(out.contains("tasks/T2-wire-ui.md"), "{out}");
 
-        app.col = 3;
-        app.row[3] = 0;
+        app.col = 1;
+        app.row[1] = 0;
         let out = render(&app, 120, 40);
         assert!(out.contains("https://github.com/o/api/pull/7"), "{out}");
         assert!(out.contains("waiting on design"), "{out}");
@@ -1460,27 +1448,25 @@ mod tests {
     }
 
     #[test]
-    fn the_task_sheet_shows_what_is_to_be_planned_or_the_plan_and_scrolls() {
+    fn the_task_sheet_shows_the_plan_or_the_description_and_scrolls() {
         let (root, mut app) = sample();
         write_task_file(&root, "T1-", "# T1: Add endpoint\n\n## Description\n\nExpose the notices over REST.\n\n## Plan\n\n## Progress\n");
         write_task_file(&root, "T3-", "# T3: Spike it\n\n## Description\n\nFind out whether the SDK works in a Lambda.\n\n## Plan\n\n## Progress\n");
         let long_plan: String = (1..=60).map(|n| format!("- step {n} of the plan\n")).collect();
         write_task_file(&root, "T2-", &format!("# T2: Wire UI\n\n## Description\n\nShow notices in the UI.\n\n## Plan\n\n### Approach\n\nUse the new endpoint.\n\n{long_plan}\n## Progress\n"));
         app.col = 0;
-        app.row[0] = 0;
+        app.row[0] = 2;
         app.detail = true;
         let out = render(&app, 120, 40);
-        assert!(out.contains("T3 · Spike it") && out.contains("To plan") && out.contains("Find out whether the SDK works"), "{out}");
-        app.col = 2;
-        app.row[2] = 0;
+        assert!(out.contains("T3 · Spike it") && out.contains("Description") && out.contains("Find out whether the SDK works"), "{out}");
+        app.row[0] = 0;
         let out = render(&app, 120, 40);
-        assert!(out.contains("T1 · Add endpoint") && out.contains("no plan written yet") && out.contains("Expose the notices over REST."), "planned but nothing written: {out}");
-        app.row[2] = 1;
+        assert!(out.contains("T1 · Add endpoint") && out.contains("Expose the notices over REST."), "nothing but a description: {out}");
+        app.row[0] = 1;
         app.open_detail();
         let out = render(&app, 120, 40);
         assert!(out.contains("T2 · Wire UI"), "{out}");
-        let status = app.selected_task().unwrap().status;
-        assert!(status == Status::Planned && out.contains("Plan") && out.contains("Approach") && out.contains("Use the new endpoint.") && !out.contains("Show notices in the UI."), "{out}");
+        assert!(out.contains("Plan") && out.contains("Approach") && out.contains("Use the new endpoint.") && !out.contains("Show notices in the UI."), "{out}");
         assert!(out.contains("step 1 of the plan") && !out.contains("step 60 of the plan") && out.contains("scroll"), "{out}");
         app.on_key(KeyCode::End, false);
         let out = render(&app, 120, 40);
@@ -1500,8 +1486,8 @@ mod tests {
     #[test]
     fn a_task_whose_file_is_missing_or_empty_says_so_instead_of_breaking() {
         let (root, mut app) = sample();
-        app.col = 2;
-        app.row[2] = 0;
+        app.col = 0;
+        app.row[0] = 0;
         app.detail = true;
         let out = render(&app, 120, 40);
         assert!(out.contains("Nothing written yet."), "{out}");
@@ -1552,7 +1538,7 @@ mod tests {
         }
         store::update(root.path(), "PROJ-1", |b| {
             for id in ["T1", "T2"] {
-                for s in [Status::Planning, Status::Planned, Status::Implementing] {
+                for s in [Status::Implementing] {
                     rules::transition(b, id, s)?;
                 }
             }
@@ -1643,7 +1629,7 @@ mod tests {
         assert!(app.detail);
         let out = render(&app, 200, 30);
         assert!(out.contains("Depends on"), "{out}");
-        app.on_click(x, y + 1);
+        app.on_click(100, 15);
         assert!(app.detail, "a click inside the sheet must not close it");
         app.on_click(0, 0);
         assert!(!app.detail);
@@ -1655,7 +1641,7 @@ mod tests {
         let out = render(&app, 200, 30);
         let (x, y) = find(&out, "DONE · 0");
         app.on_click(x, y);
-        assert_eq!(app.col, 4);
+        assert_eq!(app.col, 2);
     }
 
     #[test]
@@ -3072,7 +3058,7 @@ mod tests {
         app.open_story("PROJ-2");
         open_palette_with(&mut app, "");
         let out = render(&app, 170, 44);
-        assert!(out.contains("Plan T1") && out.contains("Implement T1") && out.contains("Back to the story list") && out.contains("auto-sync"), "{out}");
+        assert!(out.contains("Implement T1") && out.contains("Back to the story list") && out.contains("auto-sync"), "{out}");
         assert!(!out.contains("New story"), "{out}");
     }
 
@@ -3108,7 +3094,7 @@ mod tests {
         let (x, y) = find(&out, "T1");
         app.on_right_click(x + 1, y);
         let out = render(&app, 170, 44);
-        assert!(out.contains("Plan T1") && out.contains("Implement T1") && out.contains("Finish T1"), "{out}");
+        assert!(out.contains("Implement T1") && out.contains("Finish T1"), "{out}");
         app.on_key(KeyCode::Esc, false);
         app.on_right_click(1, 0);
         assert!(app.palette.as_ref().is_some_and(|p| p.searchable), "elsewhere it is the palette");
@@ -3765,33 +3751,11 @@ mod tests {
     }
 
     #[test]
-    fn dragging_a_todo_card_onto_planning_starts_the_plan_skill_in_the_storys_workspace() {
-        let (_root, mut app) = sample();
-        let fake = with_herdr(&mut app);
-        drag_card(&mut app, "T3 Spike it", "PLANNING");
-        let launches = launches_after(&mut app, &fake, 1);
-        assert_eq!(
-            launches,
-            vec![crate::herdr::Launch {
-                workspace: "PROJ-1".into(),
-                label: "PROJ-1 - Notices".into(),
-                tab: "T3 plan".into(),
-                agent: "proj-1-t3-plan".into(),
-                prompt: "/story-plan PROJ-1 T3".into(),
-                folder: None,
-                task: Some("T3".into()),
-                sessions: Vec::new(),
-            }]
-        );
-        assert_eq!(app.selected_task().unwrap().status, Status::Todo, "the skill moves the card, not the drag");
-        assert!(!app.detail);
-    }
-
-    #[test]
-    fn dragging_a_ready_planned_card_onto_implementing_starts_the_implement_skill() {
+    fn dragging_a_todo_card_onto_implementing_and_saying_yes_starts_the_implement_skill() {
         let (_root, mut app) = sample();
         let fake = with_herdr(&mut app);
         drag_card(&mut app, "T1 Add endpoint", "IMPLEMENTING");
+        app.on_key(KeyCode::Char('y'), false);
         let launches = launches_after(&mut app, &fake, 1);
         assert_eq!(launches.len(), 1);
         assert_eq!(launches[0].prompt, "/story-implement-task PROJ-1 T1");
@@ -3809,6 +3773,7 @@ mod tests {
         let mut app = App::new(root.path().to_path_buf(), Some("PROJ-1".into()));
         let fake = with_herdr(&mut app);
         drag_card(&mut app, "T1 Add endpoint", "IMPLEMENTING");
+        app.on_key(KeyCode::Char('y'), false);
         let launches = launches_after(&mut app, &fake, 1);
         assert_eq!(launches[0].sessions, vec!["s-impl".to_string()]);
     }
@@ -3866,7 +3831,7 @@ mod tests {
         assert_eq!(task_status(&app, "T3"), Status::Implementing, "the board file changed");
         assert!(launches_after(&mut app, &fake, 1).is_empty(), "no agent was opened");
         let columns = app.columns();
-        assert!(columns[3].tasks.iter().any(|t| t.id == "T3"), "and the card shows in IMPLEMENTING");
+        assert!(columns[1].tasks.iter().any(|t| t.id == "T3"), "and the card shows in IMPLEMENTING");
         assert!(app.current_notice().unwrap().contains("no agent started"));
     }
 
@@ -3880,44 +3845,27 @@ mod tests {
         assert!(app.agent_ask.is_some());
         app.on_key(KeyCode::Esc, false);
         assert!(app.agent_ask.is_none());
-        assert_eq!(task_status(&app, "T3"), Status::Todo);
+        assert_eq!(task_status(&app, "T1"), Status::Todo);
         app.on_key(KeyCode::Char('i'), false);
         let out = render(&app, 200, 40);
         let (x, y) = find(&out, "[ Esc Cancel ]");
         app.on_click(x + 3, y);
-        assert!(app.agent_ask.is_none() && task_status(&app, "T3") == Status::Todo);
+        assert!(app.agent_ask.is_none() && task_status(&app, "T1") == Status::Todo);
         app.on_key(KeyCode::Char('i'), false);
         let (x, y) = find(&render(&app, 200, 40), "[ y Start an agent ]");
         app.on_click(x + 3, y);
         let launches = launches_after(&mut app, &fake, 1);
         assert_eq!(launches.len(), 1);
-        assert_eq!(launches[0].prompt, "/story-implement-task PROJ-1 T3");
-        assert_eq!(task_status(&app, "T3"), Status::Todo, "with an agent the skill moves it");
-    }
-
-    #[test]
-    fn a_planned_card_still_goes_straight_to_the_agent_without_asking() {
-        let (_root, mut app) = sample();
-        let fake = with_herdr(&mut app);
-        drag_card(&mut app, "T1 Add endpoint", "IMPLEMENTING");
-        assert!(app.agent_ask.is_none());
-        assert_eq!(launches_after(&mut app, &fake, 1).len(), 1);
-    }
-
-    #[test]
-    fn a_card_whose_dependencies_are_not_done_is_started_all_the_same() {
-        let (_root, mut app) = sample();
-        let fake = with_herdr(&mut app);
-        drag_card(&mut app, "T2 Wire UI", "IMPLEMENTING");
-        assert_eq!(launches_after(&mut app, &fake, 1).len(), 1);
+        assert_eq!(launches[0].prompt, "/story-implement-task PROJ-1 T1");
+        assert_eq!(task_status(&app, "T1"), Status::Todo, "with an agent the skill moves it");
     }
 
     #[test]
     fn other_drops_move_the_card_by_hand_and_start_nothing() {
         let (_root, mut app) = sample();
         let fake = with_herdr(&mut app);
-        drag_card(&mut app, "T1 Add endpoint", "TODO");
-        assert_eq!(status_of(&app, "T1"), Status::Todo);
+        drag_card(&mut app, "T4 Fix schema", "TODO");
+        assert_eq!(status_of(&app, "T4"), Status::Todo);
         drag_card(&mut app, "T3 Spike it", "DONE");
         assert_eq!(status_of(&app, "T3"), Status::Done);
         assert!(launches_after(&mut app, &fake, 1).is_empty());
@@ -3928,8 +3876,8 @@ mod tests {
         let (_root, mut app) = sample();
         let fake = with_herdr(&mut app);
         let out = render(&app, 200, 30);
-        let (x, y) = find(&out, "T3 Spike it");
-        assert_eq!(app.selected_task().unwrap().id, "T3", "already selected");
+        let (x, y) = find(&out, "T1 Add endpoint");
+        assert_eq!(app.selected_task().unwrap().id, "T1", "already selected");
         app.on_click(x, y);
         app.on_drag(x + 1, y);
         app.on_release();
@@ -3938,21 +3886,19 @@ mod tests {
     }
 
     #[test]
-    fn p_and_i_start_the_selected_task_and_outside_herdr_nothing_starts() {
+    fn i_asks_about_the_selected_task_and_outside_herdr_nothing_starts() {
         let (_root, mut app) = sample();
         let fake = with_herdr(&mut app);
         app.col = 0;
         app.row[0] = 0;
-        app.on_key(KeyCode::Char('p'), false);
-        app.col = 2;
-        app.row[2] = 0;
         app.on_key(KeyCode::Char('i'), false);
-        let prompts: Vec<String> = launches_after(&mut app, &fake, 2).into_iter().map(|l| l.prompt).collect();
-        assert!(prompts.contains(&"/story-plan PROJ-1 T3".to_string()), "{prompts:?}");
+        app.on_key(KeyCode::Char('y'), false);
+        let prompts: Vec<String> = launches_after(&mut app, &fake, 1).into_iter().map(|l| l.prompt).collect();
         assert!(prompts.contains(&"/story-implement-task PROJ-1 T1".to_string()), "{prompts:?}");
         let (_root, mut plain) = sample();
         plain.col = 0;
-        plain.on_key(KeyCode::Char('p'), false);
+        plain.on_key(KeyCode::Char('i'), false);
+        plain.on_key(KeyCode::Char('y'), false);
         assert!(plain.current_notice().unwrap().contains("not running inside Herdr"));
     }
 
@@ -3961,7 +3907,7 @@ mod tests {
         let (_root, mut app) = sample();
         let out = render(&app, 200, 30);
         let (x, y) = find(&out, "T3 Spike it");
-        let (cx, cy) = find(&out, "PLANNING");
+        let (cx, cy) = find(&out, "IMPLEMENTING");
         app.on_click(x, y);
         app.on_drag(cx + 4, cy + 3);
         assert_eq!(app.drop_column(), Some(1));
@@ -4217,8 +4163,8 @@ mod tests {
         app.on_key(KeyCode::Char('x'), false);
         assert!(app.current_notice().unwrap().contains("cannot be marked done"), "{:?}", app.current_notice());
         let (_root, mut app) = finishing();
-        app.col = 3;
-        app.row[3] = 0;
+        app.col = 1;
+        app.row[1] = 0;
         app.on_key(KeyCode::Char('x'), false);
         wait_for_notice(&mut app, "T1 is done");
         let out = render(&app, 200, 40);
@@ -4228,8 +4174,8 @@ mod tests {
     #[test]
     fn a_spike_with_no_prs_finishes_straight_away() {
         let (_root, mut app) = finishing();
-        app.col = 3;
-        app.row[3] = 1;
+        app.col = 1;
+        app.row[1] = 1;
         assert_eq!(app.selected_task().unwrap().id, "T2");
         app.on_key(KeyCode::Char('x'), false);
         wait_for_notice(&mut app, "T2 is done");
@@ -4316,8 +4262,8 @@ mod tests {
         let notes = store::load(&app.root, "PROJ-1").unwrap().task("T1").unwrap().file.clone();
         std::fs::write(root.path().join("PROJ-1").join(notes), "## Progress\n- worktree: /work/api-t1\n").unwrap();
         let fake = with_herdr(&mut app);
-        app.col = 3;
-        app.row[3] = 0;
+        app.col = 1;
+        app.row[1] = 0;
         app.on_key(KeyCode::Char('x'), false);
         for _ in 0..300 {
             app.poll_ready();
@@ -5225,7 +5171,7 @@ mod tests {
         let out = render(&app, 170, 44);
         let y = find(&out, "STORY PULL REQUESTS").1;
         assert!(y < auto_y, "a taller bottom area starts higher ({auto_y} -> {y})");
-        assert!(out.contains("TODO") && out.contains("PLANNED"), "the board is still drawn:\n{out}");
+        assert!(out.contains("TODO") && out.contains("IMPLEMENTING"), "the board is still drawn:\n{out}");
     }
 
     #[test]
@@ -5244,18 +5190,18 @@ mod tests {
     fn dragging_a_column_border_resizes_the_two_neighbouring_columns() {
         let (_root, mut app) = sample();
         let out = render(&app, 200, 30);
-        let (planning_x, _) = find(&out, "PLANNING");
-        let (planned_x, _) = find(&out, "PLANNED");
-        let widths = |out: &str| (find(out, "PLANNING").0, find(out, "PLANNED").0);
-        assert_eq!(widths(&out), (planning_x, planned_x));
-        app.on_click(planning_x - 2, 6);
-        app.on_drag(planning_x - 22, 6);
+        let (implementing_x, _) = find(&out, "IMPLEMENTING");
+        let (done_x, _) = find(&out, "DONE");
+        let widths = |out: &str| (find(out, "IMPLEMENTING").0, find(out, "DONE").0);
+        assert_eq!(widths(&out), (implementing_x, done_x));
+        app.on_click(implementing_x - 2, 6);
+        app.on_drag(implementing_x - 22, 6);
         app.on_release();
         let out = render(&app, 200, 30);
-        let (new_planning_x, new_planned_x) = widths(&out);
-        assert!(new_planning_x + 18 <= planning_x, "the border moved left by about 20 ({planning_x} -> {new_planning_x}):\n{out}");
-        let before = planned_x - planning_x;
-        let after = new_planned_x - new_planning_x;
+        let (new_implementing_x, new_done_x) = widths(&out);
+        assert!(new_implementing_x + 18 <= implementing_x, "the border moved left by about 20 ({implementing_x} -> {new_implementing_x}):\n{out}");
+        let before = done_x - implementing_x;
+        let after = new_done_x - new_implementing_x;
         assert!(after > before, "the column to the right of the border grew: {before} -> {after}");
         assert!(app.col_weights[0] < 100 && app.col_weights[1] > 100, "{:?}", app.col_weights);
     }

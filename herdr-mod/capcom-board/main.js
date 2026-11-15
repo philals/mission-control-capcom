@@ -8,22 +8,18 @@ import { capcom, openUrl, short } from "./pr-details.js";
 const EVERY_MS = 5000;
 const STATUSES = [
   ["todo", "TO DO"],
-  ["planning", "PLANNING"],
-  ["planned", "PLANNED"],
   ["implementing", "IMPLEMENTING"],
   ["done", "DONE"],
   ["dropped", "DROPPED"],
 ];
 const COLOR = {
   todo: "#7c8493",
-  planning: "#6cb6ff",
-  planned: "#c792ea",
   implementing: "#f0b429",
   done: "#22c55e",
   dropped: "#5c6370",
 };
 const STORY_COLOR = { in_progress: "#f0b429", in_review: "#c792ea", done: "#22c55e" };
-const SKILL = { planning: "story-plan", implementing: "story-implement-task" };
+const SKILL = { implementing: "story-implement-task" };
 const STORY_DOT = { in_progress: "accent", in_review: "ansi3", done: "dim" };
 
 const store = (k, v) => {
@@ -133,7 +129,7 @@ export default class CapcomBoard extends View {
     const skill = SKILL[status];
     if (!skill) return;
     const argv = ["claude", `/${skill} ${this.key} ${task.id}`];
-    const name = `${this.key} ${task.id} ${status === "planning" ? "plan" : "impl"}`;
+    const name = `${this.key} ${task.id} impl`;
     const repo = task.repos?.[0]?.split("/").pop();
     const folder = task.folder || (repo ? `${home()}/code/${repo}` : null);
     if (!folder) return run("tab.new", { name, argv });
@@ -280,7 +276,7 @@ export default class CapcomBoard extends View {
   }
 
   nextStatus(task) {
-    return { todo: "planning", planned: "implementing" }[task.status];
+    return { todo: "implementing" }[task.status];
   }
 
   section(status, label, tasks, t, all) {

@@ -5,7 +5,7 @@ description: Review a whole Jira story once all its tasks are done. Checks every
 
 # Story review
 
-Argument: `<KEY>`. Board data lives in `<root>/<KEY>/` (`<root>` is the stories folder printed by `capcom root`). Valid story statuses: in_progress, in_review, done. Valid task statuses: todo, planning, planned, implementing, done, dropped.
+Argument: `<KEY>`. Board data lives in `<root>/<KEY>/` (`<root>` is the stories folder printed by `capcom root`). Valid story statuses: in_progress, in_review, done. Valid task statuses: todo, implementing, done, dropped.
 
 CI fixes and review comments belong to each task (they are handled while the task is `implementing`, before it is `done`). This skill does not re-run them. It reviews the story as a whole.
 

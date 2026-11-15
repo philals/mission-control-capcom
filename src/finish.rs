@@ -150,8 +150,6 @@ mod tests {
         store::update(root.path(), "PROJ-1", |b| {
             let dir = root.path().join("PROJ-1");
             ops::add_task(&dir, b, "Do it", kind, vec![], vec!["api".into()])?;
-            rules::transition(b, "T1", Status::Planning)?;
-            rules::transition(b, "T1", Status::Planned)?;
             rules::transition(b, "T1", Status::Implementing)?;
             if let Some(state) = with_pr {
                 ops::add_pr(b, "T1", "api", U, state)?;

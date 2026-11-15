@@ -1,5 +1,4 @@
-//! What a task's markdown file says, for the details sheet: what is still to be planned, or the plan.
-use crate::model::Status;
+//! What a task's markdown file says, for the details sheet: the task's plan or description.
 
 /// The text under a `## name` heading, up to the next `## ` heading (`###` headings stay inside it).
 pub fn section(doc: &str, name: &str) -> Option<String> {
@@ -25,17 +24,14 @@ pub struct Summary {
     pub body: String,
 }
 
-/// A task still to be planned shows its description (what is going to be planned); a planned, started or
-/// finished one shows its plan, or its description when no plan was written.
-pub fn summary(doc: &str, status: Status) -> Summary {
+/// A task's own plan when it has one, else its description (the story's plan is in `story.md`).
+pub fn summary(doc: &str) -> Summary {
     let description = section(doc, "Description").filter(|t| !t.is_empty());
     let plan = section(doc, "Plan").filter(|t| !t.is_empty());
-    match (matches!(status, Status::Todo | Status::Planning), plan, description) {
-        (false, Some(plan), _) => Summary { label: "Plan", body: plan },
-        (false, None, Some(description)) => Summary { label: "Description (no plan written yet)", body: description },
-        (true, _, Some(description)) => Summary { label: "To plan", body: description },
-        (true, Some(plan), None) => Summary { label: "Plan", body: plan },
-        (_, None, None) => Summary { label: "Description", body: "Nothing written yet.".to_string() },
+    match (plan, description) {
+        (Some(plan), _) => Summary { label: "Plan", body: plan },
+        (None, Some(description)) => Summary { label: "Description", body: description },
+        (None, None) => Summary { label: "Description", body: "Nothing written yet.".to_string() },
     }
 }
 
@@ -131,27 +127,20 @@ mod tests {
     }
 
     #[test]
-    fn a_task_to_plan_shows_what_will_be_planned_and_a_planned_one_shows_its_plan() {
-        for status in [Status::Todo, Status::Planning] {
-            let s = summary(DOC, status);
-            assert_eq!((s.label, s.body.as_str()), ("To plan", "Build the helper."));
-        }
-        for status in [Status::Planned, Status::Implementing, Status::Done] {
-            let s = summary(DOC, status);
-            assert_eq!(s.label, "Plan");
-            assert!(s.body.contains("isFlagEnabled"));
-        }
+    fn a_task_with_a_plan_shows_it_and_one_without_shows_its_description() {
+        let s = summary(DOC);
+        assert_eq!(s.label, "Plan");
+        assert!(s.body.contains("isFlagEnabled"));
+        let only_description = "## Description\n\nWhat to do.\n\n## Plan\n";
+        let s = summary(only_description);
+        assert_eq!((s.label, s.body.as_str()), ("Description", "What to do."));
     }
 
     #[test]
     fn without_a_plan_or_a_description_the_sheet_says_what_is_missing() {
         let bare = "# T1\n\n## Description\n\n## Plan\n\n## Decisions\n";
-        assert_eq!(summary(bare, Status::Todo).body, "Nothing written yet.");
-        assert_eq!(summary(bare, Status::Planned).body, "Nothing written yet.");
-        let only_description = "## Description\n\nWhat to do.\n\n## Plan\n";
-        let s = summary(only_description, Status::Planned);
-        assert!(s.label.contains("no plan written") && s.body == "What to do.");
-        assert_eq!(summary("no headings at all", Status::Todo).body, "Nothing written yet.");
+        assert_eq!(summary(bare).body, "Nothing written yet.");
+        assert_eq!(summary("no headings at all").body, "Nothing written yet.");
     }
 
     #[test]

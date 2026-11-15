@@ -117,15 +117,10 @@ fn allowed(from: Status, to: Status) -> bool {
     use Status::*;
     matches!(
         (from, to),
-        (Todo, Planning)
-            | (Todo, Implementing)
-            | (Planning, Planned)
-            | (Planning, Todo)
-            | (Planned, Implementing)
-            | (Planned, Planning)
+        (Todo, Implementing)
+            | (Implementing, Todo)
             | (Implementing, Done)
-            | (Implementing, Planned)
-            | (Todo | Planning | Planned | Implementing, Dropped)
+            | (Todo | Implementing, Dropped)
     )
 }
 
@@ -142,7 +137,7 @@ pub fn transition(board: &mut Board, id: &str, to: Status) -> Result<()> {
     {
         let t = &board.tasks[idx];
         match to {
-            Status::Implementing if matches!(from, Status::Planned | Status::Todo) => {
+            Status::Implementing if from == Status::Todo => {
                 if let Some(b) = &t.blocked {
                     bail!("{id} is blocked: {}", b.reason);
                 }
@@ -190,7 +185,7 @@ pub fn transition(board: &mut Board, id: &str, to: Status) -> Result<()> {
     t.status = to;
     if matches!(
         to,
-        Status::Todo | Status::Planned | Status::Done | Status::Dropped
+        Status::Todo | Status::Done | Status::Dropped
     ) {
         t.agent = None;
     }
@@ -201,7 +196,7 @@ pub fn transition(board: &mut Board, id: &str, to: Status) -> Result<()> {
 pub fn force_status(board: &mut Board, id: &str, to: Status) -> Result<()> {
     let t = board.tasks.iter_mut().find(|t| t.id == id).with_context(|| format!("no task {id}"))?;
     t.status = to;
-    if matches!(to, Status::Todo | Status::Planned | Status::Done | Status::Dropped) {
+    if matches!(to, Status::Todo | Status::Done | Status::Dropped) {
         t.agent = None;
     }
     Ok(())
@@ -288,14 +283,14 @@ mod tests {
     #[test]
     fn happy_path_to_implementing() {
         let mut b = board(vec![t("T1", &[])]);
-        transition(&mut b, "T1", Status::Planning).unwrap();
-        transition(&mut b, "T1", Status::Planned).unwrap();
         transition(&mut b, "T1", Status::Implementing).unwrap();
         assert_eq!(b.tasks[0].status, Status::Implementing);
+        transition(&mut b, "T1", Status::Todo).unwrap();
+        assert_eq!(b.tasks[0].status, Status::Todo);
     }
 
     #[test]
-    fn a_task_may_skip_planning_and_go_straight_from_todo_to_implementing() {
+    fn a_todo_task_goes_straight_to_implementing() {
         let mut b = board(vec![t("T1", &[]), t("T2", &["T1"]), t("T3", &[])]);
         transition(&mut b, "T1", Status::Implementing).unwrap();
         assert_eq!(b.tasks[0].status, Status::Implementing);
@@ -314,7 +309,6 @@ mod tests {
     #[test]
     fn implementing_waits_for_dependencies() {
         let mut b = board(vec![t("T1", &[]), t("T2", &["T1"])]);
-        set(&mut b, "T2", Status::Planned);
         assert!(err(transition(&mut b, "T2", Status::Implementing)).contains("waiting on"));
         set(&mut b, "T1", Status::Done);
         transition(&mut b, "T2", Status::Implementing).unwrap();
@@ -323,9 +317,16 @@ mod tests {
     #[test]
     fn implementing_refused_while_blocked() {
         let mut b = board(vec![t("T1", &[])]);
-        set(&mut b, "T1", Status::Planned);
         b.tasks[0].blocked = Some(Blocked { reason: "waiting on DBA".into() });
         assert!(err(transition(&mut b, "T1", Status::Implementing)).contains("blocked"));
+    }
+
+    #[test]
+    fn the_retired_planning_and_planned_statuses_read_as_todo() {
+        assert_eq!(Status::parse("planning"), Some(Status::Todo));
+        assert_eq!(Status::parse("planned"), Some(Status::Todo));
+        assert_eq!(serde_json::from_str::<Status>("\"planned\"").unwrap(), Status::Todo);
+        assert_eq!(serde_json::from_str::<Status>("\"planning\"").unwrap(), Status::Todo);
     }
 
     #[test]
@@ -422,9 +423,9 @@ mod tests {
     #[test]
     fn agent_is_cleared_when_a_run_finishes() {
         let mut b = board(vec![t("T1", &[])]);
-        transition(&mut b, "T1", Status::Planning).unwrap();
-        b.tasks[0].agent = Some(Agent { pane: "w1:p1".into(), skill: "story-plan".into(), started_at: "now".into() });
-        transition(&mut b, "T1", Status::Planned).unwrap();
+        transition(&mut b, "T1", Status::Implementing).unwrap();
+        b.tasks[0].agent = Some(Agent { pane: "w1:p1".into(), skill: "story-implement-task".into(), started_at: "now".into() });
+        transition(&mut b, "T1", Status::Todo).unwrap();
         assert!(b.tasks[0].agent.is_none());
     }
 

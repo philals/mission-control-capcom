@@ -13,7 +13,7 @@ const WATCH_MS = 2 * 1000;
 const IDLE_MS = 3 * 60 * 1000;
 const COLOR = { progress: "#6cb6ff", review: "#c792ea", blocked: "#ff6b6b", todo: "#7c8493", other: "#9aa1ad" };
 const RANK = { progress: 0, review: 1, blocked: 2, todo: 3, other: 4 };
-const TASK_COLOR = { todo: "#7c8493", planning: "#6cb6ff", planned: "#c792ea", implementing: "#f0b429", done: "#22c55e", dropped: "#5c6370" };
+const TASK_COLOR = { todo: "#7c8493", implementing: "#f0b429", done: "#22c55e", dropped: "#5c6370" };
 const BOARD = "#c792ea";
 
 const kindOf = (i) => {
@@ -208,7 +208,7 @@ export default class CapcomJira extends View {
     const out = [];
     const tasks = d?.board?.tasks ?? [];
     const finished = tasks.length > 0 && tasks.every((x) => x.status === "done" || x.status === "dropped") && tasks.some((x) => x.status === "done");
-    const next = tasks.find((x) => x.status === "implementing") ?? tasks.find((x) => x.status === "planned" && d?.ready.has(x.id));
+    const next = tasks.find((x) => x.status === "implementing") ?? tasks.find((x) => (x.status === "todo" || x.status === "planned") && d?.ready.has(x.id));
     if (finished) out.push({ label: "Review", full: "Review the story", cmd: `/story-review ${i.key}`, go: (cx) => this.start(cx, i.key, "story-review") });
     if (next) {
       const resume = next.status === "implementing";
@@ -328,7 +328,7 @@ export default class CapcomJira extends View {
         v_flex().gap(5).px(10).py(8)
           .child(div().text_size(10).font_semibold().text_color(t.dim).child(`${i.type.toUpperCase()}${i.priority ? ` · ${i.priority.toUpperCase()}` : ""} · UPDATED ${ago(i.updated).toUpperCase()}`))
           .when(tasks.length > 0, (el) =>
-            el.child(h_flex().gap(3).children(tasks.map((x) => div().flex_1().h(6).rounded(3).bg(TASK_COLOR[x.status]))))
+            el.child(h_flex().gap(3).children(tasks.map((x) => div().flex_1().h(6).rounded(3).bg(TASK_COLOR[x.status] ?? TASK_COLOR.todo))))
               .child(div().text_size(11).text_color(t.muted).child(counts.map(([s, n]) => `${n} ${s}`).join(" · ")))),
       )
       .child(this.heading("COPY", t))

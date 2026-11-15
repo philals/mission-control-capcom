@@ -5,8 +5,9 @@ Local kanban boards for Jira stories. One `board.json` per story at
 writer of `board.json`; skills and the Herdr plugin call it.
 
 A repo may appear more than once in a task's `repos`: it then expects that many live (not closed) PRs there before the task can be `done`.
-Task statuses: `todo → planning → planned → implementing → done`, plus `dropped`. A task may also go
-straight from `todo` to `implementing` (spikes, manual testing), under the same dependency and blocked checks.
+Task statuses: `todo → implementing → done`, plus `dropped`. A task may go back from `implementing` to `todo`. The old
+`planning` and `planned` statuses are gone: `capcom status` still accepts them and means `todo`, and boards that hold them
+read them as `todo`. Entering `implementing` is under the dependency and blocked checks.
 `blocked` is a flag with a reason. A task may enter `implementing` only when every
 dependency is `done`.
 
@@ -22,7 +23,7 @@ All commands print JSON. Our own errors go to stderr with exit status 1; clap us
 (unknown flag, missing argument) exit with status 2. Every command accepts `--root DIR`
 (or `CAPCOM_ROOT`) to choose the stories directory.
 
-Valid task statuses: `todo`, `planning`, `planned`, `implementing`, `done`, `dropped`. Valid story statuses: `in_progress` (default), `in_review`, `done`.
+Valid task statuses: `todo`, `implementing`, `done`, `dropped`. Valid story statuses: `in_progress` (default), `in_review`, `done`.
 `--type` is `pr` (the default), `spike` or `decision`. PR states: `draft`, `ready`, `merged`, `closed`.
 
     capcom init <KEY> --title T [--jira-url U]

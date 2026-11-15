@@ -103,7 +103,7 @@ fn screenshot(path: &std::path::Path, screen: &str, size: &str) -> Result<()> {
     let (title, description) = match screen {
         "board" => (
             "capcom story board",
-            "A kanban board of one demo story with its tasks in TODO, PLANNING, PLANNED, IMPLEMENTING and DONE columns, above panels of open pull requests with their CI stages and of manual workflow runs.",
+            "A kanban board of one demo story with its tasks in TODO, IMPLEMENTING and DONE columns, above panels of open pull requests with their CI stages and of manual workflow runs.",
         ),
         "palette" => (
             "capcom command palette",

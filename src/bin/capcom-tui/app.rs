@@ -19,18 +19,14 @@ use capcom::refresh::{self, GhLookup, Lookups, PrLookup};
 use capcom::rules;
 use capcom::store;
 
-const MAIN_COLUMNS: [Status; 5] = [
+const MAIN_COLUMNS: [Status; 3] = [
     Status::Todo,
-    Status::Planning,
-    Status::Planned,
     Status::Implementing,
     Status::Done,
 ];
 const MAX_COLUMNS: usize = 6;
-pub const STATUS_ORDER: [Status; 6] = [
+pub const STATUS_ORDER: [Status; 4] = [
     Status::Todo,
-    Status::Planning,
-    Status::Planned,
     Status::Implementing,
     Status::Done,
     Status::Dropped,
@@ -169,7 +165,7 @@ pub struct StorySummary {
     pub status: StoryStatus,
     pub total: usize,
     pub done: usize,
-    pub counts: [usize; 6],
+    pub counts: [usize; 4],
     /// (pull request url, task id) for every PR recorded on the story's tasks.
     pub prs: Vec<(String, String)>,
     /// (task id, Claude Code session) for every session recorded on the story's tasks.
@@ -180,7 +176,7 @@ pub struct StorySummary {
 fn summarize(root: &Path, key: &str) -> StorySummary {
     match store::load(root, key) {
         Ok(board) => {
-            let mut counts = [0; 6];
+            let mut counts = [0; 4];
             for task in &board.tasks {
                 if let Some(i) = STATUS_ORDER.iter().position(|s| *s == task.status) {
                     counts[i] += 1;
@@ -190,8 +186,8 @@ fn summarize(root: &Path, key: &str) -> StorySummary {
                 key: key.to_string(),
                 title: board.story.title.clone(),
                 status: board.story.status,
-                total: board.tasks.len() - counts[5],
-                done: counts[4],
+                total: board.tasks.len() - counts[3],
+                done: counts[2],
                 counts,
                 prs: board
                     .tasks
@@ -208,7 +204,7 @@ fn summarize(root: &Path, key: &str) -> StorySummary {
             status: StoryStatus::InProgress,
             total: 0,
             done: 0,
-            counts: [0; 6],
+            counts: [0; 4],
             prs: Vec::new(),
             sessions: Vec::new(),
             error: Some(format!("{e:#}")),
@@ -1108,7 +1104,7 @@ impl App {
                 sessions: Vec::new(),
             }),
             (ListCol::Todo, ListCol::Doing) => self.set_notice(format!(
-                "{key} moves to DOING by itself when its first task leaves TODO: open it and drag a card to PLANNING or IMPLEMENTING"
+                "{key} moves to DOING by itself when its first task leaves TODO: open it and drag a card to IMPLEMENTING"
             )),
             (ListCol::Review | ListCol::Done, ListCol::Doing) => self.set_story_status(&key, StoryStatus::InProgress, "is back in DOING"),
             (ListCol::Review, ListCol::Done) => self.set_story_status(&key, StoryStatus::Done, "is done"),
@@ -2665,8 +2661,8 @@ impl App {
         });
     }
 
-    /// Start the skill that moves a task into `to`: planning from todo, implementing from planned (or
-    /// straight from todo, for spikes and manual testing).
+    /// Move a task into `to`: a TODO task going to IMPLEMENTING first asks whether an agent is needed
+    /// (it starts the implement skill, or just moves the card for spikes and manual testing).
     pub fn start_work(&mut self, task_id: &str, to: Status) {
         let Some(board) = &self.board else {
             return;
@@ -2675,22 +2671,13 @@ impl App {
             return;
         };
         let (from, title) = (task.status, task.title.clone());
-        let (skill, tab, phase) = match (from, to) {
-            (Status::Todo, Status::Planning) => ("story-plan", "plan", "plan"),
-            (Status::Planned | Status::Todo, Status::Implementing) => {
-                if from == Status::Todo {
-                    self.agent_ask = Some(AgentAsk { id: task_id.to_string(), title, kind: AskKind::Implement });
-                    return;
-                }
-                ("story-implement-task", "implement", "impl")
+        match (from, to) {
+            (Status::Todo, Status::Implementing) => {
+                self.agent_ask = Some(AgentAsk { id: task_id.to_string(), title, kind: AskKind::Implement });
             }
-            (from, to) if from == to => return,
-            _ => {
-                self.move_task(task_id, to);
-                return;
-            }
-        };
-        self.launch_skill(task_id, skill, tab, phase);
+            (from, to) if from == to => {}
+            _ => self.move_task(task_id, to),
+        }
     }
 
     /// A hand move: the card goes to the column whatever its PRs, dependencies or current status say.
@@ -3344,7 +3331,6 @@ impl App {
             KeyCode::Char(']') => self.switch_story(1),
             KeyCode::Enter | KeyCode::Char(' ') if self.detail => self.detail = false,
             KeyCode::Enter | KeyCode::Char(' ') => self.open_detail(),
-            KeyCode::Char('p') => self.start_selected(Status::Planning),
             KeyCode::Char('i') => self.start_selected(Status::Implementing),
             KeyCode::Char('a') => self.open_task_agent(),
             KeyCode::Char('f') if self.detail => self.open_folder_edit(),
@@ -3437,7 +3423,6 @@ impl App {
             Action::DeleteStory => self.ask_delete_story(),
             Action::Help => self.help = true,
             Action::Quit => return true,
-            Action::PlanTask => self.start_selected(Status::Planning),
             Action::ImplementTask => self.start_selected(Status::Implementing),
             Action::FinishTask => self.finish_selected(),
             Action::TaskDetails => self.open_detail(),
@@ -3906,7 +3891,7 @@ mod tests {
             let dir = root.path().join(key);
             ops::add_task(&dir, b, "Done thing", Spike, vec![], vec![])?;
             let id = b.tasks.last().unwrap().id.clone();
-            for s in [Status::Planning, Status::Planned, Status::Implementing, Status::Done] {
+            for s in [Status::Implementing, Status::Done] {
                 rules::transition(b, &id, s)?;
             }
             rules::story_transition(b, StoryStatus::InReview)?;
@@ -3992,12 +3977,12 @@ mod tests {
         let tasks: Vec<(&str, TaskType, &[&str])> =
             titles.iter().map(|t| (t.as_str(), Pr, &[][..])).collect();
         story(&root, "PROJ-1", &tasks);
-        set_status(&root, "PROJ-1", "T3", Status::Planning);
+        set_status(&root, "PROJ-1", "T3", Status::Implementing);
         let app = new(&root);
-        assert_eq!(app.columns().len(), 5);
+        assert_eq!(app.columns().len(), 3);
         let todo: Vec<String> = [1, 2, 4, 5, 6, 7, 8, 9, 10].iter().map(|n| format!("T{n}")).collect();
         assert_eq!(ids(&app, Status::Todo), todo);
-        assert_eq!(ids(&app, Status::Planning), vec!["T3"]);
+        assert_eq!(ids(&app, Status::Implementing), vec!["T3"]);
         assert!(ids(&app, Status::Done).is_empty());
     }
 
@@ -4005,12 +3990,12 @@ mod tests {
     fn a_dropped_column_appears_only_when_a_task_is_dropped() {
         let root = TempDir::new().unwrap();
         story(&root, "PROJ-1", &[("One", Pr, &[]), ("Two", Pr, &[])]);
-        assert_eq!(new(&root).columns().len(), 5);
+        assert_eq!(new(&root).columns().len(), 3);
         set_status(&root, "PROJ-1", "T2", Status::Dropped);
         let app = new(&root);
         let cols = app.columns();
-        assert_eq!(cols.len(), 6);
-        assert_eq!(cols[5].status, Status::Dropped);
+        assert_eq!(cols.len(), 4);
+        assert_eq!(cols[3].status, Status::Dropped);
         assert_eq!(ids(&app, Status::Dropped), vec!["T2"]);
     }
 
@@ -4018,7 +4003,7 @@ mod tests {
     fn selection_moves_within_bounds_and_remembers_the_row_per_column() {
         let root = TempDir::new().unwrap();
         story(&root, "PROJ-1", &[("One", Pr, &[]), ("Two", Pr, &[]), ("Three", Pr, &[])]);
-        set_status(&root, "PROJ-1", "T3", Status::Planning);
+        set_status(&root, "PROJ-1", "T3", Status::Implementing);
         let mut app = new(&root);
         assert_eq!(app.selected_task().unwrap().id, "T1");
         app.move_row(1);
@@ -4034,7 +4019,7 @@ mod tests {
         app.move_col(-5);
         assert_eq!(app.col, 0);
         app.move_col(9);
-        assert_eq!(app.col, 4);
+        assert_eq!(app.col, 2);
         assert!(app.selected_task().is_none());
     }
 
@@ -4042,7 +4027,7 @@ mod tests {
     fn it_starts_on_the_first_column_that_has_tasks() {
         let root = TempDir::new().unwrap();
         story(&root, "PROJ-1", &[("One", Pr, &[])]);
-        set_status(&root, "PROJ-1", "T1", Status::Planning);
+        set_status(&root, "PROJ-1", "T1", Status::Implementing);
         assert_eq!(new(&root).col, 1);
     }
 
@@ -4053,7 +4038,7 @@ mod tests {
         let mut app = new(&root);
         app.move_row(1);
         assert!(!app.needs_reload());
-        set_status(&root, "PROJ-1", "T2", Status::Planning);
+        set_status(&root, "PROJ-1", "T2", Status::Implementing);
         assert!(app.needs_reload());
         app.reload();
         assert!(!app.needs_reload());
@@ -4240,7 +4225,7 @@ mod tests {
     fn the_list_summarises_every_story() {
         let root = TempDir::new().unwrap();
         story(&root, "PROJ-1", &[("One", Pr, &[]), ("Two", Pr, &[])]);
-        set_status(&root, "PROJ-1", "T2", Status::Planning);
+        set_status(&root, "PROJ-1", "T2", Status::Implementing);
         story(&root, "PROJ-2", &[("Three", Pr, &[])]);
         let app = App::new(root.path().to_path_buf(), None);
         assert_eq!(app.screen, Screen::List);
@@ -4328,7 +4313,7 @@ mod tests {
         story(&root, "PROJ-2", &[("Two", Pr, &[])]);
         let mut app = App::new(root.path().to_path_buf(), None);
         app.on_key(KeyCode::Char('j'), false);
-        set_status(&root, "PROJ-2", "T1", Status::Planning);
+        set_status(&root, "PROJ-2", "T1", Status::Implementing);
         app.reload();
         assert_eq!(app.visible_stories()[app.list_sel].key, "PROJ-2");
         assert_eq!(app.stories[1].counts[1], 1);
@@ -4831,9 +4816,9 @@ mod tests {
             app.on_key(KeyCode::Char(','), false);
         }
         assert_eq!(app.col_weights[..2], [20, 180], "no column goes below the minimum");
-        app.col = 4;
+        app.col = 2;
         app.on_key(KeyCode::Char('.'), false);
-        assert_eq!(app.col_weights[3..5], [80, 120], "the last column takes from the one before it");
+        assert_eq!(app.col_weights[1..3], [160, 120], "the last column takes from the one before it");
         app.on_key(KeyCode::Char('='), false);
         assert_eq!(app.col_weights, [100; 6]);
     }

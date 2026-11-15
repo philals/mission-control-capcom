@@ -38,10 +38,12 @@ fn full_task_lifecycle() {
     assert_eq!(t2["id"], "T2");
     assert_eq!(ok(&root, &["ready", "PROJ-1"])["ready"], serde_json::json!(["T1"]));
 
-    ok(&root, &["status", "PROJ-1", "T1", "planning"]);
-    ok(&root, &["set-agent", "PROJ-1", "T1", "--pane", "w1:p1", "--skill", "story-plan"]);
-    let planned = ok(&root, &["status", "PROJ-1", "T1", "planned"]);
-    assert!(planned.get("agent").is_none());
+    ok(&root, &["status", "PROJ-1", "T1", "implementing"]);
+    ok(&root, &["set-agent", "PROJ-1", "T1", "--pane", "w1:p1", "--skill", "story-implement-task"]);
+    let reset = ok(&root, &["status", "PROJ-1", "T1", "todo"]);
+    assert!(reset.get("agent").is_none());
+    assert_eq!(ok(&root, &["status", "PROJ-1", "T1", "implementing"])["status"], "implementing");
+    ok(&root, &["status", "PROJ-1", "T1", "planned"]);
     ok(&root, &["status", "PROJ-1", "T1", "implementing"]);
     ok(&root, &["add-pr", "PROJ-1", "T1", "--repo", "api", "--url", "https://github.com/o/api/pull/1"]);
     ok(&root, &["set-pr", "PROJ-1", "T1", "--url", "https://github.com/o/api/pull/1", "--state", "ready"]);
@@ -105,8 +107,6 @@ fn story_with_tasks(root: &TempDir, n: usize) {
 fn block_and_unblock() {
     let root = TempDir::new().unwrap();
     story_with_tasks(&root, 1);
-    ok(&root, &["status", "PROJ-1", "T1", "planning"]);
-    ok(&root, &["status", "PROJ-1", "T1", "planned"]);
     let blocked = ok(&root, &["block", "PROJ-1", "T1", "--reason", "waiting on API"]);
     assert_eq!(blocked["blocked"]["reason"], "waiting on API");
     assert!(fails(&root, &["block", "PROJ-1", "T1", "--reason", "  "]).contains("reason"));
@@ -289,7 +289,7 @@ fn story_review_flow() {
     ok(&root, &["add-task", "PROJ-1", "--title", "Look into it", "--type", "spike"]);
     ok(&root, &["story-status", "PROJ-1", "done"]);
     ok(&root, &["story-status", "PROJ-1", "in_progress"]);
-    for s in ["planning", "planned", "implementing", "done"] {
+    for s in ["implementing", "done"] {
         ok(&root, &["status", "PROJ-1", "T1", s]);
     }
     let story = ok(&root, &["story-status", "PROJ-1", "in_review"]);

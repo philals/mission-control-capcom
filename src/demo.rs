@@ -29,13 +29,7 @@ fn story(root: &Path, key: &str, title: &str, build: impl FnOnce(&Path, &mut cra
     store::update(root, key, |b| build(&dir, b)).expect("demo board");
 }
 
-fn plan(b: &mut crate::model::Board, id: &str) -> anyhow::Result<()> {
-    rules::transition(b, id, Status::Planning)?;
-    rules::transition(b, id, Status::Planned)
-}
-
 fn implement(b: &mut crate::model::Board, id: &str) -> anyhow::Result<()> {
-    plan(b, id)?;
     rules::transition(b, id, Status::Implementing)
 }
 
@@ -58,8 +52,6 @@ pub fn build_stories(root: &Path) {
         finish(b, "T1", "api", 201)?;
         implement(b, "T2")?;
         ops::add_pr(b, "T2", "web", "https://github.com/acme/web/pull/212", PrState::Draft)?;
-        plan(b, "T3")?;
-        rules::transition(b, "T4", Status::Planning)?;
         Ok(())
     });
     story(root, "DEMO-102", "Audit log export", |dir, b| {

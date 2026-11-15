@@ -27,7 +27,7 @@ mod tests {
         assert_eq!(app.keys, vec!["DEMO-101", "DEMO-102", "DEMO-103", "DEMO-104", "DEMO-105"]);
         let board: Board = store::load(&root, "DEMO-101").unwrap();
         let statuses: Vec<Status> = board.tasks.iter().map(|t| t.status).collect();
-        for want in [Status::Todo, Status::Planning, Status::Planned, Status::Implementing, Status::Done] {
+        for want in [Status::Todo, Status::Implementing, Status::Done] {
             assert!(statuses.contains(&want), "{want:?} missing in {statuses:?}");
         }
         assert_eq!(app.pr_rows().len(), 4);

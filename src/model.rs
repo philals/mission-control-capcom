@@ -5,19 +5,16 @@ pub const SCHEMA_VERSION: u32 = 1;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
+    #[serde(alias = "planning", alias = "planned")]
     Todo,
-    Planning,
-    Planned,
     Implementing,
     Done,
     Dropped,
 }
 
 impl Status {
-    const ALL: [Status; 6] = [
+    const ALL: [Status; 4] = [
         Status::Todo,
-        Status::Planning,
-        Status::Planned,
         Status::Implementing,
         Status::Done,
         Status::Dropped,
@@ -26,8 +23,6 @@ impl Status {
     pub fn as_str(self) -> &'static str {
         match self {
             Status::Todo => "todo",
-            Status::Planning => "planning",
-            Status::Planned => "planned",
             Status::Implementing => "implementing",
             Status::Done => "done",
             Status::Dropped => "dropped",
@@ -35,6 +30,9 @@ impl Status {
     }
 
     pub fn parse(s: &str) -> Option<Status> {
+        if matches!(s, "planning" | "planned") {
+            return Some(Status::Todo);
+        }
         Status::ALL.into_iter().find(|x| x.as_str() == s)
     }
 

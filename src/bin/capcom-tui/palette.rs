@@ -29,7 +29,6 @@ pub enum Action {
     SyncStory,
     Help,
     Quit,
-    PlanTask,
     ImplementTask,
     FinishTask,
     TaskDetails,
@@ -185,7 +184,6 @@ pub fn task_entries(id: &str) -> Vec<Entry> {
     vec![
         entry(format!("Details of {id}"), "Enter", Action::TaskDetails),
         entry(format!("Go to the agent for {id}"), "a", Action::TaskAgent),
-        entry(format!("Plan {id}"), "p", Action::PlanTask),
         entry(format!("Implement {id}"), "i", Action::ImplementTask),
         entry(format!("Finish {id} (checks its PRs)"), "x", Action::FinishTask),
     ]

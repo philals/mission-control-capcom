@@ -423,15 +423,6 @@ mod tests {
     }
 
     #[test]
-    fn planned_tasks_with_prs_refresh_state_but_do_not_transition() {
-        let mut b = board(vec![task("T1", Status::Planned, U1, PrState::Draft)]);
-        refresh(&mut b, &fake(&[(U1, Ok(PrState::Ready))]));
-
-        assert_eq!(b.tasks[0].prs[0].state, PrState::Ready);
-        assert_eq!(b.tasks[0].status, Status::Planned);
-    }
-
-    #[test]
     fn todo_tasks_with_prs_refresh_state_but_do_not_transition() {
         let mut b = board(vec![task("T1", Status::Todo, U1, PrState::Draft)]);
         refresh(&mut b, &fake(&[(U1, Ok(PrState::Ready))]));

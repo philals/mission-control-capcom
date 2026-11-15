@@ -203,7 +203,6 @@ main {
   border-left: 4px solid var(--steel);
 }
 a.card:hover { background: var(--select); text-decoration: none; }
-.card.s-planning, .card.s-planned { border-left-color: var(--yellow); }
 .card.s-implementing { border-left-color: var(--orange); }
 .card.s-done { border-left-color: var(--green); }
 .card.s-dropped { border-left-color: #444; opacity: .7; }
