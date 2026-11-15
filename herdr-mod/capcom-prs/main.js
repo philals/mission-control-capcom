@@ -381,17 +381,17 @@ export default class CapcomPrs extends View {
           .when(open.length > 0, (el) => el.child(this.section("Open", open.length, t)).children(open.map((p) => this.row(p, t, false))))
           .when(watching.length > 0, (el) => el.child(this.section("Watching", watching.length, t)).children(watching.map((p) => this.row(p, t, false))))
           .when(runs.length > 0, (el) => el.child(this.section("Runs", runs.length, t)).children(runs.map((r) => this.runRow(r, t))))
-      )
-      .when(merged.length > 0, (el) =>
-        el.child(
-          v_flex()
-            .flex_none()
-            .max_h(260)
-            .border_t(2)
-            .border_color(t.ansi5)
-            .child(this.section("Merged", merged.length, t, t.ansi5))
-            .child(v_flex().id("merged-list").flex_1().min_h(0).overflow_y_scrollbar().pb(6).children(merged.map((p) => this.row(p, t, true)))),
-        ),
+          .when(merged.length > 0, (el) =>
+            el.child(
+              v_flex()
+                .mt(18)
+                .pb(6)
+                .border_t(2)
+                .border_color(t.ansi5)
+                .child(this.section("Merged", merged.length, t, t.ansi5))
+                .children(merged.map((p) => this.row(p, t, true))),
+            ),
+          ),
       );
   }
 }
