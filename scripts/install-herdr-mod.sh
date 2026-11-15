@@ -28,7 +28,7 @@ install -m 755 scripts/capcom-daily "$HOME/.local/bin/capcom-daily"
 # Claude Code's UserPromptSubmit hook that saves a session's first prompt as its note's task (see the agent-note skill).
 install -m 755 scripts/capcom-note-hook "$HOME/.local/bin/capcom-note-hook"
 
-# capcom-tabs is Herdr's own `tabs` mod plus Capcom and My Watch buttons (herdr-mod/capcom-tabs.patch); only the patch is kept here.
+# capcom-tabs is Herdr's own `tabs` mod plus CapCom and My Watch buttons (herdr-mod/capcom-tabs.patch); only the patch is kept here.
 tabs="$home/mods/capcom-tabs"
 rm -rf "$tabs"
 cp -r "$home/mods/tabs" "$tabs"

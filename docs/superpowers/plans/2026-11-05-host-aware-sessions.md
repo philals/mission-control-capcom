@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** capcom starts new Claude sessions in whichever app you are using (Claude Desktop, Herdr or Orca), and clicking an agent takes you to the app it runs in.
+**Goal:** CapCom starts new Claude sessions in whichever app you are using (Claude Desktop, Herdr or Orca), and clicking an agent takes you to the app it runs in.
 
-**Architecture:** Two new library modules both front ends share: `host` (which app am I in, from the environment or a web request) and `orca` (every call to Orca's CLI, behind an injectable runner like `herdr::Cli::with_runner`), plus `starting` (short-lived "starting" marks against duplicate starts). capcom-tui keeps its `trait Herdr` seam and gains `Orca` and `Desktop` implementations behind a `Router` that launches in the home app and focuses by the agent's own app. capcom web learns the viewer's app per request and gets two server-side actions for Orca.
+**Architecture:** Two new library modules both front ends share: `host` (which app am I in, from the environment or a web request) and `orca` (every call to Orca's CLI, behind an injectable runner like `herdr::Cli::with_runner`), plus `starting` (short-lived "starting" marks against duplicate starts). capcom-tui keeps its `trait Herdr` seam and gains `Orca` and `Desktop` implementations behind a `Router` that launches in the home app and focuses by the agent's own app. CapCom web learns the viewer's app per request and gets two server-side actions for Orca.
 
 **Tech Stack:** Rust (existing crate, `serde_json`, `std::process::Command`), plain JS in `src/web/js`, the Claude Code mod in `mod/hooks` (TypeScript).
 
@@ -17,7 +17,7 @@
 - Orca agents always launch with `--surface terminal`.
 - Every Orca call goes through `src/orca.rs`; tests use a fake runner, never the real CLI.
 - Today's Herdr and Claude Desktop behaviour must not change.
-- Only scoped test runs locally (`cargo test --lib <module>`, `cargo test --bin capcom-tui <module>::`), never the full suite. capcom commits straight to `main`.
+- Only scoped test runs locally (`cargo test --lib <module>`, `cargo test --bin capcom-tui <module>::`), never the full suite. CapCom commits straight to `main`.
 - Minimal comments.
 
 ## Review Focus
@@ -185,9 +185,9 @@ Behaviour (spec "Automatic prompts"): Herdr/Orca agent running → prompt in pla
 - [ ] **Step 4:** `cargo test --bin capcom-tui hosts::` → PASS.
 - [ ] **Step 5:** Commit `capcom-tui: automatic prompts go to the app the agent runs in`.
 
-capcom web's autopilot only notifies today (`src/web/autopilot.rs:note_fix_need`) and starts no agents, so it is unchanged.
+CapCom web's autopilot only notifies today (`src/web/autopilot.rs:note_fix_need`) and starts no agents, so it is unchanged.
 
-### Task 7: capcom web knows the viewer's app; Orca actions
+### Task 7: CapCom web knows the viewer's app; Orca actions
 
 **Files:**
 - Modify: `src/web.rs` (`/api/state` and `/api/do` read the host), `src/web/actions.rs` (actions `session.start`, `agent.open`), `src/web/view.rs` (agents list includes Orca agents; `source: "orca"`), `src/web/js/core.js` (send host), `src/web/js/panels.js` + `extras.js` (`startSession` and agent clicks call the server when host is orca), `mod/hooks/register.tsx` (send `x-capcom-host: desktop` on every request), `~/.config/systemd/user/capcom-web.service` per Task 1 Step 6, `docs/web.md` service section
@@ -217,6 +217,6 @@ capcom web's autopilot only notifies today (`src/web/autopilot.rs:note_fix_need`
 **Files:**
 - Modify: `README.md`, `docs/tui.md`, `docs/web.md`, `docs/reference.md`
 
-- [ ] **Step 1:** Replace "inside Herdr" wording with the three-app rule, add a short Orca section (where capcom finds the CLI, `orca repo add` for unknown folders, terminals not chats, `?host=orca` for the web page), and note Claude Desktop's terminal panel per Task 1 Step 3.
+- [ ] **Step 1:** Replace "inside Herdr" wording with the three-app rule, add a short Orca section (where CapCom finds the CLI, `orca repo add` for unknown folders, terminals not chats, `?host=orca` for the web page), and note Claude Desktop's terminal panel per Task 1 Step 3.
 - [ ] **Step 2:** `cargo build --locked` → succeeds; `cargo install --path . --root ~/.local --locked`; `systemctl --user restart capcom-web`.
 - [ ] **Step 3:** Commit `capcom docs: Claude Desktop, Herdr and Orca` and push to `main`.

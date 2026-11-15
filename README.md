@@ -32,21 +32,21 @@
 
 **Let it do the boring part**
 - `auto-review` asks Copilot to review a PR; `auto-fix` hands failing CI and review comments back to the agent that made the PR, up to 5 rounds.
-- Mark a PR ready, toggle your merge bot's automerge label, or finish a task, each only when you click and confirm. capcom never merges anything.
+- Mark a PR ready, toggle your merge bot's automerge label, or finish a task, each only when you click and confirm. CapCom never merges anything.
 
 **Get back to the agent**
 - Every PR has a `🤖` button that focuses the session that made it, or resumes it if its tab was closed.
 
 ## Integrations
 
-| Integration | What capcom does with it |
+| Integration | What CapCom does with it |
 |---|---|
 | **[Claude Code](https://claude.com/claude-code)** | Six skills; a console mod beside every session (`/capcom`); reads sessions to link PRs to the agent that made them |
 | **Jira** (Atlassian MCP server) | The skills read the story, and create sub-tasks only if you ask |
 | **GitHub** (`gh`) | PRs, CI checks, Copilot reviews, review threads, Actions runs, draft/ready, labels, branch updates |
 | **Merge bot** (Kodiak style) | Reads its config for automerge and autoupdate labels; adds or removes them when you tick it |
 | **[Herdr](https://herdr.dev)** terminal | A plugin that opens the board as an overlay and starts agents in panes |
-| **Herdr desktop app** | The Capcom panel (Kanban, Jira), the My Watch panel (PRs, daily scripts) and the SG-1 agents sidebar, and agents started in its panes |
+| **Herdr desktop app** | The CapCom panel (Kanban, Jira), the My Watch panel (PRs, daily scripts) and the SG-1 agents sidebar, and agents started in its panes |
 | **Orca** | Starts and reaches agents in Orca terminals, and works from Orca's browser |
 | **Claude Desktop** | Starts sessions with a skill typed in, and reaches them again |
 | **Desktop notifications** | none: Herdr handles alerts |
@@ -69,14 +69,14 @@ The command palette (`Ctrl+P`) lists every action that fits where you are, each 
 ### In a browser: `capcom web`
 
 <p align="center">
-  <img src="docs/img/web.png" alt="capcom web: agents down the left, stories beside them, and a strip of pull requests and runs along the bottom, with plan usage gauges in the top rail" width="100%">
+  <img src="docs/img/web.png" alt="CapCom web: agents down the left, stories beside them, and a strip of pull requests and runs along the bottom, with plan usage gauges in the top rail" width="100%">
 </p>
 
 <p align="center">
-  <img src="docs/img/web-story.png" alt="capcom web showing one story as a board of tasks in TO DO, PLANNING, PLANNED, IMPLEMENTING and DONE columns" width="100%">
+  <img src="docs/img/web-story.png" alt="CapCom web showing one story as a board of tasks in TO DO, PLANNING, PLANNED, IMPLEMENTING and DONE columns" width="100%">
 </p>
 
-### In the Herdr desktop app: My Watch, the Capcom panel and SG-1 agents
+### In the Herdr desktop app: My Watch, the CapCom panel and SG-1 agents
 
 <p align="center">
   <img src="docs/img/herdr-sidebar.png" alt="The Herdr app's sidebar: agents grouped into Needs you, Working and Idle, each with a character portrait in a ring of chevrons showing its PR's progress, above the My Watch list with a progress strip per PR" width="380">
@@ -103,7 +103,7 @@ If that sounds like you, great. If not, treat this as a worked example: fork it,
 | **`capcom`** (command) | The only writer of each story's `board.json`: tasks, statuses, dependencies, PRs. Refuses illegal moves. Everything it prints is JSON. |
 | **Five Claude Code skills** | `/story-plan`, `/story-implement-task`, `/story-review`, `/pr-address` (works on any PR) and `/agent-note` (an agent's TLDR of what it is doing and waiting for, shown in the agents panel). They talk to you, Jira and `git`/`gh`, and change the board only through `capcom`. |
 | **`capcom-tui`** | A live terminal board (keyboard and mouse): your stories, your open PRs with their CI stages, and the GitHub Actions runs you started by hand. It can start the skills for you and finish tasks when their PRs merge. |
-| **Herdr app mods** (optional) | `capcom-prs` (My Watch) and `capcom-daily` in the My Watch panel, `capcom-board` (Kanban) and `capcom-jira` in the Capcom panel, and `capcom-agents` (SG-1 agents) in the sidebar, for the Herdr desktop app; install with `scripts/install-herdr-mod.sh`. |
+| **Herdr app mods** (optional) | `capcom-prs` (My Watch) and `capcom-daily` in the My Watch panel, `capcom-board` (Kanban) and `capcom-jira` in the CapCom panel, and `capcom-agents` (SG-1 agents) in the sidebar, for the Herdr desktop app; install with `scripts/install-herdr-mod.sh`. |
 | **Herdr plugin** (optional) | Opens `capcom-tui` from a keyboard shortcut in [Herdr](https://herdr.dev), and lets the board launch agents in Herdr panes. |
 
 ## How it works
@@ -116,7 +116,7 @@ If that sounds like you, great. If not, treat this as a worked example: fork it,
 - **Local files are the source of truth.** Each story is a folder with a `board.json`, a `story.md` and one markdown file per task. Jira is only read, unless you ask for subtasks, which are created once.
 - **Task statuses:** `planned → implementing → done`, plus `dropped`, and a `blocked` flag. `/story-plan` creates every task as `planned` (`todo` and `planning` remain valid statuses for older boards). `done` means every expected PR is merged.
 - **Story statuses:** `in_progress → in_review → done`, moved by `/story-review` once every task is finished.
-- **PRs are always drafts, and never stacked.** You mark them ready and merge them yourself; capcom never merges anything (it can add or remove your merge bot's automerge label, but only when you tick it and confirm).
+- **PRs are always drafts, and never stacked.** You mark them ready and merge them yourself; CapCom never merges anything (it can add or remove your merge bot's automerge label, but only when you tick it and confirm).
 - **A task can need several PRs.** List a repo once per expected PR (`--repos api,api,ui` means two PRs in `api` and one in `ui`); the task cannot finish until all of them exist and are merged.
 
 Design notes: [docs/design.md](docs/design.md). Command reference: [docs/reference.md](docs/reference.md).
@@ -162,10 +162,10 @@ A typical run, in order: plan the story and approve the plan and task table; imp
 
 - **Stories and boards:** a kanban of your stories (TO DO, DOING, IN REVIEW) and a kanban per story with a card for each task (ready to implement, waits on dependencies, blocked, PRs merged). Drag a finished story from DOING to IN REVIEW and it opens a Herdr tab running `/story-review`.
 - **Your PRs, with CI:** every open PR from a GitHub search you control, `[DRAFT]` or `[READY]`, with the CI stages that are running, queued or failed listed one per line. A PR that is all green and only waiting for a reviewer is lit up with a green `GO · ◉ AWAITING REVIEW` block, a green bar and a tinted row, and counted in the panel title. Click to open, copy the link, or mark a draft ready (it asks first). Paste someone else's PR link to follow it the same way (auto-fix starts off for it).
-- **Back to the agent:** a PR made through a task has a `🤖` button that focuses the Claude Code session that made it in the app it runs in (Herdr, Orca or Claude Desktop), or resumes it (`claude --resume`) if the tab was closed. PRs you made outside the workflow work too: Claude Code records which session made each PR, and capcom reads that.
+- **Back to the agent:** a PR made through a task has a `🤖` button that focuses the Claude Code session that made it in the app it runs in (Herdr, Orca or Claude Desktop), or resumes it (`claude --resume`) if the tab was closed. PRs you made outside the workflow work too: Claude Code records which session made each PR, and CapCom reads that.
 - **Copilot and fixing:** each PR shows Copilot's state (`reviewing`, `✎ 3 to fix`, `✔ reviewed`) and notifies you when its review lands. Two ticks on each of your PRs, `auto-review` and `auto-fix` (both on for new PRs unless you untick the defaults), do the loop for you: Copilot is asked to review the PR, and whenever CI fails or Copilot leaves comments the agent that made the PR is asked to merge the default branch in, fix the failures and address then resolve the comments (the `/pr-address` skill), up to 5 rounds and only when something has changed. A PR labelled `icebox` is never fixed or updated automatically. Boxes on the panel set the defaults.
 - **Runs and watch:** the "Run workflow" runs you started, such as a nonprod deploy, plus any GitHub Actions run you paste a link to, and your PRs merged in the last 12 hours (in purple). Each shows its stages and a link, finished runs leave after 30 minutes, and you get a bell, a status line when one finishes.
-- **Finishing tasks:** drag an IMPLEMENTING card to DONE (or press `x`) and capcom checks its PRs on GitHub, and only finishes the task if every one is merged.
+- **Finishing tasks:** drag an IMPLEMENTING card to DONE (or press `x`) and CapCom checks its PRs on GitHub, and only finishes the task if every one is merged.
 - **Resizable and remembered:** drag any divider; sizes are saved.
 - **Accessible by design:** a fixed theme with at least 4.5:1 text contrast on every screen (a test checks it), state shown with words and icons as well as colour, and focus shown by a double border.
 
@@ -203,7 +203,7 @@ If you use [Herdr](https://herdr.dev), `capcom-tui` run inside a Herdr pane can 
 ## Privacy and security
 
 - **No project data in this repo.** Your stories live in the folder you choose. The examples and tests use invented names (`acme/widgets`, `PROJ-123`, `DEMO-101`).
-- **One credential, in memory only.** capcom asks your `gh` for its token (`gh auth token`) once when it starts, keeps it in memory, and sends it only to `api.github.com` over HTTPS. It never writes it to disk or logs it. Calling the API directly instead of starting `gh` for every request is what keeps the board light on CPU (about 2 ms a call instead of about 150 ms). If you would rather capcom never held the token, set `CAPCOM_NO_NATIVE_HTTP=1`: every GitHub call then goes through the `gh` command, as before. Marking a PR ready and asking Copilot for a review always use `gh`.
+- **One credential, in memory only.** CapCom asks your `gh` for its token (`gh auth token`) once when it starts, keeps it in memory, and sends it only to `api.github.com` over HTTPS. It never writes it to disk or logs it. Calling the API directly instead of starting `gh` for every request is what keeps the board light on CPU (about 2 ms a call instead of about 150 ms). If you would rather CapCom never held the token, set `CAPCOM_NO_NATIVE_HTTP=1`: every GitHub call then goes through the `gh` command, as before. Marking a PR ready and asking Copilot for a review always use `gh`.
 - **What it changes on GitHub** is only what you click or tick: a PR's draft or ready state, a Copilot review request, its automerge label, and with auto-fix ticked, bringing a branch up to date or asking an agent to fix it.
 - **No telemetry.** The only calls are to GitHub and, when you ask the skills to, your Atlassian MCP server to Jira.
 - **What is written to disk:** the boards (only by `capcom`, under a lock), your panel sizes, and a small cache of GitHub results that is readable only by you and tidied after a day.

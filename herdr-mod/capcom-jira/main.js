@@ -65,7 +65,7 @@ export default class CapcomJira extends View {
     return Boolean(node && !node.hidden);
   }
 
-  // The Capcom panel also holds the Kanban and My Watch, so Jira pauses its fetching when idle instead of hiding the panel.
+  // The CapCom panel also holds the Kanban and My Watch, so Jira pauses its fetching when idle instead of hiding the panel.
   live() {
     return this.shown() && Date.now() - this.lastClick <= IDLE_MS;
   }
@@ -366,7 +366,7 @@ export default class CapcomJira extends View {
           .child(
             h_flex().gap(6).items_center().text_size(11).text_color(t.muted)
               .child(div().child(i.type))
-              .when(Boolean(story), (el) => el.child(div().px(5).rounded(4).border(1).border_color(t.border).text_color(BOARD).child(tasks.length ? `Capcom ${done}/${tasks.length}` : "Capcom")))
+              .when(Boolean(story), (el) => el.child(div().px(5).rounded(4).border(1).border_color(t.border).text_color(BOARD).child(tasks.length ? `CapCom ${done}/${tasks.length}` : "CapCom")))
               .child(div().flex_1())
               .child(this.chip(`id-${i.key}`, "ID", "Copy the ticket ID", (cx) => this.copy(cx, i.key, i.key), t))
               .child(this.chip(`url-${i.key}`, "URL", "Copy the ticket URL", (cx) => this.copy(cx, "the URL", i.url), t))

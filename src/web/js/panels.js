@@ -25,7 +25,7 @@ function shell(panel, plateParts, tools) {
   return body;
 }
 
-const STATIONS = ["Booster", "Retro", "Fido", "Guidance", "Surgeon", "Control", "Telemetry", "Capcom"];
+const STATIONS = ["Booster", "Retro", "Fido", "Guidance", "Surgeon", "Control", "Telemetry", "CapCom"];
 
 // The 1960s go/no-go poll, while the first list comes back from GitHub.
 function pollNode(what) {

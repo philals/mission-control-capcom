@@ -1,7 +1,7 @@
 # capcom-prs: My Watch, a panel of its own in the Herdr app
 
 A Herdr app mod (`~/.config/herdr-app/mods/capcom-prs`) that lists your open and recently merged PRs in the **My Watch** panel on the right (the **My Watch** button in the tab bar),
-in every tab. Under the PRs sits the Daily section (see below). The **Capcom** button opens a separate panel with the
+in every tab. Under the PRs sits the Daily section (see below). The **CapCom** button opens a separate panel with the
 Kanban board and your Jira tickets, so the left sidebar keeps its room for spaces and agents. It runs `capcom prs` every 30 seconds, so it needs `capcom` on your PATH and no web
 service.
 
@@ -15,7 +15,7 @@ service.
 - Changes go through `capcom pr-do`. Auto-fix and auto-review are only settings: `capcom web` (or `capcom-tui`)
   has to be running to act on them, and the `⚙` strip says so when `capcom web` is not.
 
-Install: `scripts/install.sh` then `scripts/install-herdr-mod.sh`. This repo is the source of truth for every capcom
+Install: `scripts/install.sh` then `scripts/install-herdr-mod.sh`. This repo is the source of truth for every CapCom
 mod (`capcom-prs`, `capcom-agents`, `capcom-board`, `capcom-jira`, `capcom-plan`, `capcom-daily`, `capcom-usage`; `capcom-tabs` and `capcom-pane` are Herdr's `tabs` and `pane` mods plus `capcom-tabs.patch` and `capcom-pane.patch`, built at install) and for the `capcom` layout
 (`herdr-mod/layouts/capcom.json`); the script copies them into the app and switches to the layout. Edit them here, not
 in `~/.config/herdr-app`, or the next install overwrites the change.
@@ -67,17 +67,17 @@ number), kept for as long as the agent exists. Its portrait sits on the characte
 
 ## capcom-jira: your Jira tickets
 
-The tickets assigned to you, grouped by Jira status, under the Kanban in the Capcom panel. Tickets whose status category is Done are not fetched. Click a card to expand it.
+The tickets assigned to you, grouped by Jira status, under the Kanban in the CapCom panel. Tickets whose status category is Done are not fetched. Click a card to expand it.
 
 - Each card has ID and URL copy buttons, `↗` to open in Jira, and a `▶` button for the next skill: `Plan`
   (`/story-plan KEY`) for a ticket with no board, `Do T3` / `Resume T3` for the next ready task, `Review` once every
-  task is done. The tag `Capcom 2/4` shows a ticket that already has a board, and, on a row of its own, one icon for every PR of the ticket, open, merged or closed (coloured by CI, purple once merged, grey when closed). Hover one for the same card as an agent's PR icon; click it to open the PR. The PRs come from the board's tasks, from My Watch (a PR whose title or branch names the ticket), and from a GitHub search that `capcom-jira-me` runs for each ticket key (the title must name the exact key), so merged PRs and tickets with no board are covered.
+  task is done. The tag `CapCom 2/4` shows a ticket that already has a board, and, on a row of its own, one icon for every PR of the ticket, open, merged or closed (coloured by CI, purple once merged, grey when closed). Hover one for the same card as an agent's PR icon; click it to open the PR. The PRs come from the board's tasks, from My Watch (a PR whose title or branch names the ticket), and from a GitHub search that `capcom-jira-me` runs for each ticket key (the title must name the exact key), so merged PRs and tickets with no board are covered.
 - The expanded card adds progress by task status, copy actions (ID, URL, `KEY: title`), open in Jira, and every
   skill that fits: plan or re-plan, implement a task, review, or implement directly (a small bug or change with no board).
 - Data comes from `scripts/capcom-jira-me`, installed to `~/.local/bin`. It runs `claude -p` (Haiku) with the Atlassian
   connector and writes `~/.cache/capcom/jira-me.json` (override with `CAPCOM_JIRA_FILE`; set `CAPCOM_JIRA_MODEL` for
   another model). One run takes about 15 seconds and costs under a cent.
-- It fetches when the Capcom panel opens if the file is over 5 minutes old, then every 5 minutes while the panel is open, and
+- It fetches when the CapCom panel opens if the file is over 5 minutes old, then every 5 minutes while the panel is open, and
   on `↻`. Nothing is fetched while the panel is hidden, or after 3 minutes without a click on Jira (the next click fetches again if the file is stale). A second fetch never starts while one is running.
 
 ## Session identity: which agent am I typing into?

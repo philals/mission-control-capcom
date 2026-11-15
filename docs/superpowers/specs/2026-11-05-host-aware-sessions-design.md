@@ -2,10 +2,10 @@
 
 ## Why
 
-You switch between three apps during the day: Claude Desktop, Herdr and Orca. capcom only knows how to
+You switch between three apps during the day: Claude Desktop, Herdr and Orca. CapCom only knows how to
 start and find sessions in two of them, and only in some of its views:
 
-| Host | capcom-tui today | capcom web (page and `/capcom` pane) today |
+| Host | capcom-tui today | CapCom web (page and `/capcom` pane) today |
 |---|---|---|
 | Claude Desktop | nothing (no launching, no agents panel) | new sessions through `claude://code/new?prompt=…&folder=…`; a running desktop session opens through `claude://code/continue?session=local_…` |
 | Herdr | launch, resume, prompt, focus and close agents, only when `HERDR_ENV=1` (`src/bin/capcom-tui/herdr.rs`) | nothing |
@@ -22,7 +22,7 @@ there. The rule you gave: **whatever app you do the moving in is where the sessi
 2. **Clicking an agent takes you to it, wherever it runs.** An agent running in Herdr is focused in
    Herdr, one in Orca is switched to in Orca, one in Claude Desktop is opened in Claude Desktop, even
    when you clicked from a different app. *(This is Claude's proposal; you have not objected to it.)*
-3. **Orca is a full host**, used both through capcom-tui in an Orca terminal and through the capcom web
+3. **Orca is a full host**, used both through capcom-tui in an Orca terminal and through the CapCom web
    page in Orca's built-in browser.
 4. **capcom-tui works in Claude Desktop's terminal panel** the way the web page does: new sessions go
    through `claude://` links.
@@ -36,13 +36,13 @@ there. The rule you gave: **whatever app you do the moving in is where the sessi
 
 ## Anti-goals (would count as failure even if it works)
 
-- A session silently opening in an app you are not looking at. If capcom cannot reach the app you are
+- A session silently opening in an app you are not looking at. If CapCom cannot reach the app you are
   in, it says so and starts nothing; it never falls back to another app on its own.
 - Starting a second agent for a task whose agent is already running anywhere. Today's Herdr rule (focus
   or prompt the running one, never start twice) applies across all three apps.
 - Breaking today's Herdr or Claude Desktop behaviour.
 
-## How capcom tells which app you are in
+## How CapCom tells which app you are in
 
 **capcom-tui** decides once, at start-up, from its environment. First match wins:
 
@@ -56,7 +56,7 @@ there. The rule you gave: **whatever app you do the moving in is where the sessi
 Herdr is checked before Orca because Herdr can run inside an Orca terminal; whichever wraps the TUI most
 closely wins.
 
-**capcom web** is one long-running service (`capcom-web.service`), so it cannot use its own environment.
+**CapCom web** is one long-running service (`capcom-web.service`), so it cannot use its own environment.
 It decides per request:
 
 | Request comes from | Host | How it is known |
@@ -81,8 +81,8 @@ Orca details decided so far:
 - **Always `--surface terminal`.** Orca can open Claude as a chat, but no CLI command brings a chat to
   the front, so a chat agent could never be clicked to.
 - **Workspace = the task's folder.** Herdr gets a workspace per story; Orca's workspaces are repo
-  checkouts, so capcom uses the task's `folder` field (`capcom set-folder`) as `path:<folder>`. If Orca
-  does not know that folder, capcom says so (and how to add it: `orca repo add --path …`) rather than
+  checkouts, so CapCom uses the task's `folder` field (`capcom set-folder`) as `path:<folder>`. If Orca
+  does not know that folder, CapCom says so (and how to add it: `orca repo add --path …`) rather than
   adding repos itself. *(Claude's call.)*
 - **Finding the CLI:** `ORCA_CLI_BIN_DIR` when set, else `~/.config/orca/linux-orca-cli-shim/orca`, else
   `orca-ide` on PATH. Never bare `orca`: on Linux that is the GNOME screen reader.
@@ -95,7 +95,7 @@ Orca details decided so far:
   (`~/.config/orca/*.sock`) differently. Builder's choice; the service file lives in
   `~/.config/systemd/user/capcom-web.service` and is documented in `docs/web.md`.
 - Running full test suites locally is off limits; scoped tests (one file or module) are fine.
-- capcom commits straight to `main`, no PR.
+- CapCom commits straight to `main`, no PR.
 - Orca's CLI is 1.4.247 today and changes often; every Orca call is behind one module so a CLI change is
   one place to fix, with tests using a fake runner the way `herdr.rs` does (`Cli::with_runner`).
 
@@ -110,7 +110,7 @@ These fire with no click, so there is no "app you are in".
   prompt is unknown (spike item 5); if not, open a new desktop session in the same folder with the
   prompt, through `claude://code/new`.
 - **No agent running:** start one in the app of the front end that fired it: the TUI's own app, or for
-  capcom web the app of the most recent page or pane request, falling back to Claude Desktop. *(Claude's
+  CapCom web the app of the most recent page or pane request, falling back to Claude Desktop. *(Claude's
   call; you did not answer this part.)*
 
 ## Calls Claude made after review (check these)
@@ -137,7 +137,7 @@ These fire with no click, so there is no "app you are in".
 2. What user agent does Orca's built-in browser send?
 3. Does Claude Desktop's Terminal panel set `CLAUDE_CODE_ENTRYPOINT=claude-desktop` (or anything else
    capcom-tui can see)?
-4. Can `herdr agent focus` be called from outside Herdr (from capcom web or an Orca terminal)? If not,
+4. Can `herdr agent focus` be called from outside Herdr (from CapCom web or an Orca terminal)? If not,
    clicking a Herdr agent from elsewhere says "it's in Herdr" instead.
 5. Can `claude://code/continue?session=…` take a prompt, the way `claude://code/new` does?
 
@@ -165,7 +165,7 @@ These fire with no click, so there is no "app you are in".
    Goal 4 stands: detection checks `TERM_PROGRAM` too.
 4. **Herdr from outside.** `herdr agent list` talks to a fixed socket (`~/.config/herdr/herdr.sock`);
    with no Herdr server it answers `server_not_running`. So Herdr is reachable from anywhere while it
-   runs: capcom includes Herdr whenever `herdr agent list` answers, whatever app it is in.
+   runs: CapCom includes Herdr whenever `herdr agent list` answers, whatever app it is in.
 5. **`claude://code/continue`** reads only `session` and `source` (the desktop app's link handler), so
    it cannot carry a prompt. Automatic prompts for a desktop agent use the fallback:
    `claude://code/new?prompt=…&folder=<session folder>`.
