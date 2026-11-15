@@ -33,7 +33,7 @@ export default class CapcomDaily extends View {
     this.running = new Set();
     this.message = null;
     this.now = Date.now();
-    this.collapsed = (() => { try { return localStorage.getItem("collapsed") === "1"; } catch (_e) { return false; } })();
+    this.collapsed = (() => { try { return localStorage.getItem("daily.collapsed") === "1"; } catch (_e) { return false; } })();
     this.bad = null;
     this.size = null;
     cx.timer.every(TICK_MS, (cx) => {
@@ -66,7 +66,7 @@ export default class CapcomDaily extends View {
 
   setCollapsed(on) {
     this.collapsed = on;
-    try { localStorage.setItem("collapsed", on ? "1" : "0"); } catch (_e) {}
+    try { localStorage.setItem("daily.collapsed", on ? "1" : "0"); } catch (_e) {}
     this.resize();
   }
 

@@ -5,12 +5,14 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, theme, layout } from "herdr";
+import { exec, run, theme, layout } from "herdr";
 import { SH } from "./pr-details.js";
 
 const STALE_MS = 10 * 60 * 1000;
 const WATCH_MS = 5 * 1000;
 const ORANGE = "#D97757";
+const CYAN = "#56b6c2";
+const OPEN_PX = 172, SHUT_PX = 34;
 const REQUEST = JSON.stringify({ type: "control_request", request_id: "usage", request: { subtype: "get_usage", skip_behaviors: true } });
 
 const find = (node, id) => {
@@ -44,6 +46,17 @@ function until(ms) {
   if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60);
   return h < 24 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+// How far through the working week it is: Monday to Friday, 06:00 to 17:00 local time (as in the Claude mod's status line).
+function workWeek(now) {
+  const d = new Date(now), day = d.getDay();
+  if (day === 0 || day === 6) return { kind: "work-week", label: "Working week", percent: 100, resetsAt: 0, note: "weekend" };
+  const hours = Math.min(11, Math.max(0, d.getHours() + d.getMinutes() / 60 - 6));
+  const end = new Date(d);
+  end.setDate(d.getDate() + (5 - day));
+  end.setHours(17, 0, 0, 0);
+  return { kind: "work-week", label: "Working week", percent: Math.round((((day - 1) * 11 + hours) / 55) * 100), resetsAt: end.getTime(), note: null };
 }
 
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
@@ -85,8 +98,24 @@ export default class CapcomUsage extends View {
     this.busy = false;
     this.problem = null;
     this.wasShown = false;
+    this.collapsed = (() => { try { return localStorage.getItem("usage.collapsed") === "1"; } catch (_e) { return false; } })();
+    this.size = null;
+    this.resize();
     cx.timer.every(WATCH_MS, (cx) => this.watch(cx));
     this.watch(cx);
+  }
+
+  setCollapsed(on) {
+    this.collapsed = on;
+    try { localStorage.setItem("usage.collapsed", on ? "1" : "0"); } catch (_e) {}
+    this.resize();
+  }
+
+  resize() {
+    const px = this.collapsed ? SHUT_PX : OPEN_PX;
+    if (px === this.size) return;
+    this.size = px;
+    run("layout.resize", { id: "usage", px });
   }
 
   shown() {
@@ -153,40 +182,50 @@ export default class CapcomUsage extends View {
 
   row(t, row) {
     const reset = row.resetsAt && row.resetsAt <= Date.now();
-    const color = reset ? t.dim : this.color(t, row);
+    const week = row.kind === "work-week";
+    const color = week ? CYAN : reset ? t.dim : this.color(t, row);
     const pct = Math.max(0, Math.min(100, row.percent));
     return h_flex().id(`limit-${row.kind}-${row.label}`).h(22).gap(8).flex_none().items_center()
-      .tooltip(reset ? "It has reset since this was checked: press ↻." : `${Math.round(row.percent)}% used`)
+      .tooltip(week ? "How far through the working week it is: Monday to Friday, 06:00 to 17:00" : reset ? "It has reset since this was checked: press ↻." : `${Math.round(row.percent)}% used`)
       .child(div().w(104).flex_none().truncate().text_size(11.5).text_color(t.foreground).child(row.label))
       .child(div().flex_1().min_w(24).h(5).rounded(3).overflow_hidden().bg(t.input).child(div().h_full().w(`${reset ? 0 : pct}%`).rounded(3).bg(color)))
       .child(div().w(32).flex_none().text_right().text_size(11).font_medium().text_color(color).child(reset ? "–" : `${Math.round(row.percent)}%`))
-      .child(div().w(64).flex_none().text_right().text_size(10.5).text_color(t.dim).child(!row.resetsAt ? "" : reset ? "reset" : `in ${until(row.resetsAt - Date.now())}`));
+      .child(div().w(64).flex_none().text_right().text_size(10.5).text_color(t.dim).child(week ? (row.note ?? `in ${until(row.resetsAt - Date.now())}`) : !row.resetsAt ? "" : reset ? "reset" : `in ${until(row.resetsAt - Date.now())}`));
   }
 
   render(_cx) {
     const t = theme();
     const rows = this.usage?.rows ?? [];
+    const week = workWeek(Date.now());
+    const shut = this.collapsed;
+    const session = rows.find((r) => r.kind === "session");
     const a = this.account;
     const plan = a?.plan ?? this.usage?.plan;
     return v_flex().id("usage-root").size_full().min_h(0).border_t(1).border_color(t.border)
       .child(
         h_flex().gap(6).px(10).py(6).items_center().flex_none()
-          .child(svg("icons/claude.svg").size(13).flex_none().text_color(ORANGE))
-          .child(div().text_size(12).font_semibold().text_color(t.foreground).child("Claude usage"))
-          .when(Boolean(plan), (el) => el.child(div().px(5).rounded(4).border_1().border_color(t.border).text_size(9.5).font_semibold().text_color(ORANGE).child(String(plan).toUpperCase())))
-          .child(div().flex_1())
-          .child(div().text_size(10.5).text_color(t.dim).child(this.busy ? "checking…" : this.checkedAt ? ago(this.checkedAt) : ""))
+          .child(
+            h_flex().id("usage-title").gap(6).items_center().flex_1().min_w(0).cursor_pointer()
+              .tooltip(shut ? "Show Claude usage" : "Hide Claude usage")
+              .on_click((_e, cx) => { this.setCollapsed(!shut); cx.notify(); })
+              .child(div().w(10).flex_none().text_size(10).text_color(t.dim).child(shut ? "▸" : "▾"))
+              .child(svg("icons/claude.svg").size(13).flex_none().text_color(ORANGE))
+              .child(div().text_size(12).font_semibold().text_color(t.foreground).child("Claude usage"))
+              .when(Boolean(plan) && !shut, (el) => el.child(div().px(5).rounded(4).border_1().border_color(t.border).text_size(9.5).font_semibold().text_color(ORANGE).child(String(plan).toUpperCase())))
+              .when(shut, (el) => el.child(div().truncate().text_size(10.5).text_color(t.dim).child(`${session ? `session ${Math.round(session.percent)}% · ` : ""}week ${week.percent}%`))),
+          )
+          .when(!shut, (el) => el.child(div().text_size(10.5).text_color(t.dim).child(this.busy ? "checking…" : this.checkedAt ? ago(this.checkedAt) : "")))
           .child(div().id("usage-refresh").px(6).py(1).rounded(4).text_size(12).text_color(t.dim).cursor_pointer()
             .hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip("Ask Claude Code for your usage (free: no model runs)")
             .on_click((_e, cx) => this.refresh(cx)).child("↻")),
       )
-      .child(
+      .when(!shut, (el) => el.child(
         v_flex().id("usage-body").flex_1().min_h(0).px(10).pb(6).overflow_y_scrollbar()
           .when(Boolean(a && !a.signedIn), (el) => el.child(div().text_size(11).text_color(t.ansi1).child("Claude Code isn't signed in: run `claude auth login`.")))
           .when(Boolean(a?.signedIn && a.email), (el) => el.child(div().id("usage-account").truncate().pb(3).text_size(10.5).text_color(t.dim)
             .tooltip(`${a.org ?? ""}${a.endsAt ? ` · sign-in lasts until about ${new Date(a.endsAt).toDateString()}` : ""}`).child(a.org ? `${a.email} · ${a.org}` : a.email)))
           .when(Boolean(this.problem), (el) => el.child(div().pb(3).text_size(11).text_color("#ffb000").child(this.problem)))
-          .children(rows.length ? rows.map((r) => this.row(t, r)) : [div().text_size(11).text_color(t.muted).child(this.busy ? "Asking Claude Code…" : "Not checked yet. Press ↻.")]),
-      );
+          .children([...(rows.length ? rows.map((r) => this.row(t, r)) : [div().text_size(11).text_color(t.muted).child(this.busy ? "Asking Claude Code…" : "Not checked yet. Press ↻.")]), this.row(t, week)]),
+      ));
   }
 }

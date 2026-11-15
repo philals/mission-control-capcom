@@ -40,7 +40,9 @@ Nothing runs until you press one.
 
 Under the PRs in My Watch: the account Claude Code is signed in with (email, organization, plan) and its plan limits as
 `/usage` shows them: the five-hour session, the week across all models, and a model's own weekly limit, each as a bar with
-its percentage and when it resets. Amber from 80%, red at 100%.
+its percentage and when it resets. Amber from 80%, red at 100%. A **Working week** row (cyan) shows how far through
+  Monday to Friday, 06:00 to 17:00 it is, as in the Claude mod's status line, with the time until Friday 17:00.
+- Click the title to fold it to one line (`session 5% · week 8%`); it starts open and remembers your choice.
 
 - It asks Claude Code itself (`claude -p` with its `get_usage` request, and `claude auth status`). No prompt is sent, so no
   model runs and it costs nothing, and this mod never touches your login. Idea from Mansour's HERMES.
