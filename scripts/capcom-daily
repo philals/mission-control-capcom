@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The daily scripts behind the Daily section of My Watch (the `phildaily`, `db` and `dbpg` functions of ~/code/.dotfiles).
-#   capcom-daily sso|codeartifact|ecr|all|db|dbpg|check
+#   capcom-daily sso|codeartifact|ecr|pull|all|db|dbpg|check
 # Each step records "<epoch> <ok|fail> <message>" in ~/.cache/capcom/daily/<step>, which the panel reads. Secrets stay
 # in shell variables and pipes: never in output, in the status files or in a process's arguments.
 set -uo pipefail
@@ -49,13 +49,44 @@ ecr() {
   record ecr ok "Docker signed in to ECR"
 }
 
+# Pulls the default branch of the repos in ~/code you touched most lately (newest reflog first), CAPCOM_DAILY_REPOS of them
+# (default 8). A repo is left alone, with the reason noted, unless it is on its default branch with nothing uncommitted.
+pull() {
+  local root="${CAPCOM_DAILY_CODE:-$HOME/code}" want="${CAPCOM_DAILY_REPOS:-8}" repo name branch out
+  local pulled=0 failed=0 skipped=()
+  while IFS= read -r repo; do
+    name=$(basename "$repo")
+    branch=$(git -C "$repo" symbolic-ref --short HEAD 2>/dev/null)
+    case "$branch" in
+      master | main) ;;
+      *) skipped+=("$name: on ${branch:-a detached head}"); continue ;;
+    esac
+    if [ -n "$(git -C "$repo" status --porcelain 2>/dev/null)" ]; then skipped+=("$name: uncommitted changes"); continue; fi
+    if out=$(git -C "$repo" pull --ff-only 2>&1 </dev/null); then
+      pulled=$((pulled + 1))
+    else
+      if printf '%s' "$out" | grep -q 'no tracking information'; then skipped+=("$name: no upstream"); continue; fi
+      failed=$((failed + 1)); skipped+=("$name: $(printf '%s' "$out" | grep -m1 -iE 'fatal|error|abort' | cut -c1-60)")
+    fi
+  done < <(for d in "$root"/*/; do
+      [ -e "$d/.git" ] || continue
+      printf '%s %s\n' "$(stat -c %Y "$d/.git/logs/HEAD" 2>/dev/null || echo 0)" "${d%/}"
+    done | sort -rn | head -n "$want" | cut -d' ' -f2-)
+  local msg="pulled $pulled"
+  [ "${#skipped[@]}" -eq 0 ] || msg="$msg, skipped ${#skipped[@]} ($(IFS=';'; echo "${skipped[*]}" | sed 's/;/; /g'))"
+  if [ "$failed" -gt 0 ]; then fail pull "$msg"; return 1; fi
+  record pull ok "$msg"
+}
+
 all() {
   sso || return 1
   local bad=0
+  pull & p3=$!
   codeartifact & p1=$!
   ecr & p2=$!
   wait "$p1" || bad=1
   wait "$p2" || bad=1
+  wait "$p3" || bad=1
   return "$bad"
 }
 
@@ -91,6 +122,6 @@ check() {
 }
 
 case "${1:-}" in
-  sso | codeartifact | ecr | all | db | dbpg | check) "$1" ;;
-  *) echo "usage: capcom-daily sso|codeartifact|ecr|all|db|dbpg|check" >&2; exit 2 ;;
+  sso | codeartifact | ecr | pull | all | db | dbpg | check) "$1" ;;
+  *) echo "usage: capcom-daily sso|codeartifact|ecr|pull|all|db|dbpg|check" >&2; exit 2 ;;
 esac

@@ -1,4 +1,4 @@
-// Daily, under My Watch: the start-of-day scripts (AWS sign-in, CodeArtifact token, Docker login to ECR) and the dev databases,
+// Daily, under My Watch: the start-of-day scripts (AWS sign-in, CodeArtifact token, Docker login to ECR, pulling your recent repos) and the dev databases,
 // as buttons. Runs `capcom-daily`, which records each step in ~/.cache/capcom/daily/<step>. Nothing runs until you press a button.
 
 import { View, div } from "gpui-kit";
@@ -7,14 +7,16 @@ import { exec, run, theme, home, readTextFile } from "herdr";
 import { SH } from "./pr-details.js";
 
 const TOKEN_MS = 12 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const TICK_MS = 30 * 1000;
 const CHECK_MS = 5 * 60 * 1000;
-const OPEN_PX = 150, SHUT_PX = 34;
+const OPEN_PX = 173, SHUT_PX = 34;
 const GREEN = "#22c55e", AMBER = "#ffb000", RED = "#ff1f1f";
 const STEPS = [
   { id: "sso", label: "AWS sign-in", tip: "Sign in to AWS SSO (browser) if not already", life: 0 },
   { id: "codeartifact", label: "CodeArtifact", tip: "Write a fresh CodeArtifact token to ~/.gradle/gradle.properties", life: TOKEN_MS },
   { id: "ecr", label: "Docker · ECR", tip: "Log Docker in to ECR", life: TOKEN_MS },
+  { id: "pull", label: "Pull repos", tip: "Pull the default branch of your 8 most recently used repos in ~/code (skips any that are on another branch or have changes)", life: DAY_MS },
 ];
 const DBS = [
   { id: "db", label: "Informix", tip: "Restart the informix-db container (needs the ECR login)" },
@@ -120,6 +122,7 @@ export default class CapcomDaily extends View {
     if (this.running.has(step.id) || this.running.has("all")) return "running…";
     if (!s) return "not run";
     if (!s.ok) return s.msg;
+    if (step.id === "pull") return this.now - s.at > step.life ? "over a day ago" : s.msg;
     return step.life ? left(step.life - (this.now - s.at)) : s.msg;
   }
 
@@ -145,7 +148,7 @@ export default class CapcomDaily extends View {
               .child(div().text_size(12).font_semibold().text_color(bad ? t.ansi1 : t.foreground).child(bad ? `Daily · ${bad} to run` : "Daily"))
               .when(shut, (el) => el.children(STEPS.map((step) => div().size(7).flex_none().rounded(4).bg(this.dot(step.id, t))))),
           )
-          .child(this.button("daily-all", this.running.has("all") ? "Running…" : "▶ Run daily", "AWS sign-in, then the CodeArtifact token and the ECR login together", (cx) => this.run(cx, "all", "Daily"), t, true))
+          .child(this.button("daily-all", this.running.has("all") ? "Running…" : "▶ Run daily", "AWS sign-in, then the CodeArtifact token, the ECR login and the repo pulls together", (cx) => this.run(cx, "all", "Daily"), t, true))
           .child(this.button("daily-check", "↻", "Check whether AWS is signed in", (cx) => this.run(cx, "check", "Check"), t)),
       )
       .when(!shut, (el) => el.child(
