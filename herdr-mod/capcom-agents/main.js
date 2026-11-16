@@ -7,6 +7,7 @@ import * as fs from "fs/promises";
 import { appHome, agents, terminals, panes, focused, spaces, run, exec, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 import { SH, dotColor, short, openUrl, prDo, prDetails } from "./pr-details.js";
 import { CHARACTERS } from "./characters.js";
+import { nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrls } from "./pokemon.js";
 import { who as whoIs } from "./identity.js";
 
 function find(node, id) {
@@ -61,6 +62,8 @@ const SORTS = [
   { id: "grouped", label: "Grouped by space", icon: "layers" },
 ];
 const sortOf = () => SORTS.find((s) => s.id === shared("agents.sort")) ?? SORTS[0];
+const PORTRAITS = [{ id: "sg1", label: "SG-1" }, { id: "pokemon", label: "Pokémon" }];
+const portraitsMode = () => (shared("agents.portraits") === "pokemon" ? "pokemon" : "sg1");
 const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle" };
 const SECTION_STATUS = { 4: "blocked", 3: "done", 2: "working" };
 
@@ -96,6 +99,11 @@ export default class Agents extends View {
     this.hues = JSON.parse(localStorage.getItem("hues") ?? "{}");
     this.photos = new Map();
     this.scanPhotos(cx);
+    this.pokemon = Object.fromEntries(Object.entries(JSON.parse(localStorage.getItem("pokemon") ?? "{}")).filter(([, n]) => validNumber(n)));
+    this.cached = new Set();
+    this.fetching = new Set();
+    this.failed = new Map();
+    this.scanPortraits(cx);
     cx.timer.every(30000, (cx) => { this.scanPhotos(cx); cx.notify(); });
     cx.timer.every(30000, (cx) => cx.notify());
     this.refreshNotes(cx);
@@ -145,6 +153,61 @@ export default class Agents extends View {
         if (!same) cx.notify();
       } catch {}
     });
+  }
+
+  // Portraits already downloaded for Pokemon mode: "0004/Worried.png" and so on.
+  scanPortraits(cx) {
+    cx.spawn(async (cx) => {
+      try {
+        const root = `${appHome()}/data/capcom-agents/pokemon`;
+        for (const dir of await fs.readdir(root)) {
+          for (const f of await fs.readdir(`${root}/${dir}`)) if (f.endsWith(".png")) this.cached.add(`${dir}/${f}`);
+        }
+        cx.notify();
+      } catch {}
+    });
+  }
+
+  // Each agent keeps one Pokemon for good, chosen at random from those nobody on screen has.
+  assignPokemon(list) {
+    const live = new Set(list.map((a) => a.address));
+    const taken = new Set(list.map((a) => this.pokemon[a.address]).filter(Boolean));
+    let dirty = false;
+    for (const a of list) {
+      if (this.pokemon[a.address]) continue;
+      const n = pickPokemon(taken);
+      this.pokemon[a.address] = n;
+      taken.add(n);
+      dirty = true;
+    }
+    for (const k of Object.keys(this.pokemon)) if (!live.has(k) && !this.changed[k]) { delete this.pokemon[k]; dirty = true; }
+    if (dirty) localStorage.setItem("pokemon", JSON.stringify(this.pokemon));
+  }
+
+  // The portrait's path under the app home if it's downloaded; otherwise fetch it (once at a time, not again for
+  // five minutes after a failure) and say null, so the row shows the SG-1 face meanwhile.
+  wantPortrait(cx, n, expression) {
+    const file = portraitFile(n, expression);
+    if (this.cached.has(file)) return `data/capcom-agents/pokemon/${file}`;
+    const failedAt = this.failed.get(file);
+    if (this.fetching.has(file) || (failedAt && Date.now() - failedAt < 300000)) return null;
+    this.fetching.add(file);
+    const dest = `${appHome()}/data/capcom-agents/pokemon/${file}`;
+    cx.spawn(async (cx) => {
+      try {
+        // The Normal portrait is kept under the missing expression's name when upstream has no such expression.
+        const cmd = 'mkdir -p "$(dirname "$1")" && { curl -fsSL --max-time 15 -o "$1.part" "$2" || { [ -n "$3" ] && curl -fsSL --max-time 15 -o "$1.part" "$3"; }; } && mv "$1.part" "$1"';
+        const [url, backup = ""] = portraitUrls(n, expression);
+        await exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", dest, url, backup], { timeout: 40000 });
+        this.cached.add(file);
+        this.failed.delete(file);
+      } catch {
+        this.failed.set(file, Date.now());
+      }
+      this.fetching.delete(file);
+      cx.notify();
+    });
+    return null;
   }
 
   // Each agent keeps one character for good: the first one nobody on screen has, in the cast's order.
@@ -238,6 +301,11 @@ export default class Agents extends View {
       .fallback(AvatarFallback.new().size_full().bg(c.bg));
   }
 
+  pokemonAvatar(path) {
+    return Avatar.new().size(AV).flex_none().rounded(8).overflow_hidden().bg("#2a2f37")
+      .image(AvatarImage.new(path).size_full());
+  }
+
   // Stamps agents whose state changed. Done and idle count as one: looking at a
   // finished agent turns done into idle, and looking isn't the agent doing anything.
   track(list, now) {
@@ -316,7 +384,23 @@ export default class Agents extends View {
         })
         .child(svg(`mods/workspace-chrome/${s.icon}.svg`).size(14).flex_none().text_color(t.muted))
         .child(div().flex_1().child(s.label))
-        .when(s.id === on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))));
+        .when(s.id === on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))))
+      .child(div().px(8).pt(8).pb(6).text_size(11).text_color(t.dim).child("Portraits"))
+      .children(PORTRAITS.map((p) => h_flex()
+        .id(`portraits-${p.id}`)
+        .h(31)
+        .px(8)
+        .gap(9)
+        .rounded(7)
+        .items_center()
+        .text_color(t.foreground)
+        .hover((el) => el.bg(t.hover))
+        .on_click(() => {
+          setShared("agents.portraits", p.id);
+          closeOverlay(props().overlay);
+        })
+        .child(div().flex_1().child(p.label))
+        .when(p.id === portraitsMode(), (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))));
   }
 
   // `capcom pr-do` from the card, then ask My Watch to look again.
@@ -441,6 +525,7 @@ export default class Agents extends View {
     this.track(list, now);
     this.hold(list);
     this.assign(list);
+    this.assignPokemon(list);
     this.assignColors(list);
     this.frameColor(this.hue(list.find((a) => a.focused) ?? {})?.color);
     const persona = Object.fromEntries(list.map((a) => [a.address, { label: this.character(a)?.label ?? a.program?.name ?? "", pic: this.pic(this.character(a)), ...this.hue(a) }]));
@@ -521,6 +606,8 @@ export default class Agents extends View {
     const row = (a, i, subs = []) => {
       const pic = icon(a.program, 16, t.foreground);
       const who = this.character(a);
+      const mon = who && portraitsMode() === "pokemon" ? this.pokemon[a.address] : null;
+      const monPic = mon ? this.wantPortrait(cx, mon, expressionFor(a.status)) : null;
       const more = detail.get(a.address);
       // What the agent is on leads the row; the character is only a label under it.
       const note = notes[a.address];
@@ -636,12 +723,12 @@ export default class Agents extends View {
             cx.stop_propagation();
             this.folded.has(a.address) ? this.folded.delete(a.address) : this.folded.add(a.address);
             cx.notify();
-          })).child(who ? this.avatar(t, a, who) : pic)))
+          })).child(monPic ? this.pokemonAvatar(monPic) : who ? this.avatar(t, a, who) : pic)))
         .child(who
           ? v_flex().flex_1().min_w(0)
             .child(div().min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).child(task))
             .child(h_flex().min_w(0).gap(5).text_size(11).text_color(t.muted)
-              .child(div().flex_none().child([who.label, full ? a.space_name : null].filter(Boolean).join(" \u00b7 ")))
+              .child(div().flex_none().child([monPic ? nameOf(mon) : who.label, full ? a.space_name : null].filter(Boolean).join(" \u00b7 ")))
               .when(Boolean(id.key), el => el.child(div().flex_none().font_semibold().text_color(t.muted).child(id.key)))
               .when(Boolean(id.branch), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(id.branch))))
           : h_flex().flex_1().min_w(0).gap(5).items_center()
@@ -722,7 +809,7 @@ export default class Agents extends View {
                 .text_size(11)
                 .text_color(t.dim)
                 .hover((s) => s.text_color(t.foreground))
-                .on_click(() => openOverlay({ mod: "capcom-agents", kind: "popup", width: 200, height: 140, props: { sortMenu: true } }))
+                .on_click(() => openOverlay({ mod: "capcom-agents", kind: "popup", width: 200, height: 232, props: { sortMenu: true } }))
                 .tooltip(`Sort agents: ${sort.label}`)
                 .child(svg(`mods/workspace-chrome/${sort.icon}.svg`).size(14)),
             ),

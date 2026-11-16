@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { POKEMON, nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrl } from "../herdr-mod/capcom-agents/pokemon.js";
+import { POKEMON, nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrl, portraitUrls } from "../herdr-mod/capcom-agents/pokemon.js";
 
 test("the first 151 in order", () => {
   assert.equal(POKEMON.length, 151);
@@ -42,4 +42,9 @@ test("pickPokemon never returns a taken number", () => {
 test("pickPokemon reuses one when all 151 are taken", () => {
   const n = pickPokemon(new Set(Array.from({ length: 151 }, (_, i) => i + 1)));
   assert.ok(Number.isInteger(n) && n >= 1 && n <= 151);
+});
+
+test("portraitUrls falls back to Normal because some Pokemon lack an expression", () => {
+  assert.deepEqual(portraitUrls(17, "Joyous"), [portraitUrl(17, "Joyous"), portraitUrl(17, "Normal")]);
+  assert.deepEqual(portraitUrls(17, "Normal"), [portraitUrl(17, "Normal")]);
 });

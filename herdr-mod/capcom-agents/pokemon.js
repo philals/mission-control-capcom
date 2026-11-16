@@ -37,3 +37,6 @@ export const expressionFor = (status) => EXPRESSION[status] ?? "Normal";
 export const portraitFile = (n, expression) => `${String(n).padStart(4, "0")}/${expression}.png`;
 
 export const portraitUrl = (n, expression) => `${SOURCE}/${portraitFile(n, expression)}`;
+
+// Some Pokemon lack some expressions upstream; Normal exists for all 151.
+export const portraitUrls = (n, expression) => (expression === "Normal" ? [portraitUrl(n, "Normal")] : [portraitUrl(n, expression), portraitUrl(n, "Normal")]);

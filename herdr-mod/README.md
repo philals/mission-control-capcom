@@ -65,6 +65,25 @@ number), kept for as long as the agent exists. Its portrait sits on the characte
   A `.jpg` dropped in that installed folder works too.
 - The cast is in `capcom-agents/characters.js`.
 
+### Pokemon mode
+
+The sort icon in the Agents header opens a popup with a **Portraits** section: SG-1 or Pokémon. In Pokémon mode each
+agent shows one of the first 151 Pokémon (picked at random, kept for as long as the agent exists, separate from its
+SG-1 character), and the face follows the agent's status:
+
+| Status | Portrait |
+|---|---|
+| needs you | Worried |
+| working | Determined |
+| done | Joyous |
+| idle | Normal |
+
+Portraits are not in this repo. The first time one is needed it is downloaded from PMDCollab's SpriteCollab (needs
+`curl`) into `<app home>/data/capcom-agents/pokemon/`; until it arrives, and if the download fails (retried after five
+minutes), the row shows the SG-1 face. A Pokémon with no portrait for an expression upstream (about a quarter of them)
+shows its Normal one. Only the Agents panel changes: My Watch, tabs and pane headers stay on SG-1. The pure helpers are
+in `capcom-agents/pokemon.js`, tested by `node --test scripts/pokemon.test.mjs`.
+
 ## capcom-jira: your Jira tickets
 
 The tickets assigned to you, grouped by Jira status, under the Kanban in the CapCom panel. Tickets whose status category is Done are not fetched. Click a card to expand it.
