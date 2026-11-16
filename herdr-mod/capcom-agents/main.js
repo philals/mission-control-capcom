@@ -7,7 +7,7 @@ import * as fs from "fs/promises";
 import { appHome, agents, terminals, panes, focused, spaces, run, exec, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 import { SH, dotColor, short, openUrl, prDo, prDetails } from "./pr-details.js";
 import { CHARACTERS } from "./characters.js";
-import { nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrls } from "./pokemon.js";
+import { EXPRESSIONS, nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrls } from "./pokemon.js";
 import { who as whoIs } from "./identity.js";
 
 function find(node, id) {
@@ -107,7 +107,7 @@ export default class Agents extends View {
     this.failed = new Map();
     this.scanned = false;
     this.scanPortraits(cx);
-    cx.timer.every(1500, (cx) => this.fetchWanted(cx));
+    cx.timer.every(700, (cx) => this.fetchWanted(cx));
     cx.timer.every(30000, (cx) => { this.scanPhotos(cx); cx.notify(); });
     cx.timer.every(30000, (cx) => cx.notify());
     this.refreshNotes(cx);
@@ -198,6 +198,17 @@ export default class Agents extends View {
     if (this.cached.has(file)) return `data/capcom-agents/pokemon/${file}`;
     this.wanted.set(file, { n, expression });
     return null;
+  }
+
+  // The agent's Pokemon in Pokemon mode: the portrait for its status, else the Normal one while that downloads
+  // (every expression is asked for at once), else null and the SG-1 face shows.
+  pokemonFace(a) {
+    const n = portraitsMode() === "pokemon" ? this.pokemon[a.address] : null;
+    if (!n) return null;
+    const want = this.wantPortrait(n, expressionFor(a.status));
+    for (const e of EXPRESSIONS) this.wantPortrait(n, e);
+    const path = want ?? this.wantPortrait(n, "Normal");
+    return path ? { path, n, name: nameOf(n) } : null;
   }
 
   // Download what rows asked for, one curl per file at a time, and not again for five minutes after a failure.
@@ -529,7 +540,7 @@ export default class Agents extends View {
     this.assignPokemon(list);
     this.assignColors(list);
     this.frameColor(this.hue(list.find((a) => a.focused) ?? {})?.color);
-    const persona = Object.fromEntries(list.map((a) => [a.address, { label: this.character(a)?.label ?? a.program?.name ?? "", pic: this.pic(this.character(a)), ...this.hue(a) }]));
+    const persona = Object.fromEntries(list.map((a) => [a.address, { label: this.pokemonFace(a)?.name ?? this.character(a)?.label ?? a.program?.name ?? "", pic: this.pokemonFace(a)?.path ?? this.pic(this.character(a)), ...this.hue(a) }]));
     const personaText = JSON.stringify(persona);
     if (personaText !== this.personaText) {
       this.personaText = personaText;
@@ -607,8 +618,7 @@ export default class Agents extends View {
     const row = (a, i, subs = []) => {
       const pic = icon(a.program, 16, t.foreground);
       const who = this.character(a);
-      const mon = who && portraitsMode() === "pokemon" ? this.pokemon[a.address] : null;
-      const monPic = mon ? this.wantPortrait(mon, expressionFor(a.status)) : null;
+      const mon = who ? this.pokemonFace(a) : null;
       const more = detail.get(a.address);
       // What the agent is on leads the row; the character is only a label under it.
       const note = notes[a.address];
@@ -724,12 +734,12 @@ export default class Agents extends View {
             cx.stop_propagation();
             this.folded.has(a.address) ? this.folded.delete(a.address) : this.folded.add(a.address);
             cx.notify();
-          })).child(monPic ? this.pokemonAvatar(monPic) : who ? this.avatar(t, a, who) : pic)))
+          })).child(mon ? this.pokemonAvatar(mon.path) : who ? this.avatar(t, a, who) : pic)))
         .child(who
           ? v_flex().flex_1().min_w(0)
             .child(div().min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).child(task))
             .child(h_flex().min_w(0).gap(5).text_size(11).text_color(t.muted)
-              .child(div().flex_none().child([monPic ? nameOf(mon) : who.label, full ? a.space_name : null].filter(Boolean).join(" \u00b7 ")))
+              .child(div().flex_none().child([mon ? mon.name : who.label, full ? a.space_name : null].filter(Boolean).join(" \u00b7 ")))
               .when(Boolean(id.key), el => el.child(div().flex_none().font_semibold().text_color(t.muted).child(id.key)))
               .when(Boolean(id.branch), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(id.branch))))
           : h_flex().flex_1().min_w(0).gap(5).items_center()

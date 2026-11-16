@@ -40,3 +40,5 @@ export const portraitUrl = (n, expression) => `${SOURCE}/${portraitFile(n, expre
 
 // Some Pokemon lack some expressions upstream; Normal exists for all 151.
 export const portraitUrls = (n, expression) => (expression === "Normal" ? [portraitUrl(n, "Normal")] : [portraitUrl(n, expression), portraitUrl(n, "Normal")]);
+
+export const EXPRESSIONS = ["Worried", "Determined", "Joyous", "Normal"];

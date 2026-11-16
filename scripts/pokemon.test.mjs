@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { POKEMON, nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrl, portraitUrls } from "../herdr-mod/capcom-agents/pokemon.js";
+import { POKEMON, nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrl, portraitUrls, EXPRESSIONS } from "../herdr-mod/capcom-agents/pokemon.js";
 
 test("the first 151 in order", () => {
   assert.equal(POKEMON.length, 151);
@@ -47,4 +47,8 @@ test("pickPokemon reuses one when all 151 are taken", () => {
 test("portraitUrls falls back to Normal because some Pokemon lack an expression", () => {
   assert.deepEqual(portraitUrls(17, "Joyous"), [portraitUrl(17, "Joyous"), portraitUrl(17, "Normal")]);
   assert.deepEqual(portraitUrls(17, "Normal"), [portraitUrl(17, "Normal")]);
+});
+
+test("every status expression is one that gets prefetched", () => {
+  for (const status of ["blocked", "working", "done", "idle"]) assert.ok(EXPRESSIONS.includes(expressionFor(status)));
 });

@@ -81,7 +81,7 @@ SG-1 character), and the face follows the agent's status:
 Portraits are not in this repo. The first time one is needed it is downloaded from PMDCollab's SpriteCollab (needs
 `curl`) into `<app home>/data/capcom-agents/pokemon/`; until it arrives, and if the download fails (retried after five
 minutes), the row shows the SG-1 face. A Pokémon with no portrait for an expression upstream (about a quarter of them)
-shows its Normal one. Only the Agents panel changes: My Watch, tabs and pane headers stay on SG-1. The pure helpers are
+shows its Normal one. The pane header's strip shows the same Pokémon (through `capcom.persona`); My Watch and tabs are unchanged. While a portrait for the current status downloads, the agent's Normal one shows (all four expressions are fetched at once). The pure helpers are
 in `capcom-agents/pokemon.js`, tested by `node --test scripts/pokemon.test.mjs`.
 
 ## capcom-jira: your Jira tickets
