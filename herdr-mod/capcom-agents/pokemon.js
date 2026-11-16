@@ -26,9 +26,16 @@ export const nameOf = (n) => POKEMON[n - 1];
 
 export const validNumber = (v) => Number.isInteger(v) && v >= 1 && v <= POKEMON.length;
 
+// The 33 with no Worried, Determined or Joyous portrait upstream (checked against PMDCollab SpriteCollab): they would
+// look the same working, waiting and done, so they are never assigned.
+export const STATIC = new Set([20, 33, 45, 47, 56, 57, 68, 70, 71, 73, 74, 76, 82, 88, 89, 91, 94, 95, 102, 107, 108, 110, 117, 119, 120, 121, 122, 124, 127, 139, 144, 145, 146]);
+
+export const assignable = (n) => validNumber(n) && !STATIC.has(n);
+
 export function pickPokemon(taken, rand = Math.random) {
-  const free = POKEMON.map((_, i) => i + 1).filter((n) => !taken.has(n));
-  const from = free.length ? free : POKEMON.map((_, i) => i + 1);
+  const all = POKEMON.map((_, i) => i + 1).filter(assignable);
+  const free = all.filter((n) => !taken.has(n));
+  const from = free.length ? free : all;
   return from[Math.min(from.length - 1, Math.floor(rand() * from.length))];
 }
 

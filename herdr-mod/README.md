@@ -68,7 +68,7 @@ number), kept for as long as the agent exists. Its portrait sits on the characte
 ### Pokemon mode
 
 The small **SG-1 / Pokémon** button in the Agents header, left of the sort icon, switches the portraits (click to flip). In Pokémon mode each
-agent shows one of the first 151 Pokémon (picked at random, kept for as long as the agent exists, separate from its
+agent shows one of the first 151 Pokémon, except the 33 with no Worried, Determined or Joyous portrait (they would look the same in every status; the list is `STATIC` in `pokemon.js`), picked at random, kept for as long as the agent exists, separate from its
 SG-1 character), and the face follows the agent's status:
 
 | Status | Portrait |

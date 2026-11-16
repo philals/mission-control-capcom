@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { POKEMON, nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrl, portraitUrls, EXPRESSIONS } from "../herdr-mod/capcom-agents/pokemon.js";
+import { POKEMON, nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrl, portraitUrls, EXPRESSIONS, STATIC, assignable } from "../herdr-mod/capcom-agents/pokemon.js";
 
 test("the first 151 in order", () => {
   assert.equal(POKEMON.length, 151);
@@ -34,14 +34,23 @@ test("pickPokemon takes the first free number when rand is 0", () => {
   assert.equal(pickPokemon(new Set([1, 2, 3]), () => 0), 4);
 });
 
+const POOL = Array.from({ length: 151 }, (_, i) => i + 1).filter((n) => !STATIC.has(n));
+
+test("Pokemon with no Worried, Determined or Joyous are never assigned", () => {
+  assert.equal(STATIC.size, 33);
+  assert.ok(STATIC.has(88) && !STATIC.has(25));
+  assert.equal(assignable(88), false);
+  assert.equal(assignable(25), true);
+  for (let r = 0; r < 1; r += 0.01) assert.ok(assignable(pickPokemon(new Set(), () => r)));
+});
+
 test("pickPokemon never returns a taken number", () => {
-  const taken = new Set(Array.from({ length: 150 }, (_, i) => i + 1));
+  const taken = new Set(POOL.filter((n) => n !== 151));
   for (let i = 0; i < 200; i++) assert.equal(pickPokemon(taken), 151);
 });
 
-test("pickPokemon reuses one when all 151 are taken", () => {
-  const n = pickPokemon(new Set(Array.from({ length: 151 }, (_, i) => i + 1)));
-  assert.ok(Number.isInteger(n) && n >= 1 && n <= 151);
+test("pickPokemon reuses an assignable one when the whole pool is taken", () => {
+  for (let i = 0; i < 50; i++) assert.ok(assignable(pickPokemon(new Set(POOL))));
 });
 
 test("portraitUrls tries similar expressions, then Normal", () => {

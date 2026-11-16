@@ -7,7 +7,7 @@ import * as fs from "fs/promises";
 import { appHome, agents, terminals, panes, focused, spaces, run, exec, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 import { SH, dotColor, short, openUrl, prDo, prDetails } from "./pr-details.js";
 import { CHARACTERS } from "./characters.js";
-import { EXPRESSIONS, nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrls } from "./pokemon.js";
+import { EXPRESSIONS, nameOf, assignable, pickPokemon, expressionFor, portraitFile, portraitUrls } from "./pokemon.js";
 import { who as whoIs } from "./identity.js";
 
 function find(node, id) {
@@ -100,7 +100,7 @@ export default class Agents extends View {
     this.scanPhotos(cx);
     let stored = {};
     try { stored = JSON.parse(localStorage.getItem("pokemon") ?? "{}") ?? {}; } catch {}
-    this.pokemon = Object.fromEntries(Object.entries(stored).filter(([, n]) => validNumber(n)));
+    this.pokemon = Object.fromEntries(Object.entries(stored).filter(([, n]) => assignable(n)));
     this.cached = new Set();
     this.wanted = new Map();
     this.fetching = new Set();
