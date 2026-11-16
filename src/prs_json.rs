@@ -49,11 +49,16 @@ fn autoupdate_labels(pr: &PullRequest) -> &[String] {
     pr.feedback.kodiak.as_ref().map_or(&[], |k| k.autoupdate.as_slice())
 }
 
+/// A Chromatic check that waits for you to review its UI changes.
+fn waiting_on_you(k: &crate::prs::Check) -> bool {
+    k.external && k.state == crate::prs::CheckState::Queued && k.url.as_deref().is_some_and(|u| u.contains("chromatic.com"))
+}
+
 fn open_checks(pr: &PullRequest) -> Vec<Value> {
     pr.ordered_checks()
         .iter()
         .filter(|k| !matches!(k.state, crate::prs::CheckState::Passed | crate::prs::CheckState::Skipped))
-        .map(|k| json!({ "label": k.label(), "state": check_state(k.state), "startedAt": k.started_at, "url": k.url }))
+        .map(|k| json!({ "label": k.label(), "state": check_state(k.state), "startedAt": k.started_at, "url": k.url, "attention": waiting_on_you(k) }))
         .collect()
 }
 
@@ -69,8 +74,7 @@ fn strip(pr: &PullRequest, durations: &Durations) -> Vec<Value> {
                 .then(|| Some(crate::prs::check_seconds(k, now)? as f64 / durations.estimate(&pr.repo, k)?.max(1) as f64))
                 .flatten()
                 .map(|f| (f.clamp(0.0, 0.95) * 100.0).round() / 100.0);
-            let waiting_on_you = k.external && k.state == crate::prs::CheckState::Queued && k.url.as_deref().is_some_and(|u| u.contains("chromatic.com"));
-            json!({ "state": check_state(k.state), "group": k.workflow, "label": k.label(), "done": done, "attention": waiting_on_you })
+            json!({ "state": check_state(k.state), "group": k.workflow, "label": k.label(), "done": done, "attention": waiting_on_you(k) })
         })
         .collect()
 }

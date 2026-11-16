@@ -4,7 +4,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, run, spaces, theme, shared, setShared } from "herdr";
 import { strip, stripCount, hasRunning } from "./strip.js";
-import { SH, capcom, openUrl, short, dotColor, prDo, pill, prDetails, MERGED } from "./pr-details.js";
+import { SH, capcom, openUrl, short, dotColor, prDo, pill, prDetails, MERGED, needsYou, attentionIcon } from "./pr-details.js";
 
 const EVERY_MS = 30000;
 
@@ -37,7 +37,7 @@ export default class CapcomPrs extends View {
     this.pulse = true;
     cx.timer.every(EVERY_MS, (cx) => this.refresh(cx, false));
     cx.timer.every(700, (cx) => {
-      if (!hasRunning(this.data?.open ?? [])) return;
+      if (!hasRunning([...(this.data?.open ?? []), ...(this.data?.watching ?? [])])) return;
       this.pulse = !this.pulse;
       cx.notify();
     });
@@ -213,7 +213,11 @@ export default class CapcomPrs extends View {
                     this.change(cx, pr.draft ? "ready" : "draft", pr.url);
                   }),
               )
-              .child(svg(pr.draft ? "mods/capcom-prs/pr-draft.svg" : "mods/capcom-prs/pr-ready.svg").size(15).flex_none().text_color(pr.draft ? t.muted : "#22c55e")),
+              .child(
+                needsYou(pr)
+                  ? attentionIcon(pr.draft ? "mods/capcom-prs/pr-draft.svg" : "mods/capcom-prs/pr-ready.svg", 13, 19, this.pulse)
+                  : svg(pr.draft ? "mods/capcom-prs/pr-draft.svg" : "mods/capcom-prs/pr-ready.svg").size(15).flex_none().text_color(pr.draft ? t.muted : "#22c55e"),
+              ),
       )
       .child(
         v_flex()
@@ -290,7 +294,7 @@ export default class CapcomPrs extends View {
   }
 
   details(pr, t) {
-    return prDetails(pr, t, (cx, action, url, on) => this.change(cx, action, url, on));
+    return prDetails(pr, t, (cx, action, url, on) => this.change(cx, action, url, on), true, this.pulse);
   }
 
   section(label, count, t, color) {

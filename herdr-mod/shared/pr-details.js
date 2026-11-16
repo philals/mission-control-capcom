@@ -1,6 +1,6 @@
 // Shared by capcom-prs (My Watch) and capcom-agents: the PR dot colour, the expanded details and `capcom pr-do`.
 
-import { div } from "gpui-kit";
+import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec } from "herdr";
 
@@ -16,9 +16,18 @@ export const short = (repo) => repo.split("/").pop();
 
 // GitHub's merged purple.
 export const MERGED = "#a371f7";
+// Something waiting on you: neon blue, white on the off beat of a pulse.
+export const attention = (pulse = true) => (pulse ? "#00b3ff" : "#ffffff");
+// A PR with a check that waits for you (a Chromatic review).
+export const needsYou = (pr) => !!(pr.checks?.some((k) => k.attention) || pr.strip?.some((s) => s.attention));
 
-export function dotColor(pr, merged, t) {
-  return merged ? MERGED : pr.ci === "red" ? "#ff1f1f" : pr.ci === "pending" ? "#ffb000" : pr.ci === "none" ? t.dim : "#22c55e";
+// A PR icon that waits for you: neon blue and white in turn, growing and shrinking in a box of `big` so nothing around it moves.
+export function attentionIcon(path, small, big, pulse) {
+  return h_flex().w(big).h(big).flex_none().items_center().justify_center().child(svg(path).size(pulse ? big : small).flex_none().text_color(attention(pulse)));
+}
+
+export function dotColor(pr, merged, t, pulse = true) {
+  return merged ? MERGED : needsYou(pr) ? attention(pulse) : pr.ci === "red" ? "#ff1f1f" : pr.ci === "pending" ? "#ffb000" : pr.ci === "none" ? t.dim : "#22c55e";
 }
 
 // `capcom pr-do`: change a PR or a setting; resolves to { text, ok }.
@@ -50,7 +59,7 @@ export function pill(id, label, on, t, handler, tip) {
 }
 
 // The rail, blocker, checks and toggles. `change(cx, action, url, on)` does the toggling.
-export function prDetails(pr, t, change, pad = true) {
+export function prDetails(pr, t, change, pad = true, pulse = true) {
   const RAIL = { done: t.ansi2, going: t.ansi3, wrong: t.ansi1, pending: t.dim };
   const CHECK = { failed: t.ansi1, running: t.ansi3, queued: t.dim, cancelled: t.dim };
   const url = pr.url;
@@ -64,13 +73,14 @@ export function prDetails(pr, t, change, pad = true) {
       div()
         .id(`ck-${url}-${k.url ?? k.label}`)
         .text_size(11)
-        .text_color(CHECK[k.state] ?? t.muted)
+        .text_color(k.attention ? attention(pulse) : (CHECK[k.state] ?? t.muted))
+        .when(!!k.attention, (el) => el.font_semibold())
         .truncate()
         .cursor_pointer()
         .hover((s) => s.text_color(t.foreground))
-        .tooltip(`${k.state}: ${k.label}`)
+        .tooltip(`${k.attention ? "needs you" : k.state}: ${k.label}`)
         .on_click(() => k.url && openUrl(k.url))
-        .child(`${k.state} · ${k.label.split(" / ").slice(-2).join(" / ")}`),
+        .child(`${k.attention ? "needs you" : k.state} · ${k.label.split(" / ").slice(-2).join(" / ")}`),
     );
   }
   if ((pr.checks ?? []).length > 6) rows.push(div().text_size(11).text_color(t.dim).child(`…and ${pr.checks.length - 6} more`));

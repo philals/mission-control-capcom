@@ -5,7 +5,7 @@ import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, HoverCard, Avatar, AvatarImage, AvatarFallback } from "gpui-base";
 import * as fs from "fs/promises";
 import { appHome, agents, terminals, panes, focused, spaces, run, exec, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
-import { SH, dotColor, short, openUrl, prDo, prDetails } from "./pr-details.js";
+import { SH, dotColor, short, openUrl, prDo, prDetails, needsYou, attentionIcon } from "./pr-details.js";
 import { CHARACTERS } from "./characters.js";
 import { BALL_FILE, BALL_URL, EXPRESSIONS, nameOf, assignable, pickPokemon, expressionFor, portraitFile, portraitUrls } from "./pokemon.js";
 import { who as whoIs } from "./identity.js";
@@ -108,6 +108,12 @@ export default class Agents extends View {
     this.scanned = false;
     this.scanPortraits(cx);
     cx.timer.every(700, (cx) => this.fetchWanted(cx));
+    this.pulse = true;
+    cx.timer.every(700, (cx) => {
+      if (![...this.prsByAgent.values()].some((list) => list.some(({ pr, merged }) => !merged && needsYou(pr)))) return;
+      this.pulse = !this.pulse;
+      cx.notify();
+    });
     cx.timer.every(30000, (cx) => { this.scanPhotos(cx); cx.notify(); });
     cx.timer.every(30000, (cx) => cx.notify());
     this.refreshNotes(cx);
@@ -439,7 +445,8 @@ export default class Agents extends View {
       .flex_none()
       .items_center()
       .children(mine.slice(0, MAX).map(({ pr, merged }) => {
-        const color = dotColor(pr, merged, t);
+        const color = dotColor(pr, merged, t, this.pulse);
+        const wants = !merged && needsYou(pr);
         const trigger = div()
           .id(`pri-${a.address}-${pr.url}`)
           .p(2)
@@ -450,7 +457,7 @@ export default class Agents extends View {
             cx.stop_propagation();
             openUrl(pr.url);
           })
-          .child(svg("mods/workspace-chrome/git-compare.svg").size(13).flex_none().text_color(color));
+          .child(wants ? attentionIcon("mods/workspace-chrome/git-compare.svg", 11, 17, this.pulse) : svg("mods/workspace-chrome/git-compare.svg").size(13).flex_none().text_color(color));
         const card = v_flex()
           .w(300)
           .gap(4)
