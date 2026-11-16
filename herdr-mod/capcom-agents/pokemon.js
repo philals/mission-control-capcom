@@ -51,3 +51,7 @@ const SIMILAR = { Worried: ["Surprised", "Pain", "Stunned", "Sad"], Determined: 
 export const portraitUrls = (n, expression) => [expression, ...(SIMILAR[expression] ?? []), ...(expression === "Normal" ? [] : ["Normal"])].map((e) => portraitUrl(n, e));
 
 export const EXPRESSIONS = ["Worried", "Determined", "Joyous", "Normal"];
+
+// Shown in place of a portrait until it downloads.
+export const BALL_FILE = "pokeball.png";
+export const BALL_URL = "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/poke-ball.png";

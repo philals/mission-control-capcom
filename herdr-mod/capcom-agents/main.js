@@ -7,7 +7,7 @@ import * as fs from "fs/promises";
 import { appHome, agents, terminals, panes, focused, spaces, run, exec, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 import { SH, dotColor, short, openUrl, prDo, prDetails } from "./pr-details.js";
 import { CHARACTERS } from "./characters.js";
-import { EXPRESSIONS, nameOf, assignable, pickPokemon, expressionFor, portraitFile, portraitUrls } from "./pokemon.js";
+import { BALL_FILE, BALL_URL, EXPRESSIONS, nameOf, assignable, pickPokemon, expressionFor, portraitFile, portraitUrls } from "./pokemon.js";
 import { who as whoIs } from "./identity.js";
 
 function find(node, id) {
@@ -165,6 +165,7 @@ export default class Agents extends View {
       try {
         const root = `${appHome()}/data/capcom-agents/pokemon`;
         for (const dir of await fs.readdir(root)) {
+          if (dir.endsWith(".png")) { this.cached.add(dir); continue; }
           try {
             for (const f of await fs.readdir(`${root}/${dir}`)) if (f.endsWith(".png")) this.cached.add(`${dir}/${f}`);
           } catch {}
@@ -196,19 +197,25 @@ export default class Agents extends View {
   wantPortrait(n, expression) {
     const file = portraitFile(n, expression);
     if (this.cached.has(file)) return `data/capcom-agents/pokemon/${file}`;
-    this.wanted.set(file, { n, expression });
+    this.wanted.set(file, { urls: portraitUrls(n, expression) });
+    return null;
+  }
+
+  ball() {
+    if (this.cached.has(BALL_FILE)) return `data/capcom-agents/pokemon/${BALL_FILE}`;
+    this.wanted.set(BALL_FILE, { urls: [BALL_URL] });
     return null;
   }
 
   // The agent's Pokemon in Pokemon mode: the portrait for its status, else the Normal one while that downloads
-  // (every expression is asked for at once), else an empty tile, never the SG-1 face.
+  // (every expression is asked for at once), else a Poke Ball (never the SG-1 face).
   pokemonFace(a) {
     const n = portraitsMode() === "pokemon" ? this.pokemon[a.address] : null;
     if (!n) return null;
     const want = this.wantPortrait(n, expressionFor(a.status));
     for (const e of EXPRESSIONS) this.wantPortrait(n, e);
     const path = want ?? this.wantPortrait(n, "Normal");
-    return { path, n, name: nameOf(n) };
+    return { path: path ?? this.ball(), n, name: nameOf(n) };
   }
 
   // Download what rows asked for, one curl per file at a time, and not again for five minutes after a failure.
@@ -216,14 +223,14 @@ export default class Agents extends View {
     if (!this.scanned || !this.wanted.size) return;
     const todo = [...this.wanted].filter(([file]) => !this.cached.has(file) && !this.fetching.has(file) && !(Date.now() - (this.failed.get(file) ?? 0) < 300000));
     this.wanted.clear();
-    for (const [file, { n, expression }] of todo) {
+    for (const [file, { urls }] of todo) {
       this.fetching.add(file);
       const dest = `${appHome()}/data/capcom-agents/pokemon/${file}`;
       cx.spawn(async (cx) => {
         try {
           // A similar expression's portrait (or Normal) is kept under the missing one's name.
           const cmd = 'mkdir -p "$(dirname "$1")" && d=$1 && shift && for u in "$@"; do curl -fsSL --max-time 15 -o "$d.part" "$u" && mv "$d.part" "$d" && exit 0; done; rm -f "$d.part"; exit 1';
-          const r = await exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", dest, ...portraitUrls(n, expression)], { timeout: 90000 });
+          const r = await exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", dest, ...urls], { timeout: 90000 });
           if (r.code !== 0) throw new Error(`curl exited ${r.code}`);
           this.cached.add(file);
           this.failed.delete(file);
