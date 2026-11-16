@@ -44,9 +44,12 @@ test("pickPokemon reuses one when all 151 are taken", () => {
   assert.ok(Number.isInteger(n) && n >= 1 && n <= 151);
 });
 
-test("portraitUrls falls back to Normal because some Pokemon lack an expression", () => {
-  assert.deepEqual(portraitUrls(17, "Joyous"), [portraitUrl(17, "Joyous"), portraitUrl(17, "Normal")]);
-  assert.deepEqual(portraitUrls(17, "Normal"), [portraitUrl(17, "Normal")]);
+test("portraitUrls tries similar expressions, then Normal", () => {
+  const u = (e) => portraitUrl(17, e);
+  assert.deepEqual(portraitUrls(17, "Worried"), ["Worried", "Surprised", "Pain", "Stunned", "Sad", "Normal"].map(u));
+  assert.deepEqual(portraitUrls(17, "Determined"), ["Determined", "Inspired", "Normal"].map(u));
+  assert.deepEqual(portraitUrls(17, "Joyous"), ["Joyous", "Happy", "Inspired", "Normal"].map(u));
+  assert.deepEqual(portraitUrls(17, "Normal"), [u("Normal")]);
 });
 
 test("every status expression is one that gets prefetched", () => {

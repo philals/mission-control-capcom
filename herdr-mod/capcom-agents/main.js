@@ -221,10 +221,9 @@ export default class Agents extends View {
       const dest = `${appHome()}/data/capcom-agents/pokemon/${file}`;
       cx.spawn(async (cx) => {
         try {
-          // The Normal portrait is kept under the missing expression's name when upstream has no such expression.
-          const cmd = 'mkdir -p "$(dirname "$1")" && { curl -fsSL --max-time 15 -o "$1.part" "$2" || { [ -n "$3" ] && curl -fsSL --max-time 15 -o "$1.part" "$3"; }; } && mv "$1.part" "$1"';
-          const [url, backup = ""] = portraitUrls(n, expression);
-          const r = await exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", dest, url, backup], { timeout: 40000 });
+          // A similar expression's portrait (or Normal) is kept under the missing one's name.
+          const cmd = 'mkdir -p "$(dirname "$1")" && d=$1 && shift && for u in "$@"; do curl -fsSL --max-time 15 -o "$d.part" "$u" && mv "$d.part" "$d" && exit 0; done; rm -f "$d.part"; exit 1';
+          const r = await exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", dest, ...portraitUrls(n, expression)], { timeout: 90000 });
           if (r.code !== 0) throw new Error(`curl exited ${r.code}`);
           this.cached.add(file);
           this.failed.delete(file);

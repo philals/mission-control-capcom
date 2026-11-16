@@ -38,7 +38,9 @@ export const portraitFile = (n, expression) => `${String(n).padStart(4, "0")}/${
 
 export const portraitUrl = (n, expression) => `${SOURCE}/${portraitFile(n, expression)}`;
 
-// Some Pokemon lack some expressions upstream; Normal exists for all 151.
-export const portraitUrls = (n, expression) => (expression === "Normal" ? [portraitUrl(n, "Normal")] : [portraitUrl(n, expression), portraitUrl(n, "Normal")]);
+// Some Pokemon lack some expressions upstream. Similar ones are tried in order; Normal exists for all 151.
+const SIMILAR = { Worried: ["Surprised", "Pain", "Stunned", "Sad"], Determined: ["Inspired"], Joyous: ["Happy", "Inspired"] };
+
+export const portraitUrls = (n, expression) => [expression, ...(SIMILAR[expression] ?? []), ...(expression === "Normal" ? [] : ["Normal"])].map((e) => portraitUrl(n, e));
 
 export const EXPRESSIONS = ["Worried", "Determined", "Joyous", "Normal"];
