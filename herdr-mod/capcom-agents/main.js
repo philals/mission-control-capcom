@@ -201,14 +201,14 @@ export default class Agents extends View {
   }
 
   // The agent's Pokemon in Pokemon mode: the portrait for its status, else the Normal one while that downloads
-  // (every expression is asked for at once), else null and the SG-1 face shows.
+  // (every expression is asked for at once), else an empty tile, never the SG-1 face.
   pokemonFace(a) {
     const n = portraitsMode() === "pokemon" ? this.pokemon[a.address] : null;
     if (!n) return null;
     const want = this.wantPortrait(n, expressionFor(a.status));
     for (const e of EXPRESSIONS) this.wantPortrait(n, e);
     const path = want ?? this.wantPortrait(n, "Normal");
-    return path ? { path, n, name: nameOf(n) } : null;
+    return { path, n, name: nameOf(n) };
   }
 
   // Download what rows asked for, one curl per file at a time, and not again for five minutes after a failure.
@@ -328,8 +328,8 @@ export default class Agents extends View {
   }
 
   pokemonAvatar(path) {
-    return Avatar.new().size(AV).flex_none().rounded(8).overflow_hidden().bg("#2a2f37")
-      .image(AvatarImage.new(path).size_full())
+    const av = Avatar.new().size(AV).flex_none().rounded(8).overflow_hidden().bg("#2a2f37");
+    return (path ? av.image(AvatarImage.new(path).size_full()) : av)
       .fallback(AvatarFallback.new().size_full().bg("#2a2f37"));
   }
 
@@ -539,7 +539,10 @@ export default class Agents extends View {
     this.assignPokemon(list);
     this.assignColors(list);
     this.frameColor(this.hue(list.find((a) => a.focused) ?? {})?.color);
-    const persona = Object.fromEntries(list.map((a) => [a.address, { label: this.pokemonFace(a)?.name ?? this.character(a)?.label ?? a.program?.name ?? "", pic: this.pokemonFace(a)?.path ?? this.pic(this.character(a)), ...this.hue(a) }]));
+    const persona = Object.fromEntries(list.map((a) => {
+      const mon = this.pokemonFace(a);
+      return [a.address, { label: mon?.name ?? this.character(a)?.label ?? a.program?.name ?? "", pic: mon ? mon.path ?? "" : this.pic(this.character(a)), ...this.hue(a) }];
+    }));
     const personaText = JSON.stringify(persona);
     if (personaText !== this.personaText) {
       this.personaText = personaText;
