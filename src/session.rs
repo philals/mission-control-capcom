@@ -91,7 +91,7 @@ pub struct Index {
     files: BTreeMap<String, FileEntry>,
 }
 
-const INDEX_VERSION: u32 = 2;
+const INDEX_VERSION: u32 = 3;
 
 const MAX_CWDS: usize = 64;
 
@@ -135,6 +135,11 @@ fn spawn_in(line: &str) -> Option<Spawn> {
 
 const CREATE_MARK: &str = "gh pr create";
 
+/// Whether a shell command runs `gh pr create`, not just mentions it (as a `grep` for it does).
+fn runs_create(command: &str) -> bool {
+    command.split(['\n', ';', '&', '|', '(']).any(|part| part.trim_start().starts_with(CREATE_MARK))
+}
+
 /// Ids of the Bash calls in an assistant line that run `gh pr create`.
 fn creates_in(line: &str) -> Vec<String> {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
@@ -145,7 +150,7 @@ fn creates_in(line: &str) -> Vec<String> {
     };
     blocks
         .iter()
-        .filter(|b| b["type"] == "tool_use" && b["input"]["command"].as_str().is_some_and(|c| c.contains(CREATE_MARK)))
+        .filter(|b| b["type"] == "tool_use" && b["input"]["command"].as_str().is_some_and(runs_create))
         .filter_map(|b| b["id"].as_str().map(str::to_string))
         .collect()
 }
@@ -465,6 +470,15 @@ mod tests {
         let urls: Vec<_> = index.sessions().into_iter().map(|(u, s)| (u, s.session)).collect();
         assert_eq!(urls, vec![(URL.to_string(), "s1".to_string()), ("https://github.com/acme/web/pull/9".to_string(), "s1".to_string())]);
         assert!(index.files.values().all(|e| e.creating.is_empty()), "answered calls are forgotten");
+    }
+
+    #[test]
+    fn a_command_that_only_mentions_gh_pr_create_does_not_run_it() {
+        assert!(runs_create("gh pr create -R a/b --draft"));
+        assert!(runs_create("cd x && gh pr create --fill\ngh pr create -R c/d"));
+        assert!(runs_create("git push -u origin x; (gh pr create --fill)"));
+        assert!(!runs_create("grep -o 'gh pr create[^\"]*' log.jsonl"));
+        assert!(!runs_create("sed -n 3p f | grep 'gh pr create -R a/b'"));
     }
 
     #[test]
