@@ -69,7 +69,8 @@ fn strip(pr: &PullRequest, durations: &Durations) -> Vec<Value> {
                 .then(|| Some(crate::prs::check_seconds(k, now)? as f64 / durations.estimate(&pr.repo, k)?.max(1) as f64))
                 .flatten()
                 .map(|f| (f.clamp(0.0, 0.95) * 100.0).round() / 100.0);
-            json!({ "state": check_state(k.state), "group": k.workflow, "label": k.label(), "done": done })
+            let waiting_on_you = k.external && k.state == crate::prs::CheckState::Queued && k.url.as_deref().is_some_and(|u| u.contains("chromatic.com"));
+            json!({ "state": check_state(k.state), "group": k.workflow, "label": k.label(), "done": done, "attention": waiting_on_you })
         })
         .collect()
 }
