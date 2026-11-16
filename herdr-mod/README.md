@@ -67,7 +67,7 @@ number), kept for as long as the agent exists. Its portrait sits on the characte
 
 ### Pokemon mode
 
-The sort icon in the Agents header opens a popup with a **Portraits** section: SG-1 or Pokémon. In Pokémon mode each
+The small **SG-1 / Pokémon** button in the Agents header, left of the sort icon, switches the portraits (click to flip). In Pokémon mode each
 agent shows one of the first 151 Pokémon (picked at random, kept for as long as the agent exists, separate from its
 SG-1 character), and the face follows the agent's status:
 

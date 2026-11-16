@@ -62,7 +62,6 @@ const SORTS = [
   { id: "grouped", label: "Grouped by space", icon: "layers" },
 ];
 const sortOf = () => SORTS.find((s) => s.id === shared("agents.sort")) ?? SORTS[0];
-const PORTRAITS = [{ id: "sg1", label: "SG-1" }, { id: "pokemon", label: "Pokémon" }];
 const portraitsMode = () => (shared("agents.portraits") === "pokemon" ? "pokemon" : "sg1");
 const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle" };
 const SECTION_STATUS = { 4: "blocked", 3: "done", 2: "working" };
@@ -402,23 +401,7 @@ export default class Agents extends View {
         })
         .child(svg(`mods/workspace-chrome/${s.icon}.svg`).size(14).flex_none().text_color(t.muted))
         .child(div().flex_1().child(s.label))
-        .when(s.id === on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))))
-      .child(div().px(8).pt(8).pb(6).text_size(11).text_color(t.dim).child("Portraits"))
-      .children(PORTRAITS.map((p) => h_flex()
-        .id(`portraits-${p.id}`)
-        .h(31)
-        .px(8)
-        .gap(9)
-        .rounded(7)
-        .items_center()
-        .text_color(t.foreground)
-        .hover((el) => el.bg(t.hover))
-        .on_click(() => {
-          setShared("agents.portraits", p.id);
-          closeOverlay(props().overlay);
-        })
-        .child(div().flex_1().child(p.label))
-        .when(p.id === portraitsMode(), (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))));
+        .when(s.id === on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))));
   }
 
   // `capcom pr-do` from the card, then ask My Watch to look again.
@@ -822,14 +805,36 @@ export default class Agents extends View {
             .justify_between()
             .child(div().text_size(11.5).font_medium().text_color(t.dim).child("Agents"))
             .child(
-              div()
-                .id("ag-sort")
-                .text_size(11)
-                .text_color(t.dim)
-                .hover((s) => s.text_color(t.foreground))
-                .on_click(() => openOverlay({ mod: "capcom-agents", kind: "popup", width: 200, height: 232, props: { sortMenu: true } }))
-                .tooltip(`Sort agents: ${sort.label}`)
-                .child(svg(`mods/workspace-chrome/${sort.icon}.svg`).size(14)),
+              h_flex().gap(10).items_center()
+                .child(
+                  div()
+                    .id("ag-portraits")
+                    .px(6)
+                    .py(1)
+                    .rounded(5)
+                    .border(1)
+                    .border_color(t.dim)
+                    .text_size(10.5)
+                    .text_color(t.dim)
+                    .cursor_pointer()
+                    .hover((s) => s.text_color(t.foreground))
+                    .on_click((_e, cx) => {
+                      setShared("agents.portraits", portraitsMode() === "pokemon" ? "sg1" : "pokemon");
+                      cx.notify();
+                    })
+                    .tooltip(portraitsMode() === "pokemon" ? "Portraits: Pokémon (click for SG-1)" : "Portraits: SG-1 (click for Pokémon)")
+                    .child(portraitsMode() === "pokemon" ? "Pokémon" : "SG-1"),
+                )
+                .child(
+                  div()
+                    .id("ag-sort")
+                    .text_size(11)
+                    .text_color(t.dim)
+                    .hover((s) => s.text_color(t.foreground))
+                    .on_click(() => openOverlay({ mod: "capcom-agents", kind: "popup", width: 200, height: 140, props: { sortMenu: true } }))
+                    .tooltip(`Sort agents: ${sort.label}`)
+                    .child(svg(`mods/workspace-chrome/${sort.icon}.svg`).size(14)),
+                ),
             ),
         ),
       )
