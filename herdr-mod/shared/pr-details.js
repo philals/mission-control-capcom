@@ -14,8 +14,11 @@ export function openUrl(url) {
 
 export const short = (repo) => repo.split("/").pop();
 
+// GitHub's merged purple.
+export const MERGED = "#a371f7";
+
 export function dotColor(pr, merged, t) {
-  return merged ? t.ansi5 : pr.ci === "red" ? "#ff1f1f" : pr.ci === "pending" ? "#ffb000" : pr.ci === "none" ? t.dim : "#22c55e";
+  return merged ? MERGED : pr.ci === "red" ? "#ff1f1f" : pr.ci === "pending" ? "#ffb000" : pr.ci === "none" ? t.dim : "#22c55e";
 }
 
 // `capcom pr-do`: change a PR or a setting; resolves to { text, ok }.

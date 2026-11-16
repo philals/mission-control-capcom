@@ -3,7 +3,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { run, theme, home, readTextFile, spaces } from "herdr";
-import { capcom, openUrl, short } from "./pr-details.js";
+import { capcom, openUrl, short, MERGED } from "./pr-details.js";
 
 const EVERY_MS = 5000;
 const STATUSES = [
@@ -221,7 +221,7 @@ export default class CapcomBoard extends View {
     if (task.blocked) flags.push({ text: `blocked${task.blocked.reason ? `: ${task.blocked.reason}` : ""}`, color: "#ff1f1f" });
     if (waiting.length && task.status !== "done") flags.push({ text: `waits ${waiting.join(", ")}`, color: t.ansi3 });
     if (task.type && task.type !== "pr") flags.push({ text: task.type, color: t.muted });
-    const prColor = (p) => (p.state === "merged" ? t.ansi5 : p.state === "ready" ? "#22c55e" : p.state === "draft" ? "#ffb000" : t.dim);
+    const prColor = (p) => (p.state === "merged" ? MERGED : p.state === "ready" ? "#22c55e" : p.state === "draft" ? "#ffb000" : t.dim);
     return v_flex()
       .id(`task-${task.id}`)
       .gap(4)

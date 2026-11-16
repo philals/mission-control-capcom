@@ -4,7 +4,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, run, spaces, theme, shared, setShared } from "herdr";
 import { strip, stripCount, hasRunning } from "./strip.js";
-import { SH, capcom, openUrl, short, dotColor, prDo, pill, prDetails } from "./pr-details.js";
+import { SH, capcom, openUrl, short, dotColor, prDo, pill, prDetails, MERGED } from "./pr-details.js";
 
 const EVERY_MS = 30000;
 
@@ -187,7 +187,7 @@ export default class CapcomPrs extends View {
       .cursor_pointer()
       .tooltip(merged ? this.hint(pr) : [pr.draft ? "Draft" : "Ready for review", pr.blocker ? `Blocked: ${pr.blocker}` : "Nothing in the way", "Click for details"].join(" · "))
       .hover((s) => s.bg(t.hover))
-      .when(merged, (el) => el.border_l(3).border_color(t.ansi5))
+      .when(merged, (el) => el.border_l(3).border_color(MERGED))
       .on_click((_e, cx) => {
         if (merged) return this.go(pr);
         this.expanded = this.expanded === pr.url ? null : pr.url;
@@ -225,7 +225,7 @@ export default class CapcomPrs extends View {
               div()
                 .text_size(13)
                 .truncate()
-                .text_color(merged ? t.ansi5 : ready ? t.foreground : t.muted)
+                .text_color(merged ? MERGED : ready ? t.foreground : t.muted)
                 .child(pr.title),
             ),
           )
@@ -387,8 +387,8 @@ export default class CapcomPrs extends View {
                 .mt(18)
                 .pb(6)
                 .border_t(2)
-                .border_color(t.ansi5)
-                .child(this.section("Merged", merged.length, t, t.ansi5))
+                .border_color(MERGED)
+                .child(this.section("Merged", merged.length, t, MERGED))
                 .children(merged.map((p) => this.row(p, t, true))),
             ),
           ),
