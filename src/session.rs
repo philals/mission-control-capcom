@@ -77,6 +77,9 @@ struct FileEntry {
     links: Vec<Link>,
     #[serde(default)]
     spawns: Vec<Spawn>,
+    /// `gh pr create` calls whose result has not been read yet.
+    #[serde(default)]
+    creating: Vec<String>,
 }
 
 /// Which session made which PR, kept on disk so only the new part of each transcript is read.
@@ -88,7 +91,7 @@ pub struct Index {
     files: BTreeMap<String, FileEntry>,
 }
 
-const INDEX_VERSION: u32 = 1;
+const INDEX_VERSION: u32 = 2;
 
 const MAX_CWDS: usize = 64;
 
@@ -128,6 +131,59 @@ fn spawn_in(line: &str) -> Option<Spawn> {
         };
         Some(Spawn { pane: pane.to_string(), session: session.to_string() })
     })
+}
+
+const CREATE_MARK: &str = "gh pr create";
+
+/// Ids of the Bash calls in an assistant line that run `gh pr create`.
+fn creates_in(line: &str) -> Vec<String> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+        return Vec::new();
+    };
+    let Some(blocks) = v["message"]["content"].as_array() else {
+        return Vec::new();
+    };
+    blocks
+        .iter()
+        .filter(|b| b["type"] == "tool_use" && b["input"]["command"].as_str().is_some_and(|c| c.contains(CREATE_MARK)))
+        .filter_map(|b| b["id"].as_str().map(str::to_string))
+        .collect()
+}
+
+/// Every GitHub PR URL in some text, in order, without repeats.
+fn pr_urls(text: &str) -> Vec<String> {
+    let mut urls: Vec<String> = Vec::new();
+    for (i, _) in text.match_indices("https://github.com/") {
+        let url: String = text[i..].chars().take_while(|c| c.is_ascii_alphanumeric() || "/:.-_".contains(*c)).collect();
+        let parts: Vec<&str> = url["https://github.com/".len()..].split('/').collect();
+        let ok = parts.len() == 4 && parts[2] == "pull" && !parts[3].is_empty() && parts[3].bytes().all(|b| b.is_ascii_digit());
+        if ok && !urls.contains(&url) {
+            urls.push(url);
+        }
+    }
+    urls
+}
+
+/// PRs printed by the results of the given `gh pr create` calls, with the ids of the calls answered.
+fn created_in(line: &str, creating: &[String]) -> Option<(Vec<Link>, Vec<String>)> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    let session = v["sessionId"].as_str()?;
+    let at = v["timestamp"].as_str().unwrap_or_default();
+    let mut links = Vec::new();
+    let mut answered = Vec::new();
+    for b in v["message"]["content"].as_array()?.iter().filter(|b| b["type"] == "tool_result") {
+        let Some(id) = b["tool_use_id"].as_str().filter(|id| creating.iter().any(|c| c == id)) else {
+            continue;
+        };
+        answered.push(id.to_string());
+        let text = match &b["content"] {
+            serde_json::Value::String(t) => t.clone(),
+            serde_json::Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("\n"),
+            _ => continue,
+        };
+        links.extend(pr_urls(&text).into_iter().map(|url| Link { url, session: session.to_string(), at: at.to_string() }));
+    }
+    Some((links, answered))
 }
 
 impl Index {
@@ -207,6 +263,16 @@ impl Index {
                 if let Some(spawn) = spawn_in(&text) {
                     entry.spawns.push(spawn);
                     changed = true;
+                }
+            }
+            if text.contains(CREATE_MARK) && text.contains("\"tool_use\"") {
+                entry.creating.extend(creates_in(&text));
+            }
+            if !entry.creating.is_empty() && text.contains("\"tool_result\"") {
+                if let Some((links, answered)) = created_in(&text, &entry.creating) {
+                    entry.creating.retain(|c| !answered.contains(c));
+                    changed |= !links.is_empty();
+                    entry.links.extend(links);
                 }
             }
             if text.contains(LINK_MARK) {
@@ -384,5 +450,26 @@ mod tests {
         assert_eq!(Index::load(&file).spawns().len(), 3, "kept through the file");
         std::fs::write(&file, r#"{"files":{"x":{"offset":99,"cwds":[],"links":[]}}}"#).unwrap();
         assert!(Index::load(&file).spawns().is_empty() && Index::load(&file).files.is_empty(), "an index from before spawns are read is read again");
+    }
+
+    #[test]
+    fn every_pr_one_gh_pr_create_call_printed_is_linked_even_without_a_pr_link_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let call = r#"{"type":"assistant","sessionId":"s1","message":{"content":[{"type":"tool_use","id":"t1","input":{"command":"gh pr create -R acme/api && gh pr create -R acme/web"}},{"type":"tool_use","id":"t2","input":{"command":"gh pr view 5"}}]}}"#;
+        let created = r#"{"type":"user","sessionId":"s1","timestamp":"2026-11-16T22:05:00Z","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"https://github.com/acme/api/pull/7\nhttps://github.com/acme/web/pull/9\n"}]}}"#;
+        let viewed = r#"{"type":"user","sessionId":"s1","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"url: https://github.com/acme/other/pull/5"}]}}"#;
+        let body = format!("{call}\n{created}\n{viewed}\n") + &link("s1", "https://github.com/acme/web/pull/9", "2026-11-16T22:05:05Z");
+        transcript(dir.path(), "-w", "s1", "/w", &body);
+        let mut index = Index::default();
+        assert!(index.refresh(dir.path()));
+        let urls: Vec<_> = index.sessions().into_iter().map(|(u, s)| (u, s.session)).collect();
+        assert_eq!(urls, vec![(URL.to_string(), "s1".to_string()), ("https://github.com/acme/web/pull/9".to_string(), "s1".to_string())]);
+        assert!(index.files.values().all(|e| e.creating.is_empty()), "answered calls are forgotten");
+    }
+
+    #[test]
+    fn only_pr_urls_are_picked_out_of_text() {
+        let text = "see https://github.com/a/b/pull/12, https://github.com/a/b/pull/12 and https://github.com/a/b/issues/3 or https://github.com/a/b/pull/x";
+        assert_eq!(pr_urls(text), vec!["https://github.com/a/b/pull/12".to_string()]);
     }
 }
