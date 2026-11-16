@@ -99,11 +99,16 @@ export default class Agents extends View {
     this.hues = JSON.parse(localStorage.getItem("hues") ?? "{}");
     this.photos = new Map();
     this.scanPhotos(cx);
-    this.pokemon = Object.fromEntries(Object.entries(JSON.parse(localStorage.getItem("pokemon") ?? "{}")).filter(([, n]) => validNumber(n)));
+    let stored = {};
+    try { stored = JSON.parse(localStorage.getItem("pokemon") ?? "{}") ?? {}; } catch {}
+    this.pokemon = Object.fromEntries(Object.entries(stored).filter(([, n]) => validNumber(n)));
     this.cached = new Set();
+    this.wanted = new Map();
     this.fetching = new Set();
     this.failed = new Map();
+    this.scanned = false;
     this.scanPortraits(cx);
+    cx.timer.every(1500, (cx) => this.fetchWanted(cx));
     cx.timer.every(30000, (cx) => { this.scanPhotos(cx); cx.notify(); });
     cx.timer.every(30000, (cx) => cx.notify());
     this.refreshNotes(cx);
@@ -161,10 +166,13 @@ export default class Agents extends View {
       try {
         const root = `${appHome()}/data/capcom-agents/pokemon`;
         for (const dir of await fs.readdir(root)) {
-          for (const f of await fs.readdir(`${root}/${dir}`)) if (f.endsWith(".png")) this.cached.add(`${dir}/${f}`);
+          try {
+            for (const f of await fs.readdir(`${root}/${dir}`)) if (f.endsWith(".png")) this.cached.add(`${dir}/${f}`);
+          } catch {}
         }
-        cx.notify();
       } catch {}
+      this.scanned = true;
+      cx.notify();
     });
   }
 
@@ -184,30 +192,39 @@ export default class Agents extends View {
     if (dirty) localStorage.setItem("pokemon", JSON.stringify(this.pokemon));
   }
 
-  // The portrait's path under the app home if it's downloaded; otherwise fetch it (once at a time, not again for
-  // five minutes after a failure) and say null, so the row shows the SG-1 face meanwhile.
-  wantPortrait(cx, n, expression) {
+  // The portrait's path under the app home if it's downloaded; otherwise note that it's wanted (fetchWanted downloads it)
+  // and say null, so the row shows the SG-1 face meanwhile.
+  wantPortrait(n, expression) {
     const file = portraitFile(n, expression);
     if (this.cached.has(file)) return `data/capcom-agents/pokemon/${file}`;
-    const failedAt = this.failed.get(file);
-    if (this.fetching.has(file) || (failedAt && Date.now() - failedAt < 300000)) return null;
-    this.fetching.add(file);
-    const dest = `${appHome()}/data/capcom-agents/pokemon/${file}`;
-    cx.spawn(async (cx) => {
-      try {
-        // The Normal portrait is kept under the missing expression's name when upstream has no such expression.
-        const cmd = 'mkdir -p "$(dirname "$1")" && { curl -fsSL --max-time 15 -o "$1.part" "$2" || { [ -n "$3" ] && curl -fsSL --max-time 15 -o "$1.part" "$3"; }; } && mv "$1.part" "$1"';
-        const [url, backup = ""] = portraitUrls(n, expression);
-        await exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", dest, url, backup], { timeout: 40000 });
-        this.cached.add(file);
-        this.failed.delete(file);
-      } catch {
-        this.failed.set(file, Date.now());
-      }
-      this.fetching.delete(file);
-      cx.notify();
-    });
+    this.wanted.set(file, { n, expression });
     return null;
+  }
+
+  // Download what rows asked for, one curl per file at a time, and not again for five minutes after a failure.
+  fetchWanted(cx) {
+    if (!this.scanned || !this.wanted.size) return;
+    const todo = [...this.wanted].filter(([file]) => !this.cached.has(file) && !this.fetching.has(file) && !(Date.now() - (this.failed.get(file) ?? 0) < 300000));
+    this.wanted.clear();
+    for (const [file, { n, expression }] of todo) {
+      this.fetching.add(file);
+      const dest = `${appHome()}/data/capcom-agents/pokemon/${file}`;
+      cx.spawn(async (cx) => {
+        try {
+          // The Normal portrait is kept under the missing expression's name when upstream has no such expression.
+          const cmd = 'mkdir -p "$(dirname "$1")" && { curl -fsSL --max-time 15 -o "$1.part" "$2" || { [ -n "$3" ] && curl -fsSL --max-time 15 -o "$1.part" "$3"; }; } && mv "$1.part" "$1"';
+          const [url, backup = ""] = portraitUrls(n, expression);
+          const r = await exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", dest, url, backup], { timeout: 40000 });
+          if (r.code !== 0) throw new Error(`curl exited ${r.code}`);
+          this.cached.add(file);
+          this.failed.delete(file);
+        } catch {
+          this.failed.set(file, Date.now());
+        }
+        this.fetching.delete(file);
+        cx.notify();
+      });
+    }
   }
 
   // Each agent keeps one character for good: the first one nobody on screen has, in the cast's order.
@@ -303,7 +320,8 @@ export default class Agents extends View {
 
   pokemonAvatar(path) {
     return Avatar.new().size(AV).flex_none().rounded(8).overflow_hidden().bg("#2a2f37")
-      .image(AvatarImage.new(path).size_full());
+      .image(AvatarImage.new(path).size_full())
+      .fallback(AvatarFallback.new().size_full().bg("#2a2f37"));
   }
 
   // Stamps agents whose state changed. Done and idle count as one: looking at a
@@ -607,7 +625,7 @@ export default class Agents extends View {
       const pic = icon(a.program, 16, t.foreground);
       const who = this.character(a);
       const mon = who && portraitsMode() === "pokemon" ? this.pokemon[a.address] : null;
-      const monPic = mon ? this.wantPortrait(cx, mon, expressionFor(a.status)) : null;
+      const monPic = mon ? this.wantPortrait(mon, expressionFor(a.status)) : null;
       const more = detail.get(a.address);
       // What the agent is on leads the row; the character is only a label under it.
       const note = notes[a.address];
