@@ -29,5 +29,6 @@ pub mod settings;
 pub mod starting;
 pub mod store;
 pub mod taskdoc;
+pub mod tell;
 pub mod usage;
 pub mod web;

@@ -46,7 +46,7 @@
 | **GitHub** (`gh`) | PRs, CI checks, Copilot reviews, review threads, Actions runs, draft/ready, labels, branch updates |
 | **Merge bot** (Kodiak style) | Reads its config for automerge and autoupdate labels; adds or removes them when you tick it |
 | **[Herdr](https://herdr.dev)** terminal | A plugin that opens the board as an overlay and starts agents in panes |
-| **Herdr desktop app** | The CapCom panel (Kanban, Jira), the My Watch panel (PRs, daily scripts) and the SG-1 agents sidebar, and agents started in its panes |
+| **Herdr desktop app** | The CapCom panel (Kanban, Jira), the My Watch panel (PRs, daily scripts) and the Pokémon agents sidebar, and agents started in its panes |
 | **Orca** | Starts and reaches agents in Orca terminals, and works from Orca's browser |
 | **Claude Desktop** | Starts sessions with a skill typed in, and reaches them again |
 | **Desktop notifications** | none: Herdr handles alerts |
@@ -76,13 +76,13 @@ The command palette (`Ctrl+P`) lists every action that fits where you are, each 
   <img src="docs/img/web-story.png" alt="CapCom web showing one story as a board of tasks in TO DO, IMPLEMENTING and DONE columns" width="100%">
 </p>
 
-### In the Herdr desktop app: My Watch, the CapCom panel and SG-1 agents
+### In the Herdr desktop app: My Watch, the CapCom panel and Pokémon agents
 
 <p align="center">
   <img src="docs/img/herdr-sidebar.png" alt="The Herdr app's sidebar: agents grouped into Needs you, Working and Idle, each with a character portrait in a ring of chevrons showing its PR's progress, above the My Watch list with a progress strip per PR" width="380">
 </p>
 
-Each agent gets a Stargate SG-1 character whose ring of seven chevrons lights one step per stage of its PR; below, **My Watch**, a panel on the right with a **Daily** section for your start-of-day scripts (+ adds a PR or Actions run link from the clipboard) shows each PR's CI as a strip of segments, with buttons for its agent, its link and its details. See [herdr-mod/README.md](herdr-mod/README.md).
+Each agent gets a Pokémon, whose face follows the agent's status, and other agents can message it by that name (`capcom tell krabby "..."`); below, **My Watch**, a panel on the right with a **Daily** section for your start-of-day scripts (+ adds a PR or Actions run link from the clipboard) shows each PR's CI as a strip of segments, with buttons for its agent, its link and its details. See [herdr-mod/README.md](herdr-mod/README.md).
 
 ## The name
 
@@ -101,9 +101,9 @@ If that sounds like you, great. If not, treat this as a worked example: fork it,
 | Part | What it does |
 |---|---|
 | **`capcom`** (command) | The only writer of each story's `board.json`: tasks, statuses, dependencies, PRs. Refuses illegal moves. Everything it prints is JSON. |
-| **Five Claude Code skills** | `/story-plan`, `/story-implement-task`, `/story-review`, `/pr-address` (works on any PR) and `/agent-note` (an agent's TLDR of what it is doing and waiting for, shown in the agents panel). They talk to you, Jira and `git`/`gh`, and change the board only through `capcom`. |
+| **Six Claude Code skills** | `/story-plan`, `/story-implement-task`, `/story-review`, `/pr-address` (works on any PR), `/agent-note` (an agent's TLDR of what it is doing and waiting for, shown in the agents panel) and `/agent-chat` (message another agent by its Pokémon name). They talk to you, Jira and `git`/`gh`, and change the board only through `capcom`. |
 | **`capcom-tui`** | A live terminal board (keyboard and mouse): your stories, your open PRs with their CI stages, and the GitHub Actions runs you started by hand. It can start the skills for you and finish tasks when their PRs merge. |
-| **Herdr app mods** (optional) | `capcom-prs` (My Watch) and `capcom-daily` in the My Watch panel, `capcom-board` (Kanban) and `capcom-jira` in the CapCom panel, and `capcom-agents` (SG-1 agents) in the sidebar, for the Herdr desktop app; install with `scripts/install-herdr-mod.sh`. |
+| **Herdr app mods** (optional) | `capcom-prs` (My Watch) and `capcom-daily` in the My Watch panel, `capcom-board` (Kanban) and `capcom-jira` in the CapCom panel, and `capcom-agents` (Pokémon agents) in the sidebar, for the Herdr desktop app; install with `scripts/install-herdr-mod.sh`. |
 | **Herdr plugin** (optional) | Opens `capcom-tui` from a keyboard shortcut in [Herdr](https://herdr.dev), and lets the board launch agents in Herdr panes. |
 
 ## How it works
@@ -228,7 +228,7 @@ src/                      the capcom command and its library (board model, rules
 src/bin/capcom-tui/       the terminal board (app state, drawing, GitHub polling, Herdr, cache, demo data)
 skills/                   the six Claude Code skills
 schemas/board.schema.json JSON Schema for board.json
-herdr-mod/                the Herdr app panels (My Watch, SG-1 agents)
+herdr-mod/                the Herdr app panels (My Watch, Pokémon agents)
 src/demo.rs               the invented data behind every --demo and every picture
 herdr-plugin.toml         the Herdr plugin manifest (scripts/open.sh is its action)
 docs/                     design notes, command reference, TUI and web guides, README pictures

@@ -50,6 +50,19 @@ enum Cmd {
         #[arg(long, env = "CLAUDE_CODE_SESSION_ID")]
         session: String,
     },
+    /// Send a message to another live agent by its Pokemon name (see `whois`); it arrives as a prompt in that agent's terminal.
+    Tell {
+        /// The agent's Pokemon name, for example krabby (case and punctuation do not matter)
+        pokemon: String,
+        /// The message; several words are joined with spaces
+        #[arg(required = true, num_args = 1..)]
+        text: Vec<String>,
+    },
+    /// List the live agents by Pokemon name and terminal, or look one up
+    Whois {
+        /// The agent's Pokemon name (leave out to list them all)
+        pokemon: Option<String>,
+    },
     /// Serve the boards and your open PRs as a page on localhost (read-only; it polls GitHub itself while a browser is open)
     Web {
         /// Port on 127.0.0.1 to listen on (1969, the year of the first landing)
@@ -324,6 +337,19 @@ fn main() -> Result<()> {
         let note = capcom::notes::write(&dir, &session, capcom::notes::Update { task, progress, waiting, needs_you, next, cwd }, &now)?;
         return print(&serde_json::to_value(note)?);
     }
+    if let Cmd::Tell { pokemon, text } = &cli.cmd {
+        let me = std::env::var("HC_TERMINAL_ID").ok();
+        let (to, terminal, from) = capcom::tell::tell(pokemon, &text.join(" "), me.as_deref())?;
+        return print(&json!({ "to": to, "terminal": terminal, "from": from }));
+    }
+    if let Cmd::Whois { pokemon } = &cli.cmd {
+        let all = capcom::tell::load()?;
+        let shown: Vec<&capcom::tell::Agent> = match pokemon {
+            Some(name) => vec![capcom::tell::resolve(&all, name)?],
+            None => all.iter().collect(),
+        };
+        return print(&Value::Array(shown.iter().map(|a| json!({ "name": a.name, "terminal": a.terminal })).collect()));
+    }
     if let Cmd::Prs { query, force, demo } = &cli.cmd {
         return print(&if *demo { capcom::prs_json::build_demo() } else { capcom::prs_json::build(query, *force) });
     }
@@ -346,7 +372,7 @@ fn main() -> Result<()> {
             ops::init_story(root, &key, &title, jira_url.as_deref())?;
             print(&json!({ "key": key, "dir": store::story_dir(root, &key)? }))
         }
-        Cmd::Note { .. } | Cmd::Prs { .. } | Cmd::PrDo { .. } => unreachable!("handled before the root is needed"),
+        Cmd::Note { .. } | Cmd::Tell { .. } | Cmd::Whois { .. } | Cmd::Prs { .. } | Cmd::PrDo { .. } => unreachable!("handled before the root is needed"),
         Cmd::Web { port, pr_query, no_prs, browser, workdir, deploy_repos, no_runs, demo: _ } => {
             use capcom::{cache, fixstate, prs, runs, settings, web};
             use std::sync::Arc;

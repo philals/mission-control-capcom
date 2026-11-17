@@ -6,7 +6,6 @@ import { v_flex, h_flex, HoverCard, Avatar, AvatarImage, AvatarFallback } from "
 import * as fs from "fs/promises";
 import { appHome, agents, terminals, panes, focused, spaces, run, exec, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 import { SH, dotColor, short, openUrl, prDo, prDetails, needsYou, attentionIcon } from "./pr-details.js";
-import { CHARACTERS } from "./characters.js";
 import { BALL_FILE, BALL_URL, EXPRESSIONS, nameOf, assignable, pickPokemon, expressionFor, portraitFile, portraitUrls, typeColor } from "./pokemon.js";
 import { who as whoIs } from "./identity.js";
 
@@ -62,7 +61,6 @@ const SORTS = [
   { id: "grouped", label: "Grouped by space", icon: "layers" },
 ];
 const sortOf = () => SORTS.find((s) => s.id === shared("agents.sort")) ?? SORTS[0];
-const portraitsMode = () => (shared("agents.portraits") === "pokemon" ? "pokemon" : "sg1");
 const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle" };
 const SECTION_STATUS = { 4: "blocked", 3: "done", 2: "working" };
 
@@ -112,10 +110,7 @@ export default class Agents extends View {
     this.pendingPins = JSON.parse(localStorage.getItem("pins") ?? "[]");
     if (!this.pendingPins.length) localStorage.removeItem("pins");
     this.migratingPins = new Set();
-    this.persona = JSON.parse(localStorage.getItem("persona") ?? "{}");
     this.hues = JSON.parse(localStorage.getItem("hues") ?? "{}");
-    this.photos = new Map();
-    this.scanPhotos(cx);
     let stored = {};
     try { stored = JSON.parse(localStorage.getItem("pokemon") ?? "{}") ?? {}; } catch {}
     this.pokemon = Object.fromEntries(Object.entries(stored).filter(([, n]) => assignable(n)));
@@ -132,7 +127,6 @@ export default class Agents extends View {
       this.pulse = !this.pulse;
       cx.notify();
     });
-    cx.timer.every(30000, (cx) => { this.scanPhotos(cx); cx.notify(); });
     cx.timer.every(30000, (cx) => cx.notify());
     this.models = {};
     this.refreshNotes(cx);
@@ -187,23 +181,6 @@ export default class Agents extends View {
     }
   }
 
-  // Photos you drop in avatars/ (<id>.jpg or .png) replace the drawn portraits.
-  scanPhotos(cx) {
-    cx.spawn(async (cx) => {
-      try {
-        const files = await fs.readdir(`${appHome()}/mods/capcom-agents/avatars`);
-        const found = new Map();
-        for (const f of files) {
-          const m = /^(.+)\.(jpe?g|png)$/i.exec(f);
-          if (m) found.set(m[1].toLowerCase(), `mods/capcom-agents/avatars/${f}`);
-        }
-        const same = found.size === this.photos.size && [...found].every(([k, v]) => this.photos.get(k) === v);
-        this.photos = found;
-        if (!same) cx.notify();
-      } catch {}
-    });
-  }
-
   // Portraits already downloaded for Pokemon mode: "0004/Worried.png" and so on.
   scanPortraits(cx) {
     cx.spawn(async (cx) => {
@@ -238,7 +215,7 @@ export default class Agents extends View {
   }
 
   // The portrait's path under the app home if it's downloaded; otherwise note that it's wanted (fetchWanted downloads it)
-  // and say null, so the row shows the SG-1 face meanwhile.
+  // and say null, so the row shows a Poke Ball meanwhile.
   wantPortrait(n, expression) {
     const file = portraitFile(n, expression);
     if (this.cached.has(file)) return `data/capcom-agents/pokemon/${file}`;
@@ -252,10 +229,10 @@ export default class Agents extends View {
     return null;
   }
 
-  // The agent's Pokemon in Pokemon mode: the portrait for its status, else the Normal one while that downloads
-  // (every expression is asked for at once), else a Poke Ball (never the SG-1 face).
+  // The agent's Pokemon: the portrait for its status, else the Normal one while that downloads
+  // (every expression is asked for at once), else a Poke Ball.
   pokemonFace(a) {
-    const n = portraitsMode() === "pokemon" ? this.pokemon[a.address] : null;
+    const n = this.pokemon[a.address];
     if (!n) return null;
     const want = this.wantPortrait(n, expressionFor(a.status));
     for (const e of EXPRESSIONS) this.wantPortrait(n, e);
@@ -286,28 +263,6 @@ export default class Agents extends View {
         cx.notify();
       });
     }
-  }
-
-  // Each agent keeps one character for good: the first one nobody on screen has, in the cast's order.
-  // With more agents than characters the cast repeats with a number.
-  assign(list) {
-    const live = new Set(list.map((a) => a.address));
-    const taken = new Set(list.map((a) => this.persona[a.address]).filter(Boolean));
-    let dirty = false;
-    for (const a of list) {
-      if (this.persona[a.address]) continue;
-      let round = 1;
-      let pick;
-      while (!pick) {
-        pick = CHARACTERS.map((c) => (round === 1 ? c.id : `${c.id}#${round}`)).find((id) => !taken.has(id));
-        round++;
-      }
-      this.persona[a.address] = pick;
-      taken.add(pick);
-      dirty = true;
-    }
-    for (const k of Object.keys(this.persona)) if (!live.has(k) && !this.changed[k]) { delete this.persona[k]; dirty = true; }
-    if (dirty) localStorage.setItem("persona", JSON.stringify(this.persona));
   }
 
   // Past twelve sessions a colour repeats with a number (2nd use of colour 1 is "1#2"), so a clash shows.
@@ -349,12 +304,6 @@ export default class Agents extends View {
     return COLORS[Number(i)] ? { color: COLORS[Number(i)], n: n ? Number(n) : 0 } : null;
   }
 
-  character(a) {
-    const [id, n] = (this.persona[a.address] ?? "").split("#");
-    const c = CHARACTERS.find((x) => x.id === id);
-    return c && { ...c, label: n ? `${c.name} ${n}` : c.name };
-  }
-
   // The agent's Claude Code session id: its terminal's foreground process is the `claude` that wrote
   // ~/.claude/sessions/<pid>.json.
   async sessionOf(terminal) {
@@ -365,18 +314,6 @@ export default class Agents extends View {
     } catch {
       return "";
     }
-  }
-
-  pic(c) {
-    return c ? this.photos.get(c.id) ?? `mods/capcom-agents/portraits/${c.id}.svg` : null;
-  }
-
-  // The portrait: your photo, else the drawn one, on the character's colour.
-  avatar(t, a, c) {
-    const pic = this.pic(c);
-    return Avatar.new().size(AV).flex_none().rounded_full().overflow_hidden().bg(c.color)
-      .image(AvatarImage.new(pic).size_full())
-      .fallback(AvatarFallback.new().size_full().bg(c.bg));
   }
 
   pokemonAvatar(path) {
@@ -589,13 +526,12 @@ export default class Agents extends View {
     const now = Date.now();
     this.track(list, now);
     this.hold(list);
-    this.assign(list);
     this.assignPokemon(list);
     this.assignColors(list);
     this.frameColor(this.hue(list.find((a) => a.focused) ?? {})?.color);
     const persona = Object.fromEntries(list.map((a) => {
       const mon = this.pokemonFace(a);
-      return [a.address, { label: mon?.name ?? this.character(a)?.label ?? a.program?.name ?? "", pic: mon ? mon.path ?? "" : this.pic(this.character(a)), ...this.hue(a) }];
+      return [a.address, { label: mon?.name ?? a.program?.name ?? "", pic: mon?.path ?? "", ...this.hue(a) }];
     }));
     const personaText = JSON.stringify(persona);
     if (personaText !== this.personaText) {
@@ -673,11 +609,10 @@ export default class Agents extends View {
 
     const row = (a, i, subs = []) => {
       const pic = icon(a.program, 16, t.foreground);
-      const who = this.character(a);
-      const mon = who ? this.pokemonFace(a) : null;
+      const mon = this.pokemonFace(a);
       const more = detail.get(a.address);
-      const model = who ? modelInfo(this.models[a.address]) : null;
-      // What the agent is on leads the row; the character is only a label under it.
+      const model = modelInfo(this.models[a.address]);
+      // What the agent is on leads the row; its Pokemon is only a label under it.
       const note = notes[a.address];
       const task = note?.task || (more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a)));
       const id = whoIs({ task: note?.task, branch: paneOf.get(a.pane)?.branch, tab: a.tab_name, space: a.space_name });
@@ -775,7 +710,7 @@ export default class Agents extends View {
       return h_flex()
         .id(`ag-${a.address}`)
         .px(8)
-        .h(who ? AV + (model ? 14 : 6) : 30)
+        .h(AV + (model ? 14 : 6))
         .flex_none()
         .rounded(8)
         .items_center()
@@ -793,17 +728,17 @@ export default class Agents extends View {
         })
         .on_click(() => run("pane.focus", { pane: a.pane }))
         .child(div().w(alert ? 5 : 3).h(AV - 8).flex_none().rounded(2).bg(this.hue(a)?.color ?? "#00000000"))
-        .when(Boolean(pic) || Boolean(who), el => el.child(div().id(`agent-fold-${a.address}`)
+        .when(Boolean(pic) || Boolean(mon), el => el.child(div().id(`agent-fold-${a.address}`)
           .when(subs.length > 0, el => el.on_click((_e, cx) => {
             cx.stop_propagation();
             this.folded.has(a.address) ? this.folded.delete(a.address) : this.folded.add(a.address);
             cx.notify();
-          })).child(mon ? this.pokemonAvatar(mon.path) : who ? this.avatar(t, a, who) : pic)))
-        .child(who
+          })).child(mon ? this.pokemonAvatar(mon.path) : pic)))
+        .child(mon
           ? v_flex().flex_1().min_w(0)
             .child(div().min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).child(task))
             .child(h_flex().min_w(0).gap(5).text_size(11).text_color(t.muted)
-              .child(div().flex_none().child([mon ? mon.name : who.label, full ? a.space_name : null].filter(Boolean).join(" \u00b7 ")))
+              .child(div().flex_none().child([mon.name, full ? a.space_name : null].filter(Boolean).join(" \u00b7 ")))
               .when(Boolean(id.key), el => el.child(div().flex_none().font_semibold().text_color(t.muted).child(id.key)))
               .when(Boolean(id.branch), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(id.branch))))
             .when(Boolean(model), el => el.child(div().min_w(0).truncate().text_size(10).font_semibold().text_color(model.color ?? t.dim).child(model.label)))
@@ -881,25 +816,6 @@ export default class Agents extends View {
             .child(div().text_size(11.5).font_medium().text_color(t.dim).child("Agents"))
             .child(
               h_flex().gap(10).items_center()
-                .child(
-                  div()
-                    .id("ag-portraits")
-                    .px(6)
-                    .py(1)
-                    .rounded(5)
-                    .border(1)
-                    .border_color(t.dim)
-                    .text_size(10.5)
-                    .text_color(t.dim)
-                    .cursor_pointer()
-                    .hover((s) => s.text_color(t.foreground))
-                    .on_click((_e, cx) => {
-                      setShared("agents.portraits", portraitsMode() === "pokemon" ? "sg1" : "pokemon");
-                      cx.notify();
-                    })
-                    .tooltip(portraitsMode() === "pokemon" ? "Portraits: Pokémon (click for SG-1)" : "Portraits: SG-1 (click for Pokémon)")
-                    .child(portraitsMode() === "pokemon" ? "Pokémon" : "SG-1"),
-                )
                 .child(
                   div()
                     .id("ag-sort")

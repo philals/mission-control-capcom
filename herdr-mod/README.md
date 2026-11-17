@@ -54,22 +54,9 @@ The **PLAN** button in the board's story header opens `<capcom root>/<KEY>/story
 split to the right of the board (Herdr has no markdown viewer of its own, so this mod is one). The pane reloads when
 the file changes, and shows a hint if the story has no plan yet. Close it like any pane.
 
-## capcom-agents: SG-1 personas
+## capcom-agents: Pokémon personas
 
-Each agent gets a Stargate SG-1 character (O'Neill, Carter, Daniel, Teal'c, Hammond, then the cast again with a
-number), kept for as long as the agent exists. Its portrait sits on the character's colour.
-
-- The fallback portraits are drawn by `scripts/gen-avatars.mjs` (needs `node`) when you run `scripts/install-herdr-mod.sh`.
-- The photos are `herdr-mod/capcom-agents/avatars/<id>.png`, with `<id>` one of `oneill carter daniel tealc hammond`;
-  `scripts/install-herdr-mod.sh` copies them into the mod's `avatars/` folder, and they are picked up within 30 seconds.
-  A `.jpg` dropped in that installed folder works too.
-- The cast is in `capcom-agents/characters.js`.
-
-### Pokemon mode
-
-The small **SG-1 / Pokémon** button in the Agents header, left of the sort icon, switches the portraits (click to flip). In Pokémon mode each
-agent shows one of the first 151 Pokémon, except the 33 with no Worried, Determined or Joyous portrait (they would look the same in every status; the list is `STATIC` in `pokemon.js`), picked at random, kept for as long as the agent exists, separate from its
-SG-1 character), and the face follows the agent's status:
+Each agent shows one of the first 151 Pokémon, except the 33 with no Worried, Determined or Joyous portrait (they would look the same in every status; the list is `STATIC` in `pokemon.js`), picked at random from those no live agent has and kept for as long as the agent exists. The face follows the agent's status:
 
 | Status | Portrait |
 |---|---|
@@ -80,9 +67,13 @@ SG-1 character), and the face follows the agent's status:
 
 Portraits are not in this repo. The first time one is needed it is downloaded from PMDCollab's SpriteCollab (needs
 `curl`) into `<app home>/data/capcom-agents/pokemon/`; until it arrives, and if the download fails (retried after five
-minutes), the row shows the SG-1 face. A Pokémon with no portrait for an expression upstream (about a quarter of them)
+minutes), the row shows a Poké Ball. A Pokémon with no portrait for an expression upstream (about a quarter of them)
 shows its Normal one. The pane header's strip shows the same Pokémon (through `capcom.persona`); My Watch and tabs are unchanged. While a portrait for the current status downloads, the agent's Normal one shows (all four expressions are fetched at once, only for Pokémon an agent actually has), and a Poké Ball (PokeAPI sprites) shows until the first one arrives. The pure helpers are
 in `capcom-agents/pokemon.js`, tested by `node --test scripts/pokemon.test.mjs`.
+
+### Agents message each other by name
+
+`capcom tell <pokemon> "text"` sends a prompt to the agent with that Pokémon (`capcom whois` lists them), read from `capcom.persona` in the app's `shared.json` (the app home is `$HERDR_APP_HOME`, default `~/.config/herdr-app`), so it works only while the Agents panel is running. The text reaches the other agent through `hc send` headed with the sender's Pokémon and how to answer. The `/agent-chat` skill teaches agents to use it.
 
 ## capcom-jira: your Jira tickets
 
