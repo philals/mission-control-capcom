@@ -27,7 +27,7 @@ function toggleSidebar() {
   if (!narrow()) setShared("sidebar.width", width);
   // Mods edited before the rail went by width still read the flag.
   setShared("sidebar.collapsed", !narrow());
-  run("layout.resize", { id: "sidebar", px: narrow() ? (shared("sidebar.width") ?? 268) : window()?.platform === "macos" ? 76 : 44 });
+  run("layout.resize", { id: "sidebar", px: narrow() ? (shared("sidebar.width") ?? 224) : window()?.platform === "macos" ? 76 : 44 });
 }
 
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
@@ -612,6 +612,7 @@ export default class Agents extends View {
       const mon = this.pokemonFace(a);
       const more = detail.get(a.address);
       const model = modelInfo(this.models[a.address]);
+      const hasPrs = this.prsByAgent.has(a.address);
       // What the agent is on leads the row; its Pokemon is only a label under it.
       const note = notes[a.address];
       const task = note?.task || (more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a)));
@@ -710,7 +711,7 @@ export default class Agents extends View {
       return h_flex()
         .id(`ag-${a.address}`)
         .px(8)
-        .h(AV + (model ? 14 : 6))
+        .h(AV + (model || hasPrs ? 14 : 6))
         .flex_none()
         .rounded(8)
         .items_center()
@@ -741,11 +742,12 @@ export default class Agents extends View {
               .child(div().flex_none().child([mon.name, full ? a.space_name : null].filter(Boolean).join(" \u00b7 ")))
               .when(Boolean(id.key), el => el.child(div().flex_none().font_semibold().text_color(t.muted).child(id.key)))
               .when(Boolean(id.branch), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(id.branch))))
-            .when(Boolean(model), el => el.child(div().min_w(0).truncate().text_size(10).font_semibold().text_color(model.color ?? t.dim).child(model.label)))
+            .when(Boolean(model) || hasPrs, el => el.child(h_flex().min_w(0).gap(6).items_center()
+              .when(Boolean(model), el => el.child(div().min_w(0).truncate().text_size(10).font_semibold().text_color(model.color ?? t.dim).child(model.label)))
+              .when(hasPrs, el => el.child(this.prIcons(t, a)))))
           : h_flex().flex_1().min_w(0).gap(5).items_center()
           .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
           .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`\u00b7 ${more}`))))
-        .when(this.prsByAgent.has(a.address), el => el.child(this.prIcons(t, a)))
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
         .when(this.hovered === a.address || asking, el => el.child(close))
