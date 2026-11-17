@@ -88,6 +88,18 @@ const ink = (hex) => {
   return 0.299 * r + 0.587 * g + 0.114 * b > 140 ? "#14100a" : "#ffffff";
 };
 
+// "claude-opus-5-5" -> { label: "Opus 5.5", color } ; date suffixes dropped.
+const MODEL_COLORS = { opus: "#c58af9", sonnet: "#6cb6ff", haiku: "#57d9a3", fable: "#f2a65a" };
+function modelInfo(id) {
+  if (!id) return null;
+  const parts = id.replace(/^claude-/, "").split("-").filter((x) => !/^\d{8}$/.test(x));
+  const family = parts.find((x) => /^[a-z]+$/i.test(x));
+  if (!family) return { label: id, color: null };
+  const version = parts.filter((x) => /^\d+$/.test(x)).join(".");
+  const name = family[0].toUpperCase() + family.slice(1);
+  return { label: version ? `${name} ${version}` : name, color: MODEL_COLORS[family.toLowerCase()] ?? null };
+}
+
 // Session colours: each live session has its own, the first free one, kept until it ends.
 const COLORS = ["#e8a24a", "#4aa3e8", "#b878f2", "#4fcf8e", "#ef6f9a", "#3fd0c4", "#e8d24a", "#7c8cff", "#ef7a4a", "#9bd44a", "#d65ad6", "#5ab0a0"];
 
@@ -122,6 +134,7 @@ export default class Agents extends View {
     });
     cx.timer.every(30000, (cx) => { this.scanPhotos(cx); cx.notify(); });
     cx.timer.every(30000, (cx) => cx.notify());
+    this.models = {};
     this.refreshNotes(cx);
     cx.timer.every(10000, (cx) => this.refreshNotes(cx));
   }
@@ -130,10 +143,16 @@ export default class Agents extends View {
   refreshNotes(cx) {
     cx.spawn(async () => {
       const found = {};
+      const models = {};
       await Promise.all(agents().map(async (a) => {
-        const note = await this.noteOf(a.address);
+        const [note, model] = await Promise.all([this.noteOf(a.address), this.modelOf(a.address)]);
         if (note?.task || note?.progress) found[a.address] = { task: note.task, progress: note.progress, waiting: note.waiting, needs_you: note.needs_you };
+        if (model) models[a.address] = model;
       }));
+      if (JSON.stringify(models) !== JSON.stringify(this.models)) {
+        this.models = models;
+        cx.notify();
+      }
       const text = JSON.stringify(found);
       if (text !== this.notesText) {
         this.notesText = text;
@@ -151,6 +170,20 @@ export default class Agents extends View {
       return JSON.parse((await exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", terminal], { timeout: 5000 })).stdout);
     } catch {
       return null;
+    }
+  }
+
+  // The model of the session's last main-thread reply, from its transcript, or "".
+  async modelOf(terminal) {
+    const cmd = 'pid=$(hc get "$1" | sed -n \'s/.*"foreground":{[^}]*"pid":\\([0-9]*\\).*/\\1/p\'); '
+      + 's=$(sed -n \'s/.*"sessionId":"\\([^"]*\\)".*/\\1/p\' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions/$pid.json"); '
+      + '[ -n "$s" ] || exit 0; '
+      + 'f=$(ls "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/"$s.jsonl" 2>/dev/null | head -1); '
+      + '[ -n "$f" ] && tac "$f" | grep \'"type":"assistant"\' | grep -v \'"isSidechain":true\' | grep -o \'"model":"[^"<]*"\' | head -1 | cut -d\\" -f4';
+    try {
+      return (await exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", terminal], { timeout: 5000 })).stdout.trim();
+    } catch {
+      return "";
     }
   }
 
@@ -643,6 +676,7 @@ export default class Agents extends View {
       const who = this.character(a);
       const mon = who ? this.pokemonFace(a) : null;
       const more = detail.get(a.address);
+      const model = who ? modelInfo(this.models[a.address]) : null;
       // What the agent is on leads the row; the character is only a label under it.
       const note = notes[a.address];
       const task = note?.task || (more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a)));
@@ -739,7 +773,7 @@ export default class Agents extends View {
       return h_flex()
         .id(`ag-${a.address}`)
         .px(8)
-        .h(who ? AV + 6 : 30)
+        .h(who ? AV + (model ? 14 : 6) : 30)
         .flex_none()
         .rounded(8)
         .items_center()
@@ -770,6 +804,7 @@ export default class Agents extends View {
               .child(div().flex_none().child([mon ? mon.name : who.label, full ? a.space_name : null].filter(Boolean).join(" \u00b7 ")))
               .when(Boolean(id.key), el => el.child(div().flex_none().font_semibold().text_color(t.muted).child(id.key)))
               .when(Boolean(id.branch), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(id.branch))))
+            .when(Boolean(model), el => el.child(div().min_w(0).truncate().text_size(10).font_semibold().text_color(model.color ?? t.dim).child(model.label)))
           : h_flex().flex_1().min_w(0).gap(5).items_center()
           .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
           .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`\u00b7 ${more}`))))
