@@ -7,7 +7,7 @@ import * as fs from "fs/promises";
 import { appHome, agents, terminals, panes, focused, spaces, run, exec, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 import { SH, dotColor, short, openUrl, prDo, prDetails, needsYou, attentionIcon } from "./pr-details.js";
 import { CHARACTERS } from "./characters.js";
-import { BALL_FILE, BALL_URL, EXPRESSIONS, nameOf, assignable, pickPokemon, expressionFor, portraitFile, portraitUrls } from "./pokemon.js";
+import { BALL_FILE, BALL_URL, EXPRESSIONS, nameOf, assignable, pickPokemon, expressionFor, portraitFile, portraitUrls, typeColor } from "./pokemon.js";
 import { who as whoIs } from "./identity.js";
 
 function find(node, id) {
@@ -81,6 +81,12 @@ function icon(p, size, color) {
 }
 
 const AV = 44;
+
+// Dark text on a light colour, white on a dark one.
+const ink = (hex) => {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(String(hex).slice(i, i + 2), 16));
+  return 0.299 * r + 0.587 * g + 0.114 * b > 140 ? "#14100a" : "#ffffff";
+};
 
 // Session colours: each live session has its own, the first free one, kept until it ends.
 const COLORS = ["#e8a24a", "#4aa3e8", "#b878f2", "#4fcf8e", "#ef6f9a", "#3fd0c4", "#e8d24a", "#7c8cff", "#ef7a4a", "#9bd44a", "#d65ad6", "#5ab0a0"];
@@ -517,10 +523,11 @@ export default class Agents extends View {
       .child(this.status(t, { status: st }, compact));
   }
 
-  // compact: a ! for blocked where a header already says "Needs you".
-  status(t, a, compact = false) {
+  // compact: a ! for blocked where a header already says "Needs you". alert: a solid colour for blocked.
+  status(t, a, compact = false, alert = null) {
     const color = t[a.status] ?? t.dim;
     if (a.status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).mx(1).flex_none().text_color(t.working).spin(900);
+    if (a.status === "blocked" && alert) return div().flex_none().px(6).h(18).rounded(5).bg(alert).text_size(10.5).font_semibold().text_color(ink(alert)).flex().items_center().child(compact ? "!" : "Needs you");
     if (a.status === "blocked" && compact) return div().size(14).flex_none().rounded(4).bg(t.blocked + "26").text_size(10.5).font_bold().text_color(t.blocked).flex().items_center().justify_center().child("!");
     if (a.status === "blocked") return div().flex_none().px(6).h(18).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child("Needs you");
     // Idle: a ring; done: a dot.
@@ -657,6 +664,8 @@ export default class Agents extends View {
       }
       const when = this.since(a);
       const idle = a.status === "idle" && !a.focused;
+      // Waiting on you: the row takes its Pokemon's type colour, else the theme's.
+      const alert = a.status === "blocked" ? (mon && typeColor(mon.n)) || t.blocked : null;
       const isPinned = a.pinned;
       const pin = div()
         .id(`pin-${a.address}`)
@@ -735,16 +744,19 @@ export default class Agents extends View {
         .rounded(8)
         .items_center()
         .gap(9)
+        .border(1.5)
+        .border_color(alert ?? "#00000000")
         .when(a.focused, (el) => el.bg(t.selected))
+        .when(Boolean(alert), (el) => el.bg(alert + "24"))
         .cursor_pointer()
-        .hover((s) => s.bg(t.hover))
+        .hover((s) => s.bg(alert ? alert + "38" : t.hover))
         .on_hover((on, cx) => {
           if (on) this.hovered = a.address;
           else if (this.hovered === a.address) this.hovered = null;
           cx.notify();
         })
         .on_click(() => run("pane.focus", { pane: a.pane }))
-        .child(div().w(3).h(AV - 8).flex_none().rounded(2).bg(this.hue(a)?.color ?? "#00000000"))
+        .child(div().w(alert ? 5 : 3).h(AV - 8).flex_none().rounded(2).bg(this.hue(a)?.color ?? "#00000000"))
         .when(Boolean(pic) || Boolean(who), el => el.child(div().id(`agent-fold-${a.address}`)
           .when(subs.length > 0, el => el.on_click((_e, cx) => {
             cx.stop_propagation();
@@ -768,7 +780,7 @@ export default class Agents extends View {
         .when(this.hovered === a.address || copied, el => el.child(copy))
         .when(this.hovered === a.address, el => el.child(pin))
         .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
-        .child(this.status(t, a, byPriority && !isPinned));
+        .child(this.status(t, a, byPriority && !isPinned, alert));
     };
 
     // Groups in list order: spaces (grouped) or priority sections. Agents of a

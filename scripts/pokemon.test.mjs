@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { POKEMON, nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrl, portraitUrls, EXPRESSIONS, STATIC, assignable } from "../herdr-mod/capcom-agents/pokemon.js";
+import { POKEMON, nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrl, portraitUrls, EXPRESSIONS, STATIC, assignable, typeColor } from "../herdr-mod/capcom-agents/pokemon.js";
 
 test("the first 151 in order", () => {
   assert.equal(POKEMON.length, 151);
@@ -63,4 +63,13 @@ test("portraitUrls tries similar expressions, then Normal", () => {
 
 test("every status expression is one that gets prefetched", () => {
   for (const status of ["blocked", "working", "done", "idle"]) assert.ok(EXPRESSIONS.includes(expressionFor(status)));
+});
+
+test("typeColor gives each of the 151 its first type's colour", () => {
+  assert.equal(typeColor(4), "#ee8130");
+  assert.equal(typeColor(25), "#f7d02c");
+  assert.equal(typeColor(92), "#735797");
+  assert.equal(typeColor(149), "#6f35fc");
+  for (let n = 1; n <= 151; n++) assert.match(typeColor(n), /^#[0-9a-f]{6}$/);
+  assert.equal(typeColor(152), null);
 });

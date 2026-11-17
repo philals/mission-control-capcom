@@ -55,3 +55,12 @@ export const EXPRESSIONS = ["Worried", "Determined", "Joyous", "Normal"];
 // Shown in place of a portrait until it downloads.
 export const BALL_FILE = "pokeball.png";
 export const BALL_URL = "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/poke-ball.png";
+
+// Each one's first type, one letter per Pokemon in order, and that type's colour.
+const TYPE_OF = "GGGFFFWWWBBBBBBNNNNNNNPPEEDDPPPPPPYYFFNNPPGGGBBBBDDNNWWXXFFWWWSSSXXXGGGWWRRRFFWWEENNNWWPPWWHHHRSSWWEEGGDDXXNPPDDNGNWWWWWWSBIEFBNWWWNNWEFNRRRRRNIEFZZZSS";
+const TYPE_COLORS = {
+  N: "#a8a77a", F: "#ee8130", W: "#6390f0", E: "#f7d02c", G: "#7ac74c", I: "#96d9d6", X: "#c22e28", P: "#a33ea1",
+  D: "#e2bf65", S: "#f95587", B: "#a6b91a", R: "#b6a136", H: "#735797", Z: "#6f35fc", Y: "#d685ad",
+};
+
+export const typeColor = (n) => (validNumber(n) ? TYPE_COLORS[TYPE_OF[n - 1]] : null);
