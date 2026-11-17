@@ -730,7 +730,9 @@ export default class Agents extends View {
         .tooltip(copied ? "Copied" : "Copy this agent's session id")
         .on_click((_e, cx) => {
           cx.stop_propagation();
-          this.sessionOf(a.address).then((id) => {
+          // The click's cx is spent once the handler returns, so copy from the spawned one.
+          cx.spawn(async (cx) => {
+            const id = await this.sessionOf(a.address);
             if (!id) return;
             cx.write_to_clipboard(id);
             this.copied = a.address;
