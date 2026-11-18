@@ -161,7 +161,7 @@ export default class Agents extends View {
     });
   }
 
-  // The note file of the agent's Claude Code session (see sessionOf), or null.
+  // The note file of the agent's Claude Code session (from its terminal's foreground process, the `claude` that wrote ~/.claude/sessions/<pid>.json), or null.
   async noteOf(terminal) {
     const cmd = 'pid=$(hc get "$1" | sed -n \'s/.*"foreground":{[^}]*"pid":\\([0-9]*\\).*/\\1/p\'); '
       + 's=$(sed -n \'s/.*"sessionId":"\\([^"]*\\)".*/\\1/p\' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions/$pid.json"); '
@@ -308,18 +308,6 @@ export default class Agents extends View {
   hue(a) {
     const [i, n] = (this.hues[a.address] ?? "").split("#");
     return COLORS[Number(i)] ? { color: COLORS[Number(i)], n: n ? Number(n) : 0 } : null;
-  }
-
-  // The agent's Claude Code session id: its terminal's foreground process is the `claude` that wrote
-  // ~/.claude/sessions/<pid>.json.
-  async sessionOf(terminal) {
-    const cmd = 'pid=$(hc get "$1" | sed -n \'s/.*"foreground":{[^}]*"pid":\\([0-9]*\\).*/\\1/p\'); '
-      + 'sed -n \'s/.*"sessionId":"\\([^"]*\\)".*/\\1/p\' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions/$pid.json"';
-    try {
-      return (await exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", terminal], { timeout: 5000 })).stdout.trim();
-    } catch {
-      return "";
-    }
   }
 
   pokemonAvatar(path) {
@@ -722,28 +710,6 @@ export default class Agents extends View {
         })
         .child(svg("mods/workspace-chrome/square-pen.svg").size(13));
       const copied = this.copied === a.address;
-      const copy = div()
-        .id(`copy-${a.address}`)
-        .flex_none()
-        .p(2)
-        .rounded(4)
-        .text_color(copied ? t.foreground : t.dim)
-        .cursor_pointer()
-        .hover((s) => s.bg(t.hover).text_color(t.foreground))
-        .tooltip(copied ? "Copied" : "Copy this agent's session id")
-        .on_click((_e, cx) => {
-          cx.stop_propagation();
-          // The click's cx is spent once the handler returns, so copy from the spawned one.
-          cx.spawn(async (cx) => {
-            const id = await this.sessionOf(a.address);
-            if (!id) return;
-            cx.write_to_clipboard(id);
-            this.copied = a.address;
-            cx.notify();
-            cx.timer.after(1500, (cx) => { if (this.copied === a.address) { this.copied = null; cx.notify(); } });
-          });
-        })
-        .child(svg(`mods/workspace-chrome/${copied ? "check" : "files"}.svg`).size(13));
       // Ends the agent and its sub-agents; a working or blocked one asks with a second click first.
       const asking = this.closing === a.address;
       const close = div()
@@ -804,9 +770,22 @@ export default class Agents extends View {
           })).child(mon ? this.pokemonAvatar(mon.path) : pic)))
         .child(mon
           ? v_flex().flex_1().min_w(0)
-            .child(div().id(`nm-${a.address}`).min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).tooltip(sessionName && asked ? `Asked: ${asked}` : task).child(task))
+            .child(div().id(`nm-${a.address}`).min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).cursor_pointer().tooltip(sessionName && asked ? `Asked: ${asked}. Click to rename` : "Click to rename")
+              .on_click((_e, cx) => {
+                cx.stop_propagation();
+                openOverlay({ mod: "capcom-agents", kind: "popup", width: 320, height: 130, props: { renameFor: { terminal: a.address, name: sessionName } } });
+              }).child(task))
             .child(h_flex().min_w(0).gap(5).text_size(11).text_color(t.muted)
-              .child(div().flex_none().child([mon.name, full ? a.space_name : null].filter(Boolean).join(" \u00b7 ")))
+              .child(div().id(`mon-${a.address}`).flex_none().cursor_pointer().text_color(copied ? t.foreground : t.muted)
+                .hover((s) => s.text_color(t.foreground)).tooltip(copied ? "Copied" : "Click to copy this name")
+                .on_click((_e, cx) => {
+                  cx.stop_propagation();
+                  cx.write_to_clipboard(mon.name);
+                  this.copied = a.address;
+                  cx.notify();
+                  cx.timer.after(1500, (cx) => { if (this.copied === a.address) { this.copied = null; cx.notify(); } });
+                }).child(copied ? "Copied" : mon.name))
+              .when(full && Boolean(a.space_name), el => el.child(div().flex_none().child(`\u00b7 ${a.space_name}`)))
               .when(Boolean(id.key), el => el.child(div().flex_none().font_semibold().text_color(t.muted).child(id.key)))
               .when(Boolean(id.branch), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(id.branch))))
             .when(Boolean(model) || hasPrs, el => el.child(h_flex().min_w(0).gap(6).items_center()
@@ -818,7 +797,6 @@ export default class Agents extends View {
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
         .when(this.hovered === a.address || asking, el => el.child(close))
-        .when(this.hovered === a.address || copied, el => el.child(copy))
         .when(this.hovered === a.address, el => el.child(rename))
         .when(this.hovered === a.address, el => el.child(pin))
         .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
