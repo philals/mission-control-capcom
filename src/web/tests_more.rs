@@ -252,6 +252,21 @@ fn a_story_is_deleted_only_when_confirmed_and_then_gone_from_disk_and_the_page()
 }
 
 #[test]
+fn a_task_is_marked_done_by_hand_with_no_checks() {
+    let r = rig();
+    store::update(&r.server.root, "PROJ-1", |b| {
+        crate::ops::add_pr(b, "T1", "widgets", "https://github.com/acme/widgets/pull/9", PrState::Draft)?;
+        Ok(())
+    })
+    .unwrap();
+    act(&r, json!({ "action": "task.done", "key": "PROJ-1", "id": "T1" }));
+    assert_ne!(state(&r)["stories"][0]["tasks"][0]["status"], "done", "nothing happens without a confirmation");
+    let (_, answer) = act(&r, json!({ "action": "task.done", "key": "PROJ-1", "id": "T1", "confirm": true }));
+    assert_eq!(answer["ok"], true, "{answer}");
+    assert_eq!(state(&r)["stories"][0]["tasks"][0]["status"], "done");
+}
+
+#[test]
 fn a_story_is_marked_done_or_reopened_with_no_checks() {
     let r = rig();
     let key = "PROJ-1";

@@ -9,7 +9,7 @@ use crate::finish::Msg;
 use crate::model::StoryStatus;
 
 /// Actions that need an explicit confirmation from the page.
-const CONFIRMED: [&str; 8] = ["pr.ready", "pr.draft", "pr.automerge", "story.done", "story.reopen", "task.finish", "story.sync", "story.delete"];
+const CONFIRMED: [&str; 9] = ["pr.ready", "pr.draft", "pr.automerge", "story.done", "story.reopen", "task.finish", "task.done", "story.sync", "story.delete"];
 
 fn answer(ok: bool, message: impl Into<String>) -> Value {
     json!({ "ok": ok, "message": message.into() })
@@ -78,6 +78,7 @@ impl Server {
             "story.delete" => self.delete_story(&text("key")),
             "story.sync" => self.sync_story(&text("key")),
             "task.finish" => self.finish_task(&text("key"), &text("id")),
+            "task.done" => self.force_task_done(&text("key"), &text("id")),
             "task.folder" => self.set_task_folder(&text("key"), &text("id"), &text("folder")),
             "story.new" => self.new_story(&text("key")),
             "session.start" => self.start_session(&text("key"), &text("task"), &text("kind"), &text("host")),
@@ -286,6 +287,14 @@ impl Server {
     fn finish_task(&self, key: &str, id: &str) -> Value {
         let msgs = crate::finish::finish(&self.root, key, id, self.lookup().as_ref());
         self.messages(key, msgs, id)
+    }
+
+    /// A person's override: done whatever the task's PRs, dependencies or status say.
+    fn force_task_done(&self, key: &str, id: &str) -> Value {
+        match store::update(&self.root, key, |b| crate::rules::force_status(b, id, crate::model::Status::Done)) {
+            Ok(()) => answer(true, format!("{id} is done")),
+            Err(e) => answer(false, format!("could not mark {id} done: {e:#}")),
+        }
     }
 
     fn set_task_folder(&self, key: &str, id: &str, folder: &str) -> Value {

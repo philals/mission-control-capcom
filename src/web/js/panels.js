@@ -325,7 +325,11 @@ function startSession(link, what, req) {
 }
 
 function markStoryDone(story) {
-  ask(`Mark ${story.key} done?`, [story.status === "in_review" ? "This accepts the review." : "This puts the story into DONE and skips the review.", "Every task must be done or dropped."], "Mark done", "story.done", { key: story.key });
+  ask(`Mark ${story.key} done?`, [story.status === "in_review" ? "This accepts the review." : "This puts the story into DONE and skips the review.", "Nothing is checked: tasks still open stay as they are."], "Mark done", "story.done", { key: story.key });
+}
+
+function markTaskDone(story, task) {
+  ask(`Mark ${task.id} done?`, [`${task.id} — ${task.title}`, "Nothing is checked: its PRs and dependencies are ignored. Use this when you finished it outside Claude."], "Mark done", "task.done", { key: story.key, id: task.id });
 }
 
 function reopenStory(story) {
@@ -359,7 +363,7 @@ function storyMenu(story, x, y) {
     story.tasks.length === 0 ? ["Plan it in a new session ↗", () => startSession(story.breakdown, "/story-plan", { key: story.key, kind: "breakdown" })] : null,
     story.allFinished && story.status === "in_progress" ? ["Review it in a new session ↗", () => startSession(story.review, "/story-review", { key: story.key, kind: "review" })] : null,
     story.status === "in_review" ? ["Run the review again in a new session ↗", () => startSession(story.review, "/story-review", { key: story.key, kind: "review" })] : null,
-    story.status === "in_progress" && story.allFinished ? ["Mark done…", () => markStoryDone(story)] : null,
+    story.status === "in_progress" ? ["Mark done…", () => markStoryDone(story)] : null,
     story.status === "in_review" ? ["Accept the review (mark done)…", () => markStoryDone(story)] : null,
     story.status === "in_review" || story.status === "done" ? ["Reopen…", () => reopenStory(story)] : null,
     story.jiraUrl ? ["Open in Jira", () => openExternal(story.jiraUrl)] : null,
@@ -453,6 +457,7 @@ function taskCard(story, task) {
   add(actions, btn("details", () => taskSheet(story.key, task.id), "small", "its plan or description, and its file"));
   if (task.status === "todo" && task.waitingOn.length === 0 && !task.blocked) add(actions, btn("implement ↗", () => startSession(task.implement, `/story-implement-task ${story.key} ${task.id}`, { key: story.key, task: task.id, kind: "implement" }), "small", "open a new Claude Code session with the implement skill typed in"));
   if (task.status === "implementing") add(actions, btn(task.allMerged ? "finish ✓" : "finish…", () => finishTask(story, task), task.allMerged ? "small primary" : "small", "check its PRs on GitHub and finish it when they are all merged"));
+  if (task.status === "todo" || task.status === "implementing") add(actions, btn("mark done…", () => markTaskDone(story, task), "small", "move it to DONE without checking anything, for work you finished outside Claude"));
   card.append(actions);
   return card;
 }
@@ -869,6 +874,7 @@ function taskSheet(storyKey, taskId) {
     const foot = [];
     if (task.status === "todo" && !task.waitingOn.length) foot.push(btn("Implement ↗", () => startSession(task.implement, `/story-implement-task ${storyKey} ${task.id}`, { key: storyKey, task: task.id, kind: "implement" })));
     if (task.status === "implementing") foot.push(btn("Finish…", () => finishTask(story, task)));
+    if (task.status === "todo" || task.status === "implementing") foot.push(btn("Mark done…", () => markTaskDone(story, task)));
     foot.push(btn("Close", closeModal));
     return { body, foot };
   }, { live: true, wide: true, kind: "task" });

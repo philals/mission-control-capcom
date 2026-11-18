@@ -139,10 +139,11 @@ function paletteItems() {
       push(`Details of ${t.id}: ${t.title}`, "", () => taskSheet(story.key, t.id));
       if (t.status === "todo" && !t.waitingOn.length) push(`Implement ${t.id} in a new session`, "", () => startSession(t.implement, `/story-implement-task ${story.key} ${t.id}`, { key: story.key, task: t.id, kind: "implement" }));
       if (t.status === "implementing") push(`Finish ${t.id}`, "", () => finishTask(story, t));
+      if (t.status === "todo" || t.status === "implementing") push(`Mark ${t.id} done (no checks)`, "", () => markTaskDone(story, t));
     }
     push(`Sync ${story.key} with GitHub`, "", () => syncStory(story));
     if (story.allFinished && story.status === "in_progress") push(`Review ${story.key} in a new session`, "", () => startSession(story.review, "/story-review", { key: story.key, kind: "review" }));
-    if (story.allFinished && story.status !== "done") push(`Mark ${story.key} done`, "", () => markStoryDone(story));
+    if (story.status !== "done") push(`Mark ${story.key} done`, "", () => markStoryDone(story));
     if (story.status !== "in_progress") push(`Reopen ${story.key}`, "", () => reopenStory(story));
     push(`Delete ${story.key}`, "", () => deleteStory(story));
   }
