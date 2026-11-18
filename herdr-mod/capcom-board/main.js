@@ -133,14 +133,13 @@ export default class CapcomBoard extends View {
     const repo = task.repos?.[0]?.split("/").pop();
     const folder = task.folder || (repo ? `${home()}/code/${repo}` : null);
     if (!folder) return run("tab.new", { name, argv });
-    const mine = spaces().find(
-      (s) => !s.machine && s.folder && (s.folder === folder || s.folder.startsWith(`${folder}/`) || (repo && s.folder.includes(`/worktrees/${repo}/`))),
-    );
+    const key = this.key;
+    const mine = spaces().find((s) => !s.machine && (s.name === key || s.name?.startsWith(`${key} - `)));
     if (mine) {
       run("space.select", { id: mine.id });
       run("tab.new", { space: mine.id, name, folder, argv });
     } else {
-      run("space.new", { folder, argv });
+      run("space.new", { name: key, tab: name, folder, argv });
     }
   }
 

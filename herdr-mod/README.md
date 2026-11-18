@@ -56,7 +56,7 @@ the file changes, and shows a hint if the story has no plan yet. Close it like a
 
 ## capcom-agents: Pokémon personas
 
-Each agent shows one of the first 151 Pokémon, except the 33 with no Worried, Determined or Joyous portrait (they would look the same in every status; the list is `STATIC` in `pokemon.js`), picked at random from those no live agent has and kept for as long as the agent exists. The face follows the agent's status:
+Each agent shows one of the first 151 Pokémon, picked at random from those no live agent has and kept for as long as the agent exists. The 33 with no Worried, Determined or Joyous portrait (they look the same in every status; the list is `STATIC` in `pokemon.js`) are only picked once every other one is taken. The face follows the agent's status:
 
 | Status | Portrait |
 |---|---|

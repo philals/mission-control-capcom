@@ -36,21 +36,27 @@ test("pickPokemon takes the first free number when rand is 0", () => {
 
 const POOL = Array.from({ length: 151 }, (_, i) => i + 1).filter((n) => !STATIC.has(n));
 
-test("Pokemon with no Worried, Determined or Joyous are never assigned", () => {
+test("every one of the 151 can be assigned, but the ones with changing faces go first", () => {
   assert.equal(STATIC.size, 33);
   assert.ok(STATIC.has(88) && !STATIC.has(25));
-  assert.equal(assignable(88), false);
-  assert.equal(assignable(25), true);
-  for (let r = 0; r < 1; r += 0.01) assert.ok(assignable(pickPokemon(new Set(), () => r)));
+  assert.equal(assignable(88), true);
+  assert.equal(assignable(152), false);
+  for (let r = 0; r < 1; r += 0.01) assert.ok(!STATIC.has(pickPokemon(new Set(), () => r)));
+});
+
+test("a Pokemon with no changing face is picked once the others are taken", () => {
+  for (let r = 0; r < 1; r += 0.1) assert.ok(STATIC.has(pickPokemon(new Set(POOL), () => r)));
 });
 
 test("pickPokemon never returns a taken number", () => {
   const taken = new Set(POOL.filter((n) => n !== 151));
   for (let i = 0; i < 200; i++) assert.equal(pickPokemon(taken), 151);
+  const nearlyAll = new Set(Array.from({ length: 150 }, (_, i) => i + 1));
+  for (let i = 0; i < 50; i++) assert.equal(pickPokemon(nearlyAll), 151);
 });
 
-test("pickPokemon reuses an assignable one when the whole pool is taken", () => {
-  for (let i = 0; i < 50; i++) assert.ok(assignable(pickPokemon(new Set(POOL))));
+test("pickPokemon reuses one when all 151 are taken", () => {
+  for (let i = 0; i < 50; i++) assert.ok(validNumber(pickPokemon(new Set(Array.from({ length: 151 }, (_, j) => j + 1)))));
 });
 
 test("portraitUrls tries similar expressions, then Normal", () => {

@@ -26,17 +26,17 @@ export const nameOf = (n) => POKEMON[n - 1];
 
 export const validNumber = (v) => Number.isInteger(v) && v >= 1 && v <= POKEMON.length;
 
-// The 33 with no Worried, Determined or Joyous portrait upstream (checked against PMDCollab SpriteCollab): they would
-// look the same working, waiting and done, so they are never assigned.
+// The 33 with no Worried, Determined or Joyous portrait upstream (checked against PMDCollab SpriteCollab): they look
+// the same working, waiting and done, so they are only picked once every Pokemon with changing faces is taken.
 export const STATIC = new Set([20, 33, 45, 47, 56, 57, 68, 70, 71, 73, 74, 76, 82, 88, 89, 91, 94, 95, 102, 107, 108, 110, 117, 119, 120, 121, 122, 124, 127, 139, 144, 145, 146]);
 
-export const assignable = (n) => validNumber(n) && !STATIC.has(n);
+export const assignable = validNumber;
 
 export function pickPokemon(taken, rand = Math.random) {
-  const all = POKEMON.map((_, i) => i + 1).filter(assignable);
-  const free = all.filter((n) => !taken.has(n));
-  const from = free.length ? free : all;
-  return from[Math.min(from.length - 1, Math.floor(rand() * from.length))];
+  const all = POKEMON.map((_, i) => i + 1);
+  const lively = all.filter((n) => !STATIC.has(n));
+  const pool = [lively, all.filter((n) => STATIC.has(n)), all].map((list) => list.filter((n) => !taken.has(n))).find((l) => l.length) ?? all;
+  return pool[Math.min(pool.length - 1, Math.floor(rand() * pool.length))];
 }
 
 export const expressionFor = (status) => EXPRESSION[status] ?? "Normal";

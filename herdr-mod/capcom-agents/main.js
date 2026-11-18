@@ -124,12 +124,6 @@ export default class Agents extends View {
     this.scanPortraits(cx);
     cx.timer.every(700, (cx) => this.fetchWanted(cx));
     this.pulse = true;
-    this.glow = true;
-    cx.timer.every(700, (cx) => {
-      if (!agents().some(wantsYou)) return;
-      this.glow = !this.glow;
-      cx.notify();
-    });
     cx.timer.every(700, (cx) => {
       if (![...this.prsByAgent.values()].some((list) => list.some(({ pr, merged }) => !merged && needsYou(pr)))) return;
       this.pulse = !this.pulse;
@@ -676,7 +670,7 @@ export default class Agents extends View {
       }
       const when = this.since(a);
       const idle = a.status === "idle" && !a.focused;
-      // Waiting on you (blocked, or done and unread): the row takes its Pokemon's type colour, else the theme's, and pulses.
+      // Waiting on you (blocked, or done and unread): the row takes its Pokemon's type colour, else the theme's, and holds it.
       const alert = wantsYou(a) ? (mon && typeColor(mon.n)) || t.blocked : null;
       const isPinned = a.pinned;
       const pin = div()
@@ -737,9 +731,9 @@ export default class Agents extends View {
         .items_center()
         .gap(9)
         .border(1.5)
-        .border_color(alert ? alert + (this.glow ? "ff" : "55") : "#00000000")
+        .border_color(alert ? alert : "#00000000")
         .when(a.focused, (el) => el.bg(t.selected))
-        .when(Boolean(alert), (el) => el.bg(alert + (this.glow ? "40" : "1a")))
+        .when(Boolean(alert), (el) => el.bg(alert + "40"))
         .cursor_pointer()
         .hover((s) => s.bg(alert ? alert + "38" : t.hover))
         .on_hover((on, cx) => {
