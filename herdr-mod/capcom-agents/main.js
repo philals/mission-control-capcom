@@ -695,20 +695,6 @@ export default class Agents extends View {
           cx.notify();
         })
         .child(svg(`mods/workspace-chrome/${isPinned ? "pin-off" : "pin"}.svg`).size(13));
-      const rename = div()
-        .id(`rename-${a.address}`)
-        .flex_none()
-        .p(2)
-        .rounded(4)
-        .text_color(t.dim)
-        .cursor_pointer()
-        .hover((s) => s.bg(t.hover).text_color(t.foreground))
-        .tooltip("Rename this session (same as /rename)")
-        .on_click((_e, cx) => {
-          cx.stop_propagation();
-          openOverlay({ mod: "capcom-agents", kind: "popup", width: 320, height: 130, props: { renameFor: { terminal: a.address, name: sessionName } } });
-        })
-        .child(svg("mods/workspace-chrome/square-pen.svg").size(13));
       const copied = this.copied === a.address;
       // Ends the agent and its sub-agents; a working or blocked one asks with a second click first.
       const asking = this.closing === a.address;
@@ -797,7 +783,6 @@ export default class Agents extends View {
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
         .when(this.hovered === a.address || asking, el => el.child(close))
-        .when(this.hovered === a.address, el => el.child(rename))
         .when(this.hovered === a.address, el => el.child(pin))
         .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
         .child(this.status(t, a, byPriority && !isPinned, alert));

@@ -73,7 +73,7 @@ in `capcom-agents/pokemon.js`, tested by `node --test scripts/pokemon.test.mjs`.
 
 ### Session names
 
-An agent row's top line is the Claude Code session name: what `/rename` sets, else the title Claude Code generates (the terminal's title). Hover it to see what the session was asked (the capcom note's task). Click the name (or hover the row and click the pencil) to rename: it types `/rename <name>` into the agent's prompt, so the tab, the terminal title and the status line follow. The agent must be idle or done; a working or blocked one is left alone and the popup says so. The status line (`~/.claude/statusline-command.sh`) shows the same name first, then the branch, falling back to the folder when the session has no name.
+An agent row's top line is the Claude Code session name: what `/rename` sets, else the title Claude Code generates (the terminal's title). Hover it to see what the session was asked (the capcom note's task). Click the name to rename: it types `/rename <name>` into the agent's prompt, so the tab, the terminal title and the status line follow. The agent must be idle or done; a working or blocked one is left alone and the popup says so. The status line (`~/.claude/statusline-command.sh`) shows the same name first, then the branch, falling back to the folder when the session has no name.
 
 Click the Pokémon's name under it to copy that name (for `capcom tell`); the session id is no longer copyable from the panel (it is in the status line).
 
