@@ -49,7 +49,7 @@ function title(tab, l) {
   const telling = live && live !== prog && !/^[~/]|^[A-Za-z]:\\/.test(live) && !live.includes("@") && live.toLowerCase() !== l?.program?.key;
   return (tab.name === prog || !tab.named) && telling ? live : tab.name;
 }
-const // The Claude Code session name (what /rename sets; else its generated title) is the terminal's title.
+// The Claude Code session name (what /rename sets; else its generated title) is the terminal's title.
 const sessionNameOf = (a) => {
   const live = clean(a.title);
   return live && live !== a.program?.name && !/^[~/]|^[A-Za-z]:\\/.test(live) && !live.includes("@") && live.toLowerCase() !== a.program?.key && !/^claude( code)?$/i.test(live) ? live : "";
