@@ -54,6 +54,8 @@ const sessionNameOf = (a) => {
   const live = clean(a.title);
   return live && live !== a.program?.name && !/^[~/]|^[A-Za-z]:\\/.test(live) && !live.includes("@") && live.toLowerCase() !== a.program?.key && !/^claude( code)?$/i.test(live) ? live : "";
 };
+// Blocked, or done and not yet looked at (looking turns done into idle): it is waiting on you.
+const wantsYou = (a) => a.status === "blocked" || a.status === "done";
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 // A sub-agent without a pane isn't in agents(): its raw word, error counting as
 // blocked. It's never done: it reports to its parent, and the parent's done is the news.
@@ -128,6 +130,12 @@ export default class Agents extends View {
     this.scanPortraits(cx);
     cx.timer.every(700, (cx) => this.fetchWanted(cx));
     this.pulse = true;
+    this.glow = true;
+    cx.timer.every(700, (cx) => {
+      if (!agents().some(wantsYou)) return;
+      this.glow = !this.glow;
+      cx.notify();
+    });
     cx.timer.every(700, (cx) => {
       if (![...this.prsByAgent.values()].some((list) => list.some(({ pr, merged }) => !merged && needsYou(pr)))) return;
       this.pulse = !this.pulse;
@@ -535,7 +543,7 @@ export default class Agents extends View {
   status(t, a, compact = false, alert = null) {
     const color = t[a.status] ?? t.dim;
     if (a.status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).mx(1).flex_none().text_color(t.working).spin(900);
-    if (a.status === "blocked" && alert) return div().flex_none().px(6).h(18).rounded(5).bg(alert).text_size(10.5).font_semibold().text_color(ink(alert)).flex().items_center().child(compact ? "!" : "Needs you");
+    if (wantsYou(a) && alert) return div().flex_none().px(6).h(18).rounded(5).bg(alert).text_size(10.5).font_semibold().text_color(ink(alert)).flex().items_center().child(compact ? "!" : a.status === "blocked" ? "Needs you" : "Review");
     if (a.status === "blocked" && compact) return div().size(14).flex_none().rounded(4).bg(t.blocked + "26").text_size(10.5).font_bold().text_color(t.blocked).flex().items_center().justify_center().child("!");
     if (a.status === "blocked") return div().flex_none().px(6).h(18).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child("Needs you");
     // Idle: a ring; done: a dot.
@@ -675,8 +683,8 @@ export default class Agents extends View {
       }
       const when = this.since(a);
       const idle = a.status === "idle" && !a.focused;
-      // Waiting on you: the row takes its Pokemon's type colour, else the theme's.
-      const alert = a.status === "blocked" ? (mon && typeColor(mon.n)) || t.blocked : null;
+      // Waiting on you (blocked, or done and unread): the row takes its Pokemon's type colour, else the theme's, and pulses.
+      const alert = wantsYou(a) ? (mon && typeColor(mon.n)) || t.blocked : null;
       const isPinned = a.pinned;
       const pin = div()
         .id(`pin-${a.address}`)
@@ -736,9 +744,9 @@ export default class Agents extends View {
         .items_center()
         .gap(9)
         .border(1.5)
-        .border_color(alert ?? "#00000000")
+        .border_color(alert ? alert + (this.glow ? "ff" : "55") : "#00000000")
         .when(a.focused, (el) => el.bg(t.selected))
-        .when(Boolean(alert), (el) => el.bg(alert + "24"))
+        .when(Boolean(alert), (el) => el.bg(alert + (this.glow ? "40" : "1a")))
         .cursor_pointer()
         .hover((s) => s.bg(alert ? alert + "38" : t.hover))
         .on_hover((on, cx) => {
