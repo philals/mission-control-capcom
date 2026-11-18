@@ -152,7 +152,7 @@ export const register: Register = on => {
       <Box columnGap={2} flexWrap="wrap">
         {s.fiveHour ? meter('5h', s.fiveHour.pct, s.fiveHour.resetsAt) : null}
         {s.sevenDay ? meter('7d', s.sevenDay.pct, s.sevenDay.resetsAt) : null}
-        {meter('week', weekPct(new Date(now)))}
+        {meter('week', weekPct(new Date(now), s.sevenDay?.resetsAt))}
       </Box>,
       s.prError ? <Text color={C.red} wrap="truncate">{s.prError}</Text> : null,
       v.message ? <Text dimColor wrap="truncate">{`» ${v.message}`}</Text> : null,

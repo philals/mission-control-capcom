@@ -141,8 +141,10 @@ export function gauge(pct: number, cells: number): { on: string; off: string } {
   return { on: '▮'.repeat(n), off: '▯'.repeat(cells - n) }
 }
 
-/** How far through the working week it is: Monday to Friday, 06:00 to 17:00 local time. */
-export function weekPct(now: Date): number {
+/** How far through the plan's weekly window it is when its reset time is known, else through Monday to Friday, 06:00 to 17:00 local time. */
+export function weekPct(now: Date, resetsAt?: string): number {
+  const reset = resetsAt ? Date.parse(resetsAt) : NaN
+  if (reset > now.getTime()) return Math.max(0, Math.min(100, Math.round(((now.getTime() - (reset - 7 * 86400000)) / (7 * 86400000)) * 100)))
   const day = now.getDay()
   if (day === 0 || day === 6) return 100
   const hours = Math.min(11, Math.max(0, now.getHours() + now.getMinutes() / 60 - 6))

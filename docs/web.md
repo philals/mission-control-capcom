@@ -22,7 +22,7 @@ It is laid out as `capcom-tui` is: from 1000 px wide (and 580 px tall), the agen
 
 ## Plan usage and the working week
 
-The top rail has three gauges: **5H** and **7D** are how much of your Claude plan's 5-hour and weekly limits is used (with when each starts again), and **WEEK** is how far through the working week it is (Monday to Friday, 06:00 to 17:00, local time; 100% from Friday 17:00 through the weekend). The usage ones turn yellow from 60% and red from 85%, and dim when the figures are old.
+The top rail has three gauges: **5H** and **7D** are how much of your Claude plan's 5-hour and weekly limits is used (with when each starts again), and **WEEK** is how far through the plan's weekly window it is (from 7 days before the `7D` reset time to that reset, so it lines up with `7D`; with no usage in the file it falls back to the working week, Monday to Friday, 06:00 to 17:00 local time, 100% from Friday 17:00 through the weekend). The usage ones turn yellow from 60% and red from 85%, and dim when the figures are old.
 
 Claude Code gives the plan usage to a session's status line command (`rate_limits.five_hour.used_percentage`, `rate_limits.seven_day.used_percentage` and their `resets_at`, documented under the status line), and only while a session is running; nothing else on this machine has it. So the page reads a small file that your status line script writes. Add this to your status line script, after it has read its JSON input into `$input`:
 

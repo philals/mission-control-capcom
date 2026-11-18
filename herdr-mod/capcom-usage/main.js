@@ -48,8 +48,12 @@ function until(ms) {
   return h < 24 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d ${h % 24}h`;
 }
 
-// How far through the working week it is: Monday to Friday, 06:00 to 17:00 local time (as in the Claude mod's status line).
-function workWeek(now) {
+// How far through the plan's weekly window it is when its reset time is known, else Monday to Friday, 06:00 to 17:00 local time (as in the Claude mod's status line).
+function workWeek(now, resetsAt) {
+  if (resetsAt > now) {
+    const WEEK = 7 * 24 * 3600 * 1000;
+    return { kind: "work-week", label: "Week elapsed", percent: Math.max(0, Math.min(100, Math.round(((now - (resetsAt - WEEK)) / WEEK) * 100))), resetsAt, note: null, window: true };
+  }
   const d = new Date(now), day = d.getDay();
   if (day === 0 || day === 6) return { kind: "work-week", label: "Working week", percent: 100, resetsAt: 0, note: "weekend" };
   const hours = Math.min(11, Math.max(0, d.getHours() + d.getMinutes() / 60 - 6));
@@ -186,7 +190,7 @@ export default class CapcomUsage extends View {
     const color = week ? CYAN : reset ? t.dim : this.color(t, row);
     const pct = Math.max(0, Math.min(100, row.percent));
     return h_flex().id(`limit-${row.kind}-${row.label}`).h(22).gap(8).flex_none().items_center()
-      .tooltip(week ? "How far through the working week it is: Monday to Friday, 06:00 to 17:00" : reset ? "It has reset since this was checked: press ↻." : `${Math.round(row.percent)}% used`)
+      .tooltip(week ? (row.window ? "How far through the plan's weekly window it is" : "How far through the working week it is: Monday to Friday, 06:00 to 17:00") : reset ? "It has reset since this was checked: press ↻." : `${Math.round(row.percent)}% used`)
       .child(div().w(104).flex_none().truncate().text_size(11.5).text_color(t.foreground).child(row.label))
       .child(div().flex_1().min_w(24).h(5).rounded(3).overflow_hidden().bg(t.input).child(div().h_full().w(`${reset ? 0 : pct}%`).rounded(3).bg(color)))
       .child(div().w(32).flex_none().text_right().text_size(11).font_medium().text_color(color).child(reset ? "–" : `${Math.round(row.percent)}%`))
@@ -196,7 +200,7 @@ export default class CapcomUsage extends View {
   render(_cx) {
     const t = theme();
     const rows = this.usage?.rows ?? [];
-    const week = workWeek(Date.now());
+    const week = workWeek(Date.now(), rows.find((r) => r.kind === "weekly_all")?.resetsAt);
     const shut = this.collapsed;
     const session = rows.find((r) => r.kind === "session");
     const a = this.account;

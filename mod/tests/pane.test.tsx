@@ -57,6 +57,8 @@ test('the state is cut down to what the pane draws', () => {
   expect(s.runs[0]?.fullRepo).toBe('o/api')
   expect(gauge(72, 5)).toEqual({ on: '▮▮▮▮', off: '▯' })
   expect(weekPct(new Date(2026, 9, 24, 12))).toBe(100)
+  expect(weekPct(new Date('2026-11-19T00:00:00Z'), '2026-11-24T00:00:00Z')).toBe(29)
+  expect(weekPct(new Date('2026-11-25T00:00:00Z'), '2026-11-24T00:00:00Z')).toBe(weekPct(new Date('2026-11-25T00:00:00Z')))
   const live = withLive(s, [{ kind: 'seven_day', percentUsed: 9, resetsAt: '2026-10-30T13:00:00Z' }])
   expect([live.sevenDay?.pct, live.fiveHour?.pct]).toEqual([9, 72])
 })

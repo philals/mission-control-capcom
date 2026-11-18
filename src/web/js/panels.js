@@ -137,7 +137,8 @@ function tile(lit, text, cls, onclick, title) {
   return t;
 }
 
-// The working week: Monday to Friday, 06:00 to 17:00, local time.
+// The week: the plan's weekly window when its reset time is known, else Monday to Friday, 06:00 to 17:00 local time.
+const WEEK_MS = 7 * 24 * 3600 * 1000;
 const WORK_START = 6 * 60;
 const WORK_END = 17 * 60;
 const WORK_DAYS = 5;
@@ -145,6 +146,12 @@ const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // How far through the working week it is, as whole percent, and a label for the moment.
 function workWeek(now = new Date()) {
+  const reset = data.usage?.sevenDay?.resetsAt && Date.parse(data.usage.sevenDay.resetsAt);
+  if (reset && reset > now.getTime()) {
+    const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const pct = Math.max(0, Math.min(100, Math.floor((now.getTime() - (reset - WEEK_MS)) * 100 / WEEK_MS)));
+    return { pct, label: `${DAY_NAMES[now.getDay()]} ${hhmm}`, over: false, window: true };
+  }
   const dow = now.getDay() || 7; // Monday is 1, Sunday is 7
   const day = WORK_END - WORK_START;
   const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
@@ -203,7 +210,7 @@ function usageGauges() {
     if (week) out.push(week);
   }
   const w = workWeek();
-  out.push(gauge("week", w.pct, "wk", w.label, `${w.pct}% of the working week (Monday to Friday, 06:00 to 17:00) has gone`, "wk"));
+  out.push(gauge("week", w.pct, "wk", w.label, w.window ? `${w.pct}% of the plan's weekly window has gone (it started ${new Date(Date.parse(data.usage.sevenDay.resetsAt) - WEEK_MS).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })})` : `${w.pct}% of the working week (Monday to Friday, 06:00 to 17:00) has gone`, "wk"));
   return out;
 }
 
