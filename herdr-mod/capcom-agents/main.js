@@ -2,7 +2,7 @@
 // A viewed done agent stays in Done until left.
 
 import { View, div, image, svg } from "gpui-kit";
-import { v_flex, h_flex, HoverCard, Avatar, AvatarImage, AvatarFallback } from "gpui-base";
+import { v_flex, h_flex, HoverCard, Avatar, AvatarImage, AvatarFallback, InputState, Input } from "gpui-base";
 import * as fs from "fs/promises";
 import { appHome, agents, terminals, panes, focused, spaces, run, exec, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 import { SH, dotColor, short, openUrl, prDo, prDetails, needsYou, attentionIcon } from "./pr-details.js";
@@ -49,6 +49,11 @@ function title(tab, l) {
   const telling = live && live !== prog && !/^[~/]|^[A-Za-z]:\\/.test(live) && !live.includes("@") && live.toLowerCase() !== l?.program?.key;
   return (tab.name === prog || !tab.named) && telling ? live : tab.name;
 }
+const // The Claude Code session name (what /rename sets; else its generated title) is the terminal's title.
+const sessionNameOf = (a) => {
+  const live = clean(a.title);
+  return live && live !== a.program?.name && !/^[~/]|^[A-Za-z]:\\/.test(live) && !live.includes("@") && live.toLowerCase() !== a.program?.key && !/^claude( code)?$/i.test(live) ? live : "";
+};
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 // A sub-agent without a pane isn't in agents(): its raw word, error counting as
 // blocked. It's never done: it reports to its parent, and the parent's done is the news.
@@ -103,6 +108,7 @@ const COLORS = ["#e8a24a", "#4aa3e8", "#b878f2", "#4fcf8e", "#ef6f9a", "#3fd0c4"
 
 export default class Agents extends View {
   init(_props, cx) {
+    if (props()?.renameFor) return this.initRename(cx);
     if (props()?.sortMenu) return;
     this.folded = new Set();
     // Each agent's last state and when it changed (ms), kept across restarts.
@@ -377,6 +383,50 @@ export default class Agents extends View {
     return sawDone ? RANK.done : RANK[a.status] ?? 0;
   }
 
+  // Renaming an agent types `/rename <name>` into its Claude Code prompt, so it is exactly what /rename does:
+  // the tab, the terminal title, the status line and the row above all follow. A working agent can't take it.
+  initRename(cx) {
+    this.text = props().renameFor.name ?? "";
+    this.error = "";
+    this.sending = false;
+    this.input = InputState.new({ value: this.text });
+    if (this.text) this.input.set_selected_range({ start: 0, end: this.text.length });
+    this.input.on("change", (_e, cx) => { this.text = this.input.value(); cx.notify(); });
+    this.input.on("submit", (_e, cx) => this.submitRename(cx));
+    this.input.focus();
+    cx.timer.after(600, () => this.input.focus());
+    this.handle = cx.focus_handle();
+  }
+
+  submitRename(cx) {
+    const { terminal } = props().renameFor;
+    const name = this.text.replace(/\s+/g, " ").trim();
+    if (!name || this.sending) return;
+    this.sending = true;
+    this.error = "";
+    cx.notify();
+    cx.spawn(async (cx) => {
+      // Done and idle are two states of the same thing (see track); hc types only when the status is exactly one.
+      const cmd = 'for s in idle done; do hc send --if "$s" "$1" "$2" >/dev/null 2>&1 && exit 0; done; exit 1';
+      let sent = false;
+      try { sent = (await exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", terminal, `/rename ${name}`], { timeout: 8000 })).code === 0; } catch {}
+      if (sent) return closeOverlay(props().overlay);
+      this.sending = false;
+      this.error = "Not renamed: the agent is working or waiting on you. Try again when it is idle.";
+      cx.notify();
+    });
+  }
+
+  renameView(t) {
+    return v_flex().id("rename").track_focus(this.handle)
+      .on_key_down((e, cx) => { if (e.key === "escape") { closeOverlay(props().overlay); cx.stop_propagation(); } })
+      .w_full().p(14).gap(8).bg(t.popover).text_color(t.foreground)
+      .child(div().text_size(11.5).text_color(t.dim).child("Rename session (same as /rename)"))
+      .child(Input.new(this.input).h(34).px(10).rounded(8).border_1().border_color(t.accent).bg(t.background).text_size(12.8).text_color(t.foreground))
+      .when(Boolean(this.error), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(this.error)))
+      .child(div().text_size(11).text_color(t.dim).child(this.sending ? "Sending\u2026" : "Enter renames \u00b7 Esc cancels"));
+  }
+
   sortMenu(t) {
     const on = sortOf().id;
     return v_flex()
@@ -507,6 +557,7 @@ export default class Agents extends View {
 
   render(cx) {
     const t = theme();
+    if (props()?.renameFor) return this.renameView(t);
     if (props()?.sortMenu) return this.sortMenu(t);
     const collapsed = narrow();
     const sort = sortOf();
@@ -615,7 +666,9 @@ export default class Agents extends View {
       const hasPrs = this.prsByAgent.has(a.address);
       // What the agent is on leads the row; its Pokemon is only a label under it.
       const note = notes[a.address];
-      const task = note?.task || (more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a)));
+      const sessionName = sessionNameOf(a);
+      const asked = note?.task || (more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a)));
+      const task = sessionName || asked;
       const id = whoIs({ task: note?.task, branch: paneOf.get(a.pane)?.branch, tab: a.tab_name, space: a.space_name });
       // An agent on another machine (`vps/t7`) says which.
       const machine = a.address.includes("/") ? a.address.split("/")[0] : null;
@@ -654,6 +707,20 @@ export default class Agents extends View {
           cx.notify();
         })
         .child(svg(`mods/workspace-chrome/${isPinned ? "pin-off" : "pin"}.svg`).size(13));
+      const rename = div()
+        .id(`rename-${a.address}`)
+        .flex_none()
+        .p(2)
+        .rounded(4)
+        .text_color(t.dim)
+        .cursor_pointer()
+        .hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .tooltip("Rename this session (same as /rename)")
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          openOverlay({ mod: "capcom-agents", kind: "popup", width: 320, height: 130, props: { renameFor: { terminal: a.address, name: sessionName } } });
+        })
+        .child(svg("mods/workspace-chrome/square-pen.svg").size(13));
       const copied = this.copied === a.address;
       const copy = div()
         .id(`copy-${a.address}`)
@@ -737,7 +804,7 @@ export default class Agents extends View {
           })).child(mon ? this.pokemonAvatar(mon.path) : pic)))
         .child(mon
           ? v_flex().flex_1().min_w(0)
-            .child(div().min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).child(task))
+            .child(div().id(`nm-${a.address}`).min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).tooltip(sessionName && asked ? `Asked: ${asked}` : task).child(task))
             .child(h_flex().min_w(0).gap(5).text_size(11).text_color(t.muted)
               .child(div().flex_none().child([mon.name, full ? a.space_name : null].filter(Boolean).join(" \u00b7 ")))
               .when(Boolean(id.key), el => el.child(div().flex_none().font_semibold().text_color(t.muted).child(id.key)))
@@ -752,6 +819,7 @@ export default class Agents extends View {
         .when(subs.length > 0, el => el.child(fold(a, subs)))
         .when(this.hovered === a.address || asking, el => el.child(close))
         .when(this.hovered === a.address || copied, el => el.child(copy))
+        .when(this.hovered === a.address, el => el.child(rename))
         .when(this.hovered === a.address, el => el.child(pin))
         .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
         .child(this.status(t, a, byPriority && !isPinned, alert));

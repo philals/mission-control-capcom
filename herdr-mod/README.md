@@ -71,6 +71,10 @@ minutes), the row shows a Poké Ball. A Pokémon with no portrait for an express
 shows its Normal one. The pane header's strip shows the same Pokémon (through `capcom.persona`); My Watch and tabs are unchanged. While a portrait for the current status downloads, the agent's Normal one shows (all four expressions are fetched at once, only for Pokémon an agent actually has), and a Poké Ball (PokeAPI sprites) shows until the first one arrives. The pure helpers are
 in `capcom-agents/pokemon.js`, tested by `node --test scripts/pokemon.test.mjs`.
 
+### Session names
+
+An agent row's top line is the Claude Code session name: what `/rename` sets, else the title Claude Code generates (the terminal's title). Hover it to see what the session was asked (the capcom note's task). Hover the row and click the pencil to rename: it types `/rename <name>` into the agent's prompt, so the tab, the terminal title and the status line follow. The agent must be idle or done; a working or blocked one is left alone and the popup says so. The status line (`~/.claude/statusline-command.sh`) shows the same name first, then the branch, falling back to the folder when the session has no name.
+
 ### Agents message each other by name
 
 `capcom tell <pokemon> "text"` sends a prompt to the agent with that Pokémon (`capcom whois` lists them), read from `capcom.persona` in the app's `shared.json` (the app home is `$HERDR_APP_HOME`, default `~/.config/herdr-app`), so it works only while the Agents panel is running. The text reaches the other agent through `hc send` headed with the sender's Pokémon and how to answer. The `/agent-chat` skill teaches agents to use it.
