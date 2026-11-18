@@ -116,6 +116,7 @@ export default class Agents extends View {
     let stored = {};
     try { stored = JSON.parse(localStorage.getItem("pokemon") ?? "{}") ?? {}; } catch {}
     this.pokemon = Object.fromEntries(Object.entries(stored).filter(([, n]) => assignable(n)));
+    this.lastPokemon = Number(localStorage.getItem("pokemonLast")) || 0;
     this.cached = new Set();
     this.wanted = new Map();
     this.fetching = new Set();
@@ -207,7 +208,9 @@ export default class Agents extends View {
     let dirty = false;
     for (const a of list) {
       if (this.pokemon[a.address]) continue;
-      const n = pickPokemon(taken);
+      const n = pickPokemon(taken, this.lastPokemon);
+      this.lastPokemon = n;
+      localStorage.setItem("pokemonLast", String(n));
       this.pokemon[a.address] = n;
       taken.add(n);
       dirty = true;

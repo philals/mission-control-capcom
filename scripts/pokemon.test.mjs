@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { POKEMON, nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrl, portraitUrls, EXPRESSIONS, STATIC, assignable, typeColor } from "../herdr-mod/capcom-agents/pokemon.js";
+import { POKEMON, nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrl, portraitUrls, EXPRESSIONS, assignable, typeColor } from "../herdr-mod/capcom-agents/pokemon.js";
 
 test("the first 151 in order", () => {
   assert.equal(POKEMON.length, 151);
@@ -30,33 +30,32 @@ test("portrait file and url", () => {
   assert.equal(portraitUrl(25, "Joyous"), "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/master/portrait/0025/Joyous.png");
 });
 
-test("pickPokemon takes the first free number when rand is 0", () => {
-  assert.equal(pickPokemon(new Set([1, 2, 3]), () => 0), 4);
+test("pickPokemon starts at 1 and goes on to the next number", () => {
+  assert.equal(pickPokemon(new Set()), 1);
+  assert.equal(pickPokemon(new Set(), 1), 2);
+  assert.equal(pickPokemon(new Set(), 24), 25);
 });
 
-const POOL = Array.from({ length: 151 }, (_, i) => i + 1).filter((n) => !STATIC.has(n));
+test("pickPokemon wraps from 151 to 1", () => {
+  assert.equal(pickPokemon(new Set(), 151), 1);
+});
 
-test("every one of the 151 can be assigned, but the ones with changing faces go first", () => {
-  assert.equal(STATIC.size, 33);
-  assert.ok(STATIC.has(88) && !STATIC.has(25));
+test("pickPokemon skips numbers a live agent has", () => {
+  assert.equal(pickPokemon(new Set([2, 3]), 1), 4);
+  assert.equal(pickPokemon(new Set([1, 2, 3]), 150), 151);
+  assert.equal(pickPokemon(new Set([151, 1]), 150), 2);
+});
+
+test("pickPokemon still answers when all 151 are taken", () => {
+  const all = new Set(Array.from({ length: 151 }, (_, i) => i + 1));
+  assert.equal(pickPokemon(all, 10), 11);
+  assert.equal(pickPokemon(all, 151), 1);
+});
+
+test("every one of the 151 can be assigned", () => {
   assert.equal(assignable(88), true);
+  assert.equal(assignable(151), true);
   assert.equal(assignable(152), false);
-  for (let r = 0; r < 1; r += 0.01) assert.ok(!STATIC.has(pickPokemon(new Set(), () => r)));
-});
-
-test("a Pokemon with no changing face is picked once the others are taken", () => {
-  for (let r = 0; r < 1; r += 0.1) assert.ok(STATIC.has(pickPokemon(new Set(POOL), () => r)));
-});
-
-test("pickPokemon never returns a taken number", () => {
-  const taken = new Set(POOL.filter((n) => n !== 151));
-  for (let i = 0; i < 200; i++) assert.equal(pickPokemon(taken), 151);
-  const nearlyAll = new Set(Array.from({ length: 150 }, (_, i) => i + 1));
-  for (let i = 0; i < 50; i++) assert.equal(pickPokemon(nearlyAll), 151);
-});
-
-test("pickPokemon reuses one when all 151 are taken", () => {
-  for (let i = 0; i < 50; i++) assert.ok(validNumber(pickPokemon(new Set(Array.from({ length: 151 }, (_, j) => j + 1)))));
 });
 
 test("portraitUrls tries similar expressions, then Normal", () => {
