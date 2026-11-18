@@ -75,11 +75,11 @@ in `capcom-agents/pokemon.js`, tested by `node --test scripts/pokemon.test.mjs`.
 
 An agent row's top line is the Claude Code session name: what `/rename` sets, else the title Claude Code generates (the terminal's title). Hover it to see what the session was asked (the capcom note's task). Click the name to rename: it types `/rename <name>` into the agent's prompt, so the tab, the terminal title and the status line follow. The agent must be idle or done; a working or blocked one is left alone and the popup says so. The status line (`~/.claude/statusline-command.sh`) shows the same name first, then the branch, falling back to the folder when the session has no name.
 
-Click the Pokémon's name under it to copy that name (for `capcom tell`); the session id is no longer copyable from the panel (it is in the status line).
+Click the Pokémon's name under it to copy `Krabby (t5h)`, its name and terminal (for `capcom tell`); the session id is no longer copyable from the panel (it is in the status line).
 
 ### Agents message each other by name
 
-`capcom tell <pokemon> "text"` sends a prompt to the agent with that Pokémon (`capcom whois` lists them), read from `capcom.persona` in the app's `shared.json` (the app home is `$HERDR_APP_HOME`, default `~/.config/herdr-app`), so it works only while the Agents panel is running. The text reaches the other agent through `hc send` headed with the sender's Pokémon and how to answer. The `/agent-chat` skill teaches agents to use it.
+`capcom tell <agent> "text"` sends a prompt to an agent, named by its Pokémon (`krabby`), its terminal (`t5h`, which also works without the panel) or both (`"Krabby (t5h)"`; the terminal wins, and it fails if that terminal is no longer that Pokémon). `capcom whois` lists them, read from `capcom.persona` in the app's `shared.json` (the app home is `$HERDR_APP_HOME`, default `~/.config/herdr-app`), so it works only while the Agents panel is running. The text reaches the other agent through `hc send` headed with the sender's Pokémon and how to answer. The `/agent-chat` skill teaches agents to use it.
 
 ## capcom-jira: your Jira tickets
 

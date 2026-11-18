@@ -763,10 +763,10 @@ export default class Agents extends View {
               }).child(task))
             .child(h_flex().min_w(0).gap(5).text_size(11).text_color(t.muted)
               .child(div().id(`mon-${a.address}`).flex_none().cursor_pointer().text_color(copied ? t.foreground : t.muted)
-                .hover((s) => s.text_color(t.foreground)).tooltip(copied ? "Copied" : "Click to copy this name")
+                .hover((s) => s.text_color(t.foreground)).tooltip(copied ? "Copied" : `Click to copy "${mon.name} (${a.address})"`)
                 .on_click((_e, cx) => {
                   cx.stop_propagation();
-                  cx.write_to_clipboard(mon.name);
+                  cx.write_to_clipboard(`${mon.name} (${a.address})`);
                   this.copied = a.address;
                   cx.notify();
                   cx.timer.after(1500, (cx) => { if (this.copied === a.address) { this.copied = null; cx.notify(); } });

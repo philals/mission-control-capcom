@@ -52,7 +52,7 @@ enum Cmd {
     },
     /// Send a message to another live agent by its Pokemon name (see `whois`); it arrives as a prompt in that agent's terminal.
     Tell {
-        /// The agent's Pokemon name, for example krabby (case and punctuation do not matter)
+        /// The agent: its Pokemon name (krabby; case and punctuation do not matter), its terminal (t5h), or both as `"Krabby (t5h)"`
         pokemon: String,
         /// The message; several words are joined with spaces
         #[arg(required = true, num_args = 1..)]
@@ -60,7 +60,7 @@ enum Cmd {
     },
     /// List the live agents by Pokemon name and terminal, or look one up
     Whois {
-        /// The agent's Pokemon name (leave out to list them all)
+        /// The agent, as for `tell` (leave out to list them all)
         pokemon: Option<String>,
     },
     /// Serve the boards and your open PRs as a page on localhost (read-only; it polls GitHub itself while a browser is open)
@@ -344,11 +344,13 @@ fn main() -> Result<()> {
     }
     if let Cmd::Whois { pokemon } = &cli.cmd {
         let all = capcom::tell::load()?;
-        let shown: Vec<&capcom::tell::Agent> = match pokemon {
-            Some(name) => vec![capcom::tell::resolve(&all, name)?],
-            None => all.iter().collect(),
-        };
-        return print(&Value::Array(shown.iter().map(|a| json!({ "name": a.name, "terminal": a.terminal })).collect()));
+        return print(&match pokemon {
+            Some(spec) => {
+                let t = capcom::tell::resolve(&all, spec)?;
+                Value::Array(vec![json!({ "name": t.name, "terminal": t.terminal })])
+            }
+            None => Value::Array(all.iter().map(|a| json!({ "name": a.name, "terminal": a.terminal })).collect()),
+        });
     }
     if let Cmd::Prs { query, force, demo } = &cli.cmd {
         return print(&if *demo { capcom::prs_json::build_demo() } else { capcom::prs_json::build(query, *force) });
