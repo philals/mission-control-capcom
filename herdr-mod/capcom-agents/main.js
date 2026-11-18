@@ -87,12 +87,6 @@ function icon(p, size, color) {
 
 const AV = 44;
 
-// Dark text on a light colour, white on a dark one.
-const ink = (hex) => {
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(String(hex).slice(i, i + 2), 16));
-  return 0.299 * r + 0.587 * g + 0.114 * b > 140 ? "#14100a" : "#ffffff";
-};
-
 // "claude-opus-5-5" -> { label: "Opus 5.5", color } ; date suffixes dropped.
 const MODEL_COLORS = { opus: "#c58af9", sonnet: "#6cb6ff", haiku: "#57d9a3", fable: "#f2a65a" };
 function modelInfo(id) {
@@ -539,11 +533,10 @@ export default class Agents extends View {
       .child(this.status(t, { status: st }, compact));
   }
 
-  // compact: a ! for blocked where a header already says "Needs you". alert: a solid colour for blocked.
-  status(t, a, compact = false, alert = null) {
+  // compact: a ! for blocked where a header already says "Needs you".
+  status(t, a, compact = false) {
     const color = t[a.status] ?? t.dim;
     if (a.status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).mx(1).flex_none().text_color(t.working).spin(900);
-    if (wantsYou(a) && alert) return div().flex_none().px(6).h(18).rounded(5).bg(alert).text_size(10.5).font_semibold().text_color(ink(alert)).flex().items_center().child(compact ? "!" : a.status === "blocked" ? "Needs you" : "Review");
     if (a.status === "blocked" && compact) return div().size(14).flex_none().rounded(4).bg(t.blocked + "26").text_size(10.5).font_bold().text_color(t.blocked).flex().items_center().justify_center().child("!");
     if (a.status === "blocked") return div().flex_none().px(6).h(18).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child("Needs you");
     // Idle: a ring; done: a dot.
@@ -793,7 +786,7 @@ export default class Agents extends View {
         .when(this.hovered === a.address || asking, el => el.child(close))
         .when(this.hovered === a.address, el => el.child(pin))
         .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
-        .child(this.status(t, a, byPriority && !isPinned, alert));
+        .when(!alert, (el) => el.child(this.status(t, a, byPriority && !isPinned)));
     };
 
     // Groups in list order: spaces (grouped) or priority sections. Agents of a
