@@ -170,6 +170,14 @@ export default class CapcomBoard extends View {
         if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").pop());
         this.message = { text: `${key} is now ${status.replace("_", " ")}`, ok: true };
         if (status === "in_review") run("tab.new", { name: `${key} review`, argv: ["claude", `/story-review ${key}`] });
+        if (status === "done" && !this.showDone && this.key === key) {
+          const next = this.stories.find((x) => x.key !== key && x.status !== "done");
+          if (next) {
+            this.select(cx, next.key);
+            this.message = { text: `${key} is now done and hidden (☐ done shows finished stories)`, ok: true };
+            return;
+          }
+        }
       } catch (e) {
         this.message = { text: String(e?.message ?? e), ok: false };
       }
