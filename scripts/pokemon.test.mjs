@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { POKEMON, nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrl, portraitUrls, EXPRESSIONS, assignable, typeColor } from "../herdr-mod/capcom-agents/pokemon.js";
+import { POKEMON, nameOf, validNumber, pickPokemon, expressionFor, portraitFile, portraitUrl, portraitUrls, EXPRESSIONS, assignable, typeColor, stageColor } from "../herdr-mod/capcom-agents/pokemon.js";
 
 test("the first 151 in order", () => {
   assert.equal(POKEMON.length, 151);
@@ -77,4 +77,13 @@ test("typeColor gives each of the 151 its first type's colour", () => {
   assert.equal(typeColor(149), "#6f35fc");
   for (let n = 1; n <= 151; n++) assert.match(typeColor(n), /^#[0-9a-f]{6}$/);
   assert.equal(typeColor(152), null);
+});
+
+test("stageColor: the type colour, light then plain then dark down an evolution line", () => {
+  const lum = (h) => parseInt(h.slice(1, 3), 16) + parseInt(h.slice(3, 5), 16) + parseInt(h.slice(5, 7), 16);
+  assert.equal(stageColor(2), typeColor(2));
+  assert.ok(lum(stageColor(1)) > lum(stageColor(2)) && lum(stageColor(2)) > lum(stageColor(3)));
+  assert.ok(lum(stageColor(4)) > lum(stageColor(6)));
+  assert.equal(stageColor(0), null);
+  for (let n = 1; n <= 151; n++) assert.match(stageColor(n), /^#[0-9a-f]{6}$/);
 });

@@ -6,7 +6,7 @@ import { v_flex, h_flex, HoverCard, Avatar, AvatarImage, AvatarFallback, InputSt
 import * as fs from "fs/promises";
 import { appHome, agents, terminals, panes, focused, spaces, run, exec, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 import { SH, dotColor, short, openUrl, prDo, prDetails, needsYou, attentionIcon } from "./pr-details.js";
-import { BALL_FILE, BALL_URL, EXPRESSIONS, nameOf, assignable, pickPokemon, expressionFor, portraitFile, portraitUrls, typeColor } from "./pokemon.js";
+import { BALL_FILE, BALL_URL, EXPRESSIONS, nameOf, assignable, pickPokemon, expressionFor, portraitFile, portraitUrls, typeColor, stageColor } from "./pokemon.js";
 import { who as whoIs } from "./identity.js";
 
 function find(node, id) {
@@ -305,6 +305,8 @@ export default class Agents extends View {
   }
 
   hue(a) {
+    const mon = stageColor(this.pokemon[a.address]);
+    if (mon) return { color: mon, n: 0 };
     const [i, n] = (this.hues[a.address] ?? "").split("#");
     return COLORS[Number(i)] ? { color: COLORS[Number(i)], n: n ? Number(n) : 0 } : null;
   }

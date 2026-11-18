@@ -63,3 +63,19 @@ const TYPE_COLORS = {
 };
 
 export const typeColor = (n) => (validNumber(n) ? TYPE_COLORS[TYPE_OF[n - 1]] : null);
+
+// Each one's place in its evolution line: L first of a line, M middle (or a Pokemon with no evolution), D last of a line.
+const STAGE_OF = "LMDLMDLMDLMDLMDLMDLDLDLDLDLDLMDLMDLDLDLDLDLMDLDLDLDLDLDLDLDLMDLMDLMDLMDLDLMDLDLDLDMLDLDLDLDLMDMLDLDLDLDLDMMMLDLDMMMLDLDLDMMMMMMMLDMMLDDDMLDLDMMMMMLMDMM";
+
+// Blend a #rrggbb colour towards white (amount > 0) or black (amount < 0).
+const shade = (hex, amount) => {
+  const target = amount < 0 ? 0 : 255;
+  const k = Math.abs(amount);
+  const part = (i) => Math.round(parseInt(hex.slice(i, i + 2), 16) * (1 - k) + target * k).toString(16).padStart(2, "0");
+  return `#${part(1)}${part(3)}${part(5)}`;
+};
+
+const STAGE_SHADE = { L: 0.4, M: 0, D: -0.4 };
+
+// The type colour, lighter for the first of an evolution line, darker for the last.
+export const stageColor = (n) => (validNumber(n) ? shade(typeColor(n), STAGE_SHADE[STAGE_OF[n - 1]]) : null);

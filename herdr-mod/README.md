@@ -104,8 +104,8 @@ The tickets assigned to you, grouped by Jira status, under the Kanban in the Cap
 So a prompt does not land in the wrong session, every agent says what it is about in three places, and every live
 session has its own colour (with or without a Jira ticket).
 
-- **Colour**: `capcom-agents` gives each live session the first free colour of twelve and keeps it until the session
-  ends. Past twelve sessions a colour repeats with a number badge (`#2`). The ticket key (`ABC-123`, found in the
+- **Colour**: each session's colour is its Pokemon's type colour, lighter for the first of an evolution line, plain
+  for the middle (or a Pokemon that does not evolve) and darker for the last (two-stage lines go light then dark). The ticket key (`ABC-123`, found in the
   note's task, the branch, or the tab and space names) is shown as text and does not decide the colour.
 - **Agents list** (`capcom-agents`): the row leads with the task from `capcom note --task` (else the tab or title as
   before), with the persona, ticket key and branch under it, and a bar in the session colour on the left.
