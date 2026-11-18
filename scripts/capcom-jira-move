@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Moves one Jira ticket to another status, using Claude's Atlassian connector (`claude -p`).
+# Usage: capcom-jira-move KEY "Done"   (the status name, e.g. Done, In Progress, In Review)
+# Prints the status the ticket ended up in. The capcom-jira board mod runs this.
+set -euo pipefail
+PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+
+key="${1:?usage: capcom-jira-move KEY STATUS}"
+target="${2:?usage: capcom-jira-move KEY STATUS}"
+[[ "$key" =~ ^[A-Z][A-Z0-9]*-[0-9]+$ ]] || { echo "capcom-jira-move: \"$key\" is not a Jira key" >&2; exit 2; }
+
+schema='{"type":"object","required":["moved","status","reason"],"properties":{"moved":{"type":"boolean"},"status":{"type":"string"},"reason":{"type":"string"}}}'
+prompt="Use the Atlassian tools. Call getAccessibleAtlassianResources for the cloud id, then getTransitionsForJiraIssue for $key. Pick the transition whose destination status is \"$target\" (match the status name, ignoring case); if none matches by name, use the only transition into that status category if there is exactly one. If there is none, do not guess: return moved false and say which transitions exist in reason. Otherwise call transitionJiraIssue with it, then getJiraIssue for $key and return moved true with its current status name in status. Always fill reason (empty string when moved)."
+
+raw="$(claude -p "$prompt" \
+  --model "${CAPCOM_JIRA_MODEL:-haiku}" \
+  --allowedTools mcp__claude_ai_Atlassian__getAccessibleAtlassianResources mcp__claude_ai_Atlassian__getTransitionsForJiraIssue mcp__claude_ai_Atlassian__transitionJiraIssue mcp__claude_ai_Atlassian__getJiraIssue \
+  --json-schema "$schema" \
+  --no-session-persistence \
+  --output-format json)"
+
+printf '%s' "$raw" | jq -r '
+  if .is_error then error(.result // "claude failed")
+  elif .structured_output.moved == true then .structured_output.status
+  else error(.structured_output.reason // "no matching transition") end'

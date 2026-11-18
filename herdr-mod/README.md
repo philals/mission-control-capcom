@@ -90,6 +90,9 @@ The tickets assigned to you, grouped by Jira status, under the Kanban in the Cap
   task is done. The tag `CapCom 2/4` shows a ticket that already has a board, and, on a row of its own, one icon for every PR of the ticket, open, merged or closed (coloured by CI, purple once merged, grey when closed). Hover one for the same card as an agent's PR icon; click it to open the PR. The PRs come from the board's tasks, from My Watch (a PR whose title or branch names the ticket), and from a GitHub search that `capcom-jira-me` runs for each ticket key (the title must name the exact key), so merged PRs and tickets with no board are covered.
 - The expanded card adds progress by task status, copy actions (ID, URL, `KEY: title`), open in Jira, and every
   skill that fits: plan or re-plan, implement a task, review, or implement directly (a small bug or change with no board).
+- The expanded card has a MOVE IN JIRA section: Move to In Progress / In Review / Done, so a ticket you reviewed outside
+  Claude can be closed without leaving CapCom. It runs `scripts/capcom-jira-move KEY STATUS` (Haiku plus the Atlassian
+  connector, which picks the matching workflow transition and fails loudly if there is none), then refetches.
 - Data comes from `scripts/capcom-jira-me`, installed to `~/.local/bin`. It runs `claude -p` (Haiku) with the Atlassian
   connector and writes `~/.cache/capcom/jira-me.json` (override with `CAPCOM_JIRA_FILE`; set `CAPCOM_JIRA_MODEL` for
   another model). One run takes about 15 seconds and costs under a cent.

@@ -16,6 +16,7 @@ done
 # capcom-jira runs this to fetch your Jira tickets through Claude's Atlassian connector.
 mkdir -p "$HOME/.local/bin"
 install -m 755 scripts/capcom-jira-me "$HOME/.local/bin/capcom-jira-me"
+install -m 755 scripts/capcom-jira-move "$HOME/.local/bin/capcom-jira-move"
 
 # capcom-daily runs the AWS, CodeArtifact, ECR and database scripts behind My Watch's Daily section.
 install -m 755 scripts/capcom-daily "$HOME/.local/bin/capcom-daily"

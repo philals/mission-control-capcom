@@ -163,6 +163,23 @@ export default class CapcomJira extends View {
     });
   }
 
+  moveTo(cx, i, status) {
+    this.moving = i.key;
+    this.say(cx, `${i.key} → ${status}…`);
+    cx.spawn(async (cx) => {
+      try {
+        const r = await exec(SH[0], [...SH.slice(1), "capcom-jira-move", i.key, status], { timeout: 120000 });
+        if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || `capcom-jira-move exited ${r.code}`);
+        this.say(cx, `${i.key} is now ${r.stdout.trim() || status}`);
+        this.moving = null;
+        this.fetch(cx);
+      } catch (e) {
+        this.moving = null;
+        this.say(cx, String(e?.message ?? e), false);
+      }
+    });
+  }
+
   say(cx, text, ok = true) {
     this.message = { text, ok };
     cx.notify();
@@ -337,6 +354,11 @@ export default class CapcomJira extends View {
       .child(this.line(`cp-title-${i.key}`, "Copy ID and title", `${i.key}: ${i.summary}`, (cx) => this.copy(cx, "ID and title", `${i.key}: ${i.summary}`), t))
       .child(this.heading("OPEN", t))
       .child(this.line(`open-${i.key}`, "Open in Jira", "↗", () => openUrl(i.url), t))
+      .child(this.heading("MOVE IN JIRA", t))
+      .children(
+        ["In Progress", "In Review", "Done"].filter((x) => x.toLowerCase() !== i.status.toLowerCase()).map((x) =>
+          this.line(`mv-${i.key}-${x}`, `Move to ${x}`, this.moving === i.key ? "working…" : "", (cx) => this.moving ? this.say(cx, "A move is already running", false) : this.moveTo(cx, i, x), t, x === "Done" ? "#22c55e" : undefined)),
+      )
       .child(this.heading("START IN A NEW TAB", t))
       .children(acts.map((a, n) => this.line(`go-${i.key}-${n}`, `▶ ${a.full}`, a.cmd, a.go, t, n === 0 && !a.minor ? "#9fc8ff" : undefined)));
   }
