@@ -785,7 +785,7 @@ export default class Agents extends View {
         .when(this.hovered === a.address || asking, el => el.child(close))
         .when(this.hovered === a.address, el => el.child(pin))
         .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
-        .when(Boolean(a.focused && mon), (el) => { const b = this.ball(); return b ? el.child(image(b).w(24).h(24).flex_none()) : el; })
+        .when(Boolean(a.focused && mon), (el) => { const b = this.ball(); return b ? el.child(image(b).w(48).h(48).flex_none()) : el; })
         .when(!alert, (el) => el.child(this.status(t, a, byPriority && !isPinned)));
     };
 
