@@ -56,6 +56,9 @@ const sessionNameOf = (a) => {
 };
 // Blocked, or done and not yet looked at (looking turns done into idle): it is waiting on you.
 const wantsYou = (a) => a.status === "blocked" || a.status === "done";
+const SHAKE_DX = [-3, 0, 3, 0, -3, 0, 3, 0, -3, 0, 3, 0];
+const SHAKE_REST = 10;
+const SHAKE_FRAMES = SHAKE_REST + SHAKE_DX.length;
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 // A sub-agent without a pane isn't in agents(): its raw word, error counting as
 // blocked. It's never done: it reports to its parent, and the parent's done is the news.
@@ -124,6 +127,13 @@ export default class Agents extends View {
     this.scanned = false;
     this.scanPortraits(cx);
     cx.timer.every(700, (cx) => this.fetchWanted(cx));
+    this.shake = 0;
+    this.waiting = false;
+    cx.timer.every(110, (cx) => {
+      if (!this.waiting) return;
+      this.shake = (this.shake + 1) % SHAKE_FRAMES;
+      cx.notify();
+    });
     this.pulse = true;
     cx.timer.every(700, (cx) => {
       if (![...this.prsByAgent.values()].some((list) => list.some(({ pr, merged }) => !merged && needsYou(pr)))) return;
@@ -226,6 +236,15 @@ export default class Agents extends View {
     if (this.cached.has(file)) return `data/capcom-agents/pokemon/${file}`;
     this.wanted.set(file, { urls: portraitUrls(n, expression) });
     return null;
+  }
+
+  // Rocks side to side with a tilt, three times, then rests, so the sprite-less ball reads as a catch attempt.
+  shakingBall(path) {
+    const f = this.shake % SHAKE_FRAMES;
+    const i = f - SHAKE_REST;
+    const dx = i >= 0 ? SHAKE_DX[i % SHAKE_DX.length] : 0;
+    return div().w(56).h(48).flex_none().flex().items_center().justify_center()
+      .child(image(path).w(40).h(40).flex_none().ml(dx * 2).mt(Math.abs(dx)));
   }
 
   ball() {
@@ -567,6 +586,7 @@ export default class Agents extends View {
     this.hold(list);
     this.assignPokemon(list);
     this.assignColors(list);
+    this.waiting = !collapsed && list.some((a) => wantsYou(a) && this.pokemon[a.address]);
     this.frameColor(this.hue(list.find((a) => a.focused) ?? {})?.color);
     const persona = Object.fromEntries(list.map((a) => {
       const mon = this.pokemonFace(a);
@@ -675,8 +695,10 @@ export default class Agents extends View {
       }
       const when = this.since(a);
       const idle = a.status === "idle" && !a.focused;
-      // Waiting on you (blocked, or done and unread): the row takes its Pokemon's type colour, else the theme's, and holds it.
-      const alert = wantsYou(a) ? (mon && typeColor(mon.n)) || t.blocked : null;
+      // The selected agent: the row takes its Pokemon's type colour, else the theme's, and holds it.
+      const alert = a.focused ? (mon && typeColor(mon.n)) || t.blocked : null;
+      // Waiting on you (blocked, or done and unread): a Poke Ball that shakes like one catching a Pokemon.
+      const ball = wantsYou(a) && mon ? this.ball() : null;
       const isPinned = a.pinned;
       const pin = div()
         .id(`pin-${a.address}`)
@@ -785,8 +807,8 @@ export default class Agents extends View {
         .when(this.hovered === a.address || asking, el => el.child(close))
         .when(this.hovered === a.address, el => el.child(pin))
         .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
-        .when(Boolean(a.focused && mon), (el) => { const b = this.ball(); return b ? el.child(image(b).w(48).h(48).flex_none()) : el; })
-        .when(!alert, (el) => el.child(this.status(t, a, byPriority && !isPinned)));
+        .when(Boolean(ball), (el) => el.child(this.shakingBall(ball)))
+        .when(!ball && !alert, (el) => el.child(this.status(t, a, byPriority && !isPinned)));
     };
 
     // Groups in list order: spaces (grouped) or priority sections. Agents of a
