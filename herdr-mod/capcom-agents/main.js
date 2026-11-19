@@ -697,8 +697,8 @@ export default class Agents extends View {
       // Without a space header above (priority, pinned) the row names its space.
       const full = byPriority || isPinned;
       const name = full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
-      const AVS = tight ? 26 : 32;
       const rowH = mon ? (model || hasPrs ? 58 : 46) : AV + (model || hasPrs ? 14 : 6);
+      const AVS = rowH - 12;
       const showActions = this.hovered === a.address || asking;
       return h_flex()
         .id(`ag-${a.address}`)
