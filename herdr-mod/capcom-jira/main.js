@@ -57,6 +57,10 @@ export default class CapcomJira extends View {
     cx.timer.every(FETCH_MS, (cx) => this.live() && this.fetch(cx));
     cx.timer.every(RELOAD_MS, (cx) => this.live() && this.reload(cx));
     cx.timer.every(WATCH_MS, (cx) => this.watch(cx));
+    cx.spawn(async (cx) => {
+      await this.readCache();
+      cx.notify();
+    });
     this.watch(cx);
   }
 
