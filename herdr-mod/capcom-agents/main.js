@@ -19,6 +19,8 @@ function find(node, id) {
 }
 
 // The sidebar's rail goes by its width, not a flag: dragging its edge narrows it too.
+const sidebarPx = () => find(layout(), "sidebar")?.size?.px ?? Infinity;
+const TIGHT = 240;
 const narrow = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
 
 // To the rail (on macOS wide enough for the traffic lights), or back to the width it had.
@@ -73,14 +75,6 @@ const SORTS = [
 const sortOf = () => SORTS.find((s) => s.id === shared("agents.sort")) ?? SORTS[0];
 const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle" };
 const SECTION_STATUS = { 4: "blocked", 3: "done", 2: "working" };
-
-function duration(ms) {
-  const m = Math.floor(ms / 60000);
-  if (m < 1) return "<1m";
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
-}
 
 // The agent's icon from the app's program table: a one-color glyph or a picture.
 function icon(p, size, color) {
@@ -238,12 +232,12 @@ export default class Agents extends View {
   }
 
   // Rocks side to side with a tilt, three times, then rests, so the sprite-less ball reads as a catch attempt.
-  shakingBall(path) {
+  shakingBall(path, size = 40) {
     const f = this.shake % SHAKE_FRAMES;
     const i = f - SHAKE_REST;
     const dx = i >= 0 ? SHAKE_DX[i % SHAKE_DX.length] : 0;
-    return div().w(56).h(48).flex_none().flex().items_center().justify_center()
-      .child(image(path).w(40).h(40).flex_none().ml(dx * 2).mt(Math.abs(dx)));
+    return div().w(size + 14).h(size + 6).flex_none().flex().items_center().justify_center()
+      .child(image(path).w(size).h(size).flex_none().ml(dx * 2).mt(Math.abs(dx)));
   }
 
   ball() {
@@ -329,8 +323,8 @@ export default class Agents extends View {
     return COLORS[Number(i)] ? { color: COLORS[Number(i)], n: n ? Number(n) : 0 } : null;
   }
 
-  pokemonAvatar(path) {
-    const av = Avatar.new().size(AV).flex_none().rounded(8).overflow_hidden().bg("#2a2f37");
+  pokemonAvatar(path, size = AV) {
+    const av = Avatar.new().size(size).flex_none().rounded(8).overflow_hidden().bg("#2a2f37");
     return (path ? av.image(AvatarImage.new(path).size_full()) : av)
       .fallback(AvatarFallback.new().size_full().bg("#2a2f37"));
   }
@@ -521,6 +515,7 @@ export default class Agents extends View {
     const t = theme();
     if (props()?.sortMenu) return this.sortMenu(t);
     const collapsed = narrow();
+    const tight = !collapsed && sidebarPx() < TIGHT;
     const sort = sortOf();
     let list = agents();
     this.listed = new Map(list.map((a) => [a.address, a.status]));
@@ -647,7 +642,6 @@ export default class Agents extends View {
           .child(div().flex_1().min_w(0).whitespace_nowrap().text_right().text_color(t.muted).child(String(i + 1)))
           .child(h_flex().w(14).flex_none().items_center().justify_center().child(this.status(t, a, true)));
       }
-      const when = this.since(a);
       const idle = a.status === "idle" && !a.focused;
       // The selected agent: the row takes its Pokemon's type colour, else the theme's, and holds it.
       const alert = a.focused ? (mon && typeColor(mon.n)) || t.blocked : null;
@@ -703,10 +697,13 @@ export default class Agents extends View {
       // Without a space header above (priority, pinned) the row names its space.
       const full = byPriority || isPinned;
       const name = full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
+      const AVS = tight ? 26 : 32;
+      const rowH = mon ? (tight ? 40 : 46) : AV + (model || hasPrs ? 14 : 6);
+      const showActions = this.hovered === a.address || asking;
       return h_flex()
         .id(`ag-${a.address}`)
         .px(8)
-        .h(AV + (model || hasPrs ? 14 : 6))
+        .h(rowH)
         .flex_none()
         .rounded(8)
         .items_center()
@@ -723,16 +720,16 @@ export default class Agents extends View {
           cx.notify();
         })
         .on_click(() => run("pane.focus", { pane: a.pane }))
-        .child(div().w(alert ? 5 : 3).h(AV - 8).flex_none().rounded(2).bg(this.hue(a)?.color ?? "#00000000"))
+        .child(div().w(alert ? 5 : 3).h(mon ? rowH - 14 : AV - 8).flex_none().rounded(2).bg(this.hue(a)?.color ?? "#00000000"))
         .when(Boolean(pic) || Boolean(mon), el => el.child(div().id(`agent-fold-${a.address}`)
           .when(subs.length > 0, el => el.on_click((_e, cx) => {
             cx.stop_propagation();
             this.folded.has(a.address) ? this.folded.delete(a.address) : this.folded.add(a.address);
             cx.notify();
-          })).child(mon ? this.pokemonAvatar(mon.path) : pic)))
+          })).child(mon ? this.pokemonAvatar(mon.path, AVS) : pic)))
         .child(mon
           ? v_flex().flex_1().min_w(0)
-            .child(div().id(`nm-${a.address}`).min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).when(Boolean(sessionName && asked), (el) => el.tooltip(`Asked: ${asked}`)).child(task))
+            .child(div().id(`nm-${a.address}`).min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).tooltip([asked && sessionName ? `Asked: ${asked}` : "", a.space_name, id.branch, model?.label].filter(Boolean).join(" \u00b7 ") || task).child(task))
             .child(h_flex().min_w(0).gap(5).text_size(11).text_color(t.muted)
               .child(div().id(`mon-${a.address}`).flex_none().cursor_pointer().text_color(copied ? t.foreground : t.muted)
                 .hover((s) => s.text_color(t.foreground)).tooltip(copied ? "Copied" : `Click to copy "${mon.name} (${a.address})"`)
@@ -743,22 +740,17 @@ export default class Agents extends View {
                   cx.notify();
                   cx.timer.after(1500, (cx) => { if (this.copied === a.address) { this.copied = null; cx.notify(); } });
                 }).child(copied ? "Copied" : mon.name))
-              .when(full && Boolean(a.space_name), el => el.child(div().flex_none().child(`\u00b7 ${a.space_name}`)))
               .when(Boolean(id.key), el => el.child(div().flex_none().font_semibold().text_color(t.muted).child(id.key)))
-              .when(Boolean(id.branch), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(id.branch))))
-            .when(Boolean(model) || hasPrs, el => el.child(h_flex().min_w(0).gap(6).items_center()
-              .when(Boolean(model), el => el.child(div().min_w(0).truncate().text_size(10).font_semibold().text_color(model.color ?? t.dim).child(model.label)))
-              .when(hasPrs, el => el.child(this.prIcons(t, a)))))
+              .when(Boolean(id.branch) && !tight, el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(id.branch)))
+              .when(hasPrs && !tight, el => el.child(div().flex_none().ml_auto().child(this.prIcons(t, a)))))
           : h_flex().flex_1().min_w(0).gap(5).items_center()
           .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
           .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`\u00b7 ${more}`))))
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
-        .when(this.hovered === a.address || asking, el => el.child(close))
-        .when(this.hovered === a.address, el => el.child(pin))
-        .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
-        .when(Boolean(ball), (el) => el.child(this.shakingBall(ball)))
-        .when(!ball && !alert, (el) => el.child(this.status(t, a, byPriority && !isPinned)));
+        .when(Boolean(ball), (el) => el.child(this.shakingBall(ball, tight ? 24 : 30)))
+        .when(!ball && !alert, (el) => el.child(this.status(t, a, byPriority && !isPinned)))
+        .when(showActions, el => el.child(h_flex().absolute().top(2).right(3).gap(2).rounded(5).bg(t.background).child(pin).child(close)));
     };
 
     // Groups in list order: spaces (grouped) or priority sections. Agents of a
