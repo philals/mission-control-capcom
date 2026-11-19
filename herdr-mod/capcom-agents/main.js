@@ -698,7 +698,7 @@ export default class Agents extends View {
       const full = byPriority || isPinned;
       const name = full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
       const AVS = tight ? 26 : 32;
-      const rowH = mon ? (tight ? 40 : 46) : AV + (model || hasPrs ? 14 : 6);
+      const rowH = mon ? (model || hasPrs ? 58 : 46) : AV + (model || hasPrs ? 14 : 6);
       const showActions = this.hovered === a.address || asking;
       return h_flex()
         .id(`ag-${a.address}`)
@@ -729,7 +729,7 @@ export default class Agents extends View {
           })).child(mon ? this.pokemonAvatar(mon.path, AVS) : pic)))
         .child(mon
           ? v_flex().flex_1().min_w(0)
-            .child(div().id(`nm-${a.address}`).min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).tooltip([asked && sessionName ? `Asked: ${asked}` : "", a.space_name, id.branch, model?.label].filter(Boolean).join(" \u00b7 ") || task).child(task))
+            .child(div().id(`nm-${a.address}`).min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).tooltip([asked && sessionName ? `Asked: ${asked}` : "", a.space_name, id.branch].filter(Boolean).join(" \u00b7 ") || task).child(task))
             .child(h_flex().min_w(0).gap(5).text_size(11).text_color(t.muted)
               .child(div().id(`mon-${a.address}`).flex_none().cursor_pointer().text_color(copied ? t.foreground : t.muted)
                 .hover((s) => s.text_color(t.foreground)).tooltip(copied ? "Copied" : `Click to copy "${mon.name} (${a.address})"`)
@@ -742,7 +742,10 @@ export default class Agents extends View {
                 }).child(copied ? "Copied" : mon.name))
               .when(Boolean(id.key), el => el.child(div().flex_none().font_semibold().text_color(t.muted).child(id.key)))
               .when(Boolean(id.branch) && !tight, el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(id.branch)))
-              .when(hasPrs && !tight, el => el.child(div().flex_none().ml_auto().child(this.prIcons(t, a)))))
+              )
+            .when(Boolean(model) || hasPrs, el => el.child(h_flex().min_w(0).gap(6).items_center()
+              .when(Boolean(model), el => el.child(div().min_w(0).truncate().text_size(10).font_semibold().text_color(model.color ?? t.dim).child(model.label)))
+              .when(hasPrs, el => el.child(this.prIcons(t, a)))))
           : h_flex().flex_1().min_w(0).gap(5).items_center()
           .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
           .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`\u00b7 ${more}`))))
