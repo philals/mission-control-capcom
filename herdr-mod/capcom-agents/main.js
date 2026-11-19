@@ -58,7 +58,7 @@ const sessionNameOf = (a) => {
 };
 // Blocked, or done and not yet looked at (looking turns done into idle): it is waiting on you.
 const wantsYou = (a) => a.status === "blocked" || a.status === "done";
-const SHAKE_DX = [-3, 0, 3, 0, -3, 0, 3, 0, -3, 0, 3, 0];
+const SHAKE_DX = [-2, 0, 2, 0, -2, 0, 2, 0, -2, 0, 2, 0];
 const SHAKE_REST = 10;
 const SHAKE_FRAMES = SHAKE_REST + SHAKE_DX.length;
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
@@ -237,7 +237,7 @@ export default class Agents extends View {
     const i = f - SHAKE_REST;
     const dx = i >= 0 ? SHAKE_DX[i % SHAKE_DX.length] : 0;
     return div().w(size + 14).h(size + 6).flex_none().flex().items_center().justify_center()
-      .child(image(path).w(size).h(size).flex_none().ml(dx * 2).mt(Math.abs(dx)));
+      .child(image(path).w(size).h(size).flex_none().ml(dx * 1.5).mt(Math.abs(dx) / 2));
   }
 
   ball() {
