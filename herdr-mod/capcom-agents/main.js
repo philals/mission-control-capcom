@@ -2,7 +2,7 @@
 // A viewed done agent stays in Done until left.
 
 import { View, div, image, svg } from "gpui-kit";
-import { v_flex, h_flex, HoverCard, Avatar, AvatarImage, AvatarFallback, InputState, Input } from "gpui-base";
+import { v_flex, h_flex, HoverCard, Avatar, AvatarImage, AvatarFallback } from "gpui-base";
 import * as fs from "fs/promises";
 import { appHome, agents, terminals, panes, focused, spaces, run, exec, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 import { SH, dotColor, short, openUrl, prDo, prDetails, needsYou, attentionIcon } from "./pr-details.js";
@@ -107,7 +107,6 @@ const COLORS = ["#e8a24a", "#4aa3e8", "#b878f2", "#4fcf8e", "#ef6f9a", "#3fd0c4"
 
 export default class Agents extends View {
   init(_props, cx) {
-    if (props()?.renameFor) return this.initRename(cx);
     if (props()?.sortMenu) return;
     this.folded = new Set();
     // Each agent's last state and when it changed (ms), kept across restarts.
@@ -391,50 +390,6 @@ export default class Agents extends View {
     return sawDone ? RANK.done : RANK[a.status] ?? 0;
   }
 
-  // Renaming an agent types `/rename <name>` into its Claude Code prompt, so it is exactly what /rename does:
-  // the tab, the terminal title, the status line and the row above all follow. A working agent can't take it.
-  initRename(cx) {
-    this.text = props().renameFor.name ?? "";
-    this.error = "";
-    this.sending = false;
-    this.input = InputState.new({ value: this.text });
-    if (this.text) this.input.set_selected_range({ start: 0, end: this.text.length });
-    this.input.on("change", (_e, cx) => { this.text = this.input.value(); cx.notify(); });
-    this.input.on("submit", (_e, cx) => this.submitRename(cx));
-    this.input.focus();
-    cx.timer.after(600, () => this.input.focus());
-    this.handle = cx.focus_handle();
-  }
-
-  submitRename(cx) {
-    const { terminal } = props().renameFor;
-    const name = this.text.replace(/\s+/g, " ").trim();
-    if (!name || this.sending) return;
-    this.sending = true;
-    this.error = "";
-    cx.notify();
-    cx.spawn(async (cx) => {
-      // Done and idle are two states of the same thing (see track); hc types only when the status is exactly one.
-      const cmd = 'for s in idle done; do hc send --if "$s" "$1" "$2" >/dev/null 2>&1 && exit 0; done; exit 1';
-      let sent = false;
-      try { sent = (await exec(SH[0], [...SH.slice(1), "sh", "-c", cmd, "sh", terminal, `/rename ${name}`], { timeout: 8000 })).code === 0; } catch {}
-      if (sent) return closeOverlay(props().overlay);
-      this.sending = false;
-      this.error = "Not renamed: the agent is working or waiting on you. Try again when it is idle.";
-      cx.notify();
-    });
-  }
-
-  renameView(t) {
-    return v_flex().id("rename").track_focus(this.handle)
-      .on_key_down((e, cx) => { if (e.key === "escape") { closeOverlay(props().overlay); cx.stop_propagation(); } })
-      .w_full().p(14).gap(8).bg(t.popover).text_color(t.foreground)
-      .child(div().text_size(11.5).text_color(t.dim).child("Rename session (same as /rename)"))
-      .child(Input.new(this.input).h(34).px(10).rounded(8).border_1().border_color(t.accent).bg(t.background).text_size(12.8).text_color(t.foreground))
-      .when(Boolean(this.error), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(this.error)))
-      .child(div().text_size(11).text_color(t.dim).child(this.sending ? "Sending\u2026" : "Enter renames \u00b7 Esc cancels"));
-  }
-
   sortMenu(t) {
     const on = sortOf().id;
     return v_flex()
@@ -564,7 +519,6 @@ export default class Agents extends View {
 
   render(cx) {
     const t = theme();
-    if (props()?.renameFor) return this.renameView(t);
     if (props()?.sortMenu) return this.sortMenu(t);
     const collapsed = narrow();
     const sort = sortOf();
@@ -778,11 +732,7 @@ export default class Agents extends View {
           })).child(mon ? this.pokemonAvatar(mon.path) : pic)))
         .child(mon
           ? v_flex().flex_1().min_w(0)
-            .child(div().id(`nm-${a.address}`).min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).cursor_pointer().tooltip(sessionName && asked ? `Asked: ${asked}. Click to rename` : "Click to rename")
-              .on_click((_e, cx) => {
-                cx.stop_propagation();
-                openOverlay({ mod: "capcom-agents", kind: "popup", width: 320, height: 130, props: { renameFor: { terminal: a.address, name: sessionName } } });
-              }).child(task))
+            .child(div().id(`nm-${a.address}`).min_w(0).truncate().font_semibold().text_color(idle ? t.muted : t.foreground).when(Boolean(sessionName && asked), (el) => el.tooltip(`Asked: ${asked}`)).child(task))
             .child(h_flex().min_w(0).gap(5).text_size(11).text_color(t.muted)
               .child(div().id(`mon-${a.address}`).flex_none().cursor_pointer().text_color(copied ? t.foreground : t.muted)
                 .hover((s) => s.text_color(t.foreground)).tooltip(copied ? "Copied" : `Click to copy "${mon.name} (${a.address})"`)
