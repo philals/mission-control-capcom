@@ -189,7 +189,7 @@ export default class CapcomPrs extends View {
       .cursor_pointer()
       .tooltip(merged ? this.hint(pr) : [pr.draft ? "Draft" : "Ready for review", pr.blocker ? `Blocked: ${pr.blocker}` : "Nothing in the way", "Click for details"].join(" · "))
       .hover((s) => s.bg(sel ? sel + "38" : t.hover))
-      .when(!!sel, (el) => el.bg(sel + "40").border_l(3).border_color(sel))
+      .when(!!sel, (el) => el.rounded(8).border(1.5).border_color(sel).bg(sel + "40"))
       .when(!sel && merged, (el) => el.border_l(3).border_color(MERGED))
       .on_click((_e, cx) => {
         if (merged) return this.go(pr);
