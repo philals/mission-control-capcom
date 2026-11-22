@@ -31,6 +31,7 @@ export default class CapcomPrs extends View {
     this.loading = false;
     this.now = Date.now();
     this.expanded = null;
+    this.hoveredPr = null;
     this.showSettings = false;
     this.asked = shared("capcom.refresh");
     this.message = null;
@@ -180,6 +181,15 @@ export default class CapcomPrs extends View {
     } else {
       bits.push(`${ago(pr.mergedAt, this.now)} ago`);
     }
+    const icon = (id, tip, onClick, child) =>
+      div().id(`${id}-${pr.url}`).flex_none().p(2).rounded(4).text_size(12).text_color(id === "go" && live ? t.accent : t.dim).cursor_pointer()
+        .hover((x) => x.bg(t.hover).text_color(t.foreground)).tooltip(tip)
+        .on_click((_e, cx) => { cx.stop_propagation(); onClick(cx); }).child(child);
+    const actions = h_flex().absolute().top(2).right(3).gap(2).rounded(5).bg(t.background)
+      .when(!!pr.agent, (el) => el.child(icon("go", this.hint(pr), () => this.go(pr), "🤖")))
+      .child(icon("cp", "Copy the PR link", (cx) => this.copyUrl(pr.url, cx), svg("mods/workspace-chrome/files.svg").size(13).flex_none()))
+      .child(icon("gh", "Open on GitHub", () => this.openUrl(pr.url), "↗"))
+      .when(!merged && !pr.mine, (el) => el.child(icon("uw", "Stop watching", (cx) => this.change(cx, "unwatch", pr.url), "×")));
     const line = h_flex()
       .id(`pr-${pr.url}`)
       .gap(8)
@@ -188,6 +198,11 @@ export default class CapcomPrs extends View {
       .items_center()
       .cursor_pointer()
       .tooltip(merged ? this.hint(pr) : [pr.draft ? "Draft" : "Ready for review", pr.blocker ? `Blocked: ${pr.blocker}` : "Nothing in the way", "Click for details"].join(" · "))
+      .on_hover((on, cx) => {
+        if (on) this.hoveredPr = pr.url;
+        else if (this.hoveredPr === pr.url) this.hoveredPr = null;
+        cx.notify();
+      })
       .hover((s) => s.bg(sel ? sel + "38" : t.hover))
       .when(!!sel, (el) => el.rounded(8).border(1.5).border_color(sel).bg(sel + "40"))
       .when(!sel && merged, (el) => el.border_l(3).border_color(MERGED))
@@ -247,51 +262,7 @@ export default class CapcomPrs extends View {
           .when(!merged && pr.ci === "red" && !!pr.failing?.length, (el) => el.child(div().text_size(11).text_color(t.ansi1).truncate().child(`✗ ${pr.failing[0]}`))),
       )
       .when(!merged && pr.automerge?.on, (el) => el.child(div().text_size(10).text_color(t.ansi2).flex_none().child("auto")))
-      .child(
-        div()
-          .id(`go-${pr.url}`)
-          .text_size(12)
-          .text_color(live ? t.accent : t.dim)
-          .flex_none()
-          .px(2)
-          .tooltip(this.hint(pr))
-          .on_click((_e, cx) => {
-            cx.stop_propagation();
-            this.go(pr);
-          })
-          .child(pr.agent ? "🤖" : ""),
-      )
-      .child(
-        div()
-          .id(`cp-${pr.url}`)
-          .text_size(12)
-          .text_color(t.dim)
-          .flex_none()
-          .px(2)
-          .tooltip("Copy the PR link")
-          .hover((s) => s.text_color(t.foreground))
-          .on_click((_e, cx) => {
-            cx.stop_propagation();
-            this.copyUrl(pr.url, cx);
-          })
-          .child(svg("mods/workspace-chrome/files.svg").size(13).flex_none()),
-      )
-      .when(!merged && !pr.mine, (el) => el.child(this.unwatchButton(pr.url, t)))
-      .child(
-        div()
-          .id(`gh-${pr.url}`)
-          .text_size(12)
-          .text_color(t.dim)
-          .flex_none()
-          .px(4)
-          .tooltip("Open on GitHub")
-          .hover((s) => s.text_color(t.foreground))
-          .on_click((_e, cx) => {
-            cx.stop_propagation();
-            this.openUrl(pr.url);
-          })
-          .child("↗"),
-      );
+      .when(this.hoveredPr === pr.url, (el) => el.child(actions));
     if (merged || this.expanded !== pr.url) return line;
     return v_flex().child(line).child(this.details(pr, t));
   }
