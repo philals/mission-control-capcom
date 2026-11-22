@@ -88,6 +88,11 @@ export default class CapcomPrs extends View {
     cx.write_to_clipboard(url);
   }
 
+  copyOpen(cx) {
+    const ready = (this.data?.open ?? []).filter((p) => !p.draft);
+    if (ready.length) cx.write_to_clipboard(ready.map((p) => `- ${p.url}`).join("\n"));
+  }
+
   // The agent if it is live, else resume its session in a new tab, else the PR on GitHub.
   go(pr) {
     const a = pr.agent;
@@ -319,6 +324,15 @@ export default class CapcomPrs extends View {
                   .hover((s) => s.text_color(t.foreground))
                   .on_click((_e, cx) => ((this.showSettings = !this.showSettings), cx.notify()))
                   .child("⚙"),
+              )
+              .child(
+                div()
+                  .id("copy-open")
+                  .text_color(t.dim)
+                  .tooltip("Copy the links of my open, ready PRs")
+                  .hover((s) => s.text_color(t.foreground))
+                  .on_click((_e, cx) => this.copyOpen(cx))
+                  .child(svg("mods/workspace-chrome/files.svg").size(13).flex_none()),
               )
               .child(
             div()
