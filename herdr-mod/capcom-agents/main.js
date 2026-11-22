@@ -546,6 +546,12 @@ export default class Agents extends View {
       this.personaText = personaText;
       setShared("capcom.persona", persona);
     }
+    const sel = list.find((a) => a.focused);
+    const selText = sel ? JSON.stringify({ terminal: sel.address, color: (typeColor(this.pokemonFace(sel)?.n) || t.blocked) }) : "";
+    if (selText !== this.selText) {
+      this.selText = selText;
+      setShared("capcom.selected", selText ? JSON.parse(selText) : null);
+    }
     const notes = shared("capcom.notes") ?? {};
     const paneOf = new Map(panes().map((p) => [p.pane, p]));
     // A kept sub-agent (one with a pane) is in agents() too: where a tree shows

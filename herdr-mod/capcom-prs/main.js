@@ -169,6 +169,8 @@ export default class CapcomPrs extends View {
   row(pr, t, merged) {
     const dot = dotColor(pr, merged, t);
     const live = !!pr.agent?.terminal;
+    const picked = shared("capcom.selected");
+    const sel = live && picked?.terminal === pr.agent.terminal ? picked.color : null;
     const ready = !merged && !pr.draft;
     const bits = [];
     if (!merged) {
@@ -186,8 +188,9 @@ export default class CapcomPrs extends View {
       .items_center()
       .cursor_pointer()
       .tooltip(merged ? this.hint(pr) : [pr.draft ? "Draft" : "Ready for review", pr.blocker ? `Blocked: ${pr.blocker}` : "Nothing in the way", "Click for details"].join(" · "))
-      .hover((s) => s.bg(t.hover))
-      .when(merged, (el) => el.border_l(3).border_color(MERGED))
+      .hover((s) => s.bg(sel ? sel + "38" : t.hover))
+      .when(!!sel, (el) => el.bg(sel + "40").border_l(3).border_color(sel))
+      .when(!sel && merged, (el) => el.border_l(3).border_color(MERGED))
       .on_click((_e, cx) => {
         if (merged) return this.go(pr);
         this.expanded = this.expanded === pr.url ? null : pr.url;
