@@ -272,8 +272,8 @@ export default class CapcomPrs extends View {
       .mx(6)
       .my(2)
       .rounded(8)
-      .border(1.5)
-      .border_color(sel ?? (merged ? MERGED : t.border))
+      .border(2)
+      .border_color(sel ?? (merged ? MERGED : t.muted))
       .when(!!sel, (el) => el.bg(sel + "40"))
       .child(line)
       .when(open, (el) => el.child(this.details(pr, t)));
