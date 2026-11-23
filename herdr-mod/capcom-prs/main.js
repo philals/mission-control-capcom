@@ -208,9 +208,8 @@ export default class CapcomPrs extends View {
         else if (this.hoveredPr === pr.url) this.hoveredPr = null;
         cx.notify();
       })
+      .rounded(7)
       .hover((s) => s.bg(sel ? sel + "38" : t.hover))
-      .when(!!sel, (el) => el.rounded(8).border(1.5).border_color(sel).bg(sel + "40"))
-      .when(!sel && merged, (el) => el.border_l(3).border_color(MERGED))
       .on_click((_e, cx) => {
         if (merged) return this.go(pr);
         this.expanded = this.expanded === pr.url ? null : pr.url;
@@ -268,8 +267,16 @@ export default class CapcomPrs extends View {
       )
       .when(!merged && pr.automerge?.on, (el) => el.child(div().text_size(10).text_color(t.ansi2).flex_none().child("auto")))
       .when(this.hoveredPr === pr.url, (el) => el.child(actions));
-    if (merged || this.expanded !== pr.url) return line;
-    return v_flex().child(line).child(this.details(pr, t));
+    const open = !merged && this.expanded === pr.url;
+    return v_flex()
+      .mx(6)
+      .my(2)
+      .rounded(8)
+      .border(1.5)
+      .border_color(sel ?? (merged ? MERGED : t.border))
+      .when(!!sel, (el) => el.bg(sel + "40"))
+      .child(line)
+      .when(open, (el) => el.child(this.details(pr, t)));
   }
 
   details(pr, t) {
